@@ -548,9 +548,13 @@ export default function ServantTimelineApp() {
             
             <div>
               <h1 className="text-2xl font-black tracking-tight text-[#1F2937] flex items-center gap-2.5">
-                {/* 品牌幾何 Logo 意象 */}
-                <div className="w-9 h-9 rounded-[10px] bg-gradient-to-br from-[#F25D6B] to-[#6D55A3] flex items-center justify-center shadow-md shadow-[#F25D6B]/20 rotate-3">
-                  <Sparkles className="w-5 h-5 text-white -rotate-3" />
+                {/* 新版品牌 Logo */}
+                <div className="w-9 h-9 rounded-[10px] bg-white flex items-center justify-center shadow-md shadow-[#6D55A3]/10">
+                  <img
+                    src="https://raw.githubusercontent.com/ylee77ylee77-lang/servant-timeline/main/public/logo.png"
+                    alt="Logo"
+                    className="w-7 h-7 object-contain"
+                  />
                 </div>
                 主日崇拜招待
               </h1>
