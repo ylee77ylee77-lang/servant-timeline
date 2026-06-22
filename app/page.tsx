@@ -18,7 +18,10 @@ import {
   HeartHandshake,
   Edit,
   Lock,
-  Unlock
+  Unlock,
+  GripVertical,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 // 1. 您的專屬雲端鑰匙 (維持原樣)
@@ -76,7 +79,7 @@ export default function App() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const ADMIN_PASSWORD = '1234'; // 管理員驗證密碼，可自由更改
+  const ADMIN_PASSWORD = '1234'; // 管理員驗證密碼
 
   // --- 自訂精美 Modal 提示框狀態 (取代冷冰冰的 alert & confirm) ---
   const [customAlert, setCustomAlert] = useState<{isOpen: boolean, message: string}>({ isOpen: false, message: "" });
@@ -102,6 +105,15 @@ export default function App() {
     location: '',
     details: ''
   });
+
+  // --- 行內即時修改（Inline Editing）狀態 ---
+  const [activeInlineEdit, setActiveInlineEdit] = useState<{ type: 'node' | 'checklist', id: string, field: string } | null>(null);
+  const [inlineEditValue, setInlineEditValue] = useState("");
+
+  // --- 展開折疊管理確認項目狀態 (Accordion) ---
+  const [expandedChecklistNodeId, setExpandedChecklistNodeId] = useState<string | null>(null);
+  const [newChecklistItem, setNewChecklistItem] = useState({ text: "", details: "" });
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
 
   // 確保時鐘即時更新，並加入自動切換邏輯 (維持原樣)
   useEffect(() => {
@@ -130,12 +142,12 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // 背景自動同步雲端資料 (維持原樣)
+  // 背景自動同步雲端資料，改由 sort_order 升序排序
   const fetchData = async (isBackgroundSync = false) => {
     try {
       if (!isBackgroundSync) setFetchError("");
       const nodesData = await supabaseFetch('timeline_nodes?order=time.asc');
-      const checklistData = await supabaseFetch('checklist_items?order=id.asc');
+      const checklistData = await supabaseFetch('checklist_items?order=sort_order.asc,id.asc');
 
       if (nodesData && checklistData) {
         const formattedNodes = nodesData.map((node: any) => ({
@@ -290,6 +302,188 @@ export default function App() {
     });
   };
 
+  // --- 行內即時修改（Inline Editing）核心邏輯 ---
+  const handleInlineClick = (type: 'node' | 'checklist', id: string, field: string, currentValue: string) => {
+    if (!isAdminUnlocked) return; // 沒密碼解鎖就當作防誤觸唯讀狀態
+    setActiveInlineEdit({ type, id, field });
+    setInlineEditValue(currentValue);
+  };
+
+  const handleInlineBlur = async () => {
+    if (!activeInlineEdit) return;
+    const { type, id, field } = activeInlineEdit;
+    const updatedValue = inlineEditValue.trim();
+
+    // 先在前端 UI 即時反應
+    if (type === 'node') {
+      setNodes(prev => prev.map(node => {
+        if (node.id !== id) return node;
+        return { ...node, [field]: updatedValue };
+      }));
+    } else if (type === 'checklist') {
+      setNodes(prev => prev.map(node => ({
+        ...node,
+        checklist: node.checklist.map((item: any) => 
+          item.id === id ? { ...item, [field]: updatedValue } : item
+        )
+      })));
+    }
+
+    setActiveInlineEdit(null);
+
+    // 同步到 Supabase 雲端
+    try {
+      if (type === 'node') {
+        await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
+      } else if (type === 'checklist') {
+        await supabaseFetch(`checklist_items?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
+      }
+      fetchData(true); // 背景安靜同步
+    } catch (err: any) {
+      console.error("行內修改同步失敗:", err);
+      setCustomAlert({ isOpen: true, message: "行內即時同步失敗，正在復原最新雲端數據..." });
+      fetchData(true);
+    }
+  };
+
+  // --- Checklist 拖曳與排序核心功能 (Drag & Drop) ---
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    setDraggedItemId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (e: React.DragEvent, nodeId: string, targetId: string) => {
+    e.preventDefault();
+    if (!draggedItemId || draggedItemId === targetId) return;
+
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node || !node.checklist) return;
+
+    const items = [...node.checklist].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const draggedIndex = items.findIndex(item => item.id === draggedItemId);
+    const targetIndex = items.findIndex(item => item.id === targetId);
+
+    if (draggedIndex === -1 || targetIndex === -1) return;
+
+    // 搬移
+    const [removed] = items.splice(draggedIndex, 1);
+    items.splice(targetIndex, 0, removed);
+
+    // 重新編排 sort_order
+    const updatedItems = items.map((item, index) => ({
+      ...item,
+      sort_order: index
+    }));
+
+    // 本地預先渲染
+    setNodes(prev => prev.map(n => {
+      if (n.id !== nodeId) return n;
+      return { ...n, checklist: updatedItems };
+    }));
+
+    setDraggedItemId(null);
+
+    // 依序寫入雲端
+    try {
+      for (const item of updatedItems) {
+        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
+          sort_order: item.sort_order
+        });
+      }
+      fetchData(true);
+    } catch (err) {
+      console.error("更新排序失敗:", err);
+    }
+  };
+
+  // 提供給手機端的箭頭一鍵移位功能 (完美補位 HTML5 Drag&Drop)
+  const moveChecklistItem = async (nodeId: string, index: number, direction: 'up' | 'down') => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node || !node.checklist) return;
+
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= node.checklist.length) return;
+
+    const items = [...node.checklist].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    
+    // 交換
+    const temp = items[index];
+    items[index] = items[targetIndex];
+    items[targetIndex] = temp;
+
+    // 重新排序
+    const updatedItems = items.map((item, idx) => ({
+      ...item,
+      sort_order: idx
+    }));
+
+    // 本地預先渲染
+    setNodes(prev => prev.map(n => {
+      if (n.id !== nodeId) return n;
+      return { ...n, checklist: updatedItems };
+    }));
+
+    // 雲端同步
+    try {
+      for (const item of updatedItems) {
+        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
+          sort_order: item.sort_order
+        });
+      }
+      fetchData(true);
+    } catch (err) {
+      console.error("箭頭移動更新失敗:", err);
+    }
+  };
+
+  // --- 新增、刪除 Checklist 子項目邏輯 ---
+  const handleAddChecklistItem = async (nodeId: string) => {
+    if (!newChecklistItem.text.trim()) {
+      setCustomAlert({ isOpen: true, message: "請輸入確認項目的標題！" });
+      return;
+    }
+
+    const node = nodes.find(n => n.id === nodeId);
+    const maxOrder = node?.checklist && node.checklist.length > 0 
+      ? Math.max(...node.checklist.map((c: any) => c.sort_order || 0)) 
+      : -1;
+
+    const newItemId = 'c_' + Math.random().toString(36).substr(2, 9);
+    try {
+      await supabaseFetch('checklist_items', 'POST', {
+        id: newItemId,
+        node_id: nodeId,
+        text: newChecklistItem.text.trim(),
+        details: newChecklistItem.details.trim() || '',
+        is_completed: false,
+        sort_order: maxOrder + 1
+      });
+      setNewChecklistItem({ text: "", details: "" });
+      fetchData(true);
+    } catch (err: any) {
+      setCustomAlert({ isOpen: true, message: "新增確認項目失敗：" + err.message });
+    }
+  };
+
+  const handleDeleteChecklistItem = async (itemId: string) => {
+    setCustomConfirm({
+      isOpen: true,
+      message: "確定要刪除這筆任務清單細項嗎？",
+      onConfirm: async () => {
+        try {
+          await supabaseFetch(`checklist_items?id=eq.${itemId}`, 'DELETE');
+          fetchData(true);
+        } catch (err: any) {
+          setCustomAlert({ isOpen: true, message: "刪除清單細項失敗：" + err.message });
+        }
+      }
+    });
+  };
+
   // 驗證管理密碼並進入管理面板
   const handleVerifyPassword = () => {
     if (passwordInput === ADMIN_PASSWORD) {
@@ -302,6 +496,62 @@ export default function App() {
       setPasswordError("密碼錯誤，請重新輸入！");
       setPasswordInput("");
     }
+  };
+
+  // 渲染行內即時編輯輸入欄位
+  const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
+    const isEditing = activeInlineEdit?.type === type && activeInlineEdit?.id === id && activeInlineEdit?.field === field;
+
+    if (!isAdminUnlocked) {
+      return <span className={styleClass}>{currentValue || "(未填寫)"}</span>;
+    }
+
+    if (isEditing) {
+      if (inputType === 'textarea') {
+        return (
+          <textarea
+            value={inlineEditValue}
+            onChange={e => setInlineEditValue(e.target.value)}
+            onBlur={handleInlineBlur}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleInlineBlur();
+              }
+            }}
+            className="border-2 border-[#6D55A3] rounded-lg p-2 bg-white text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 w-full resize-none"
+            autoFocus
+          />
+        );
+      }
+      return (
+        <input
+          type={inputType}
+          value={inlineEditValue}
+          onChange={e => setInlineEditValue(e.target.value)}
+          onBlur={handleInlineBlur}
+          onKeyDown={e => {
+            if (e.key === 'Enter') handleInlineBlur();
+            if (e.key === 'Escape') setActiveInlineEdit(null);
+          }}
+          className="border-2 border-[#6D55A3] rounded-lg px-2 py-1 bg-white text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 w-full"
+          autoFocus
+        />
+      );
+    }
+
+    return (
+      <span
+        onClick={(e) => {
+          e.stopPropagation();
+          handleInlineClick(type, id, field, currentValue);
+        }}
+        className={`${styleClass} border-b-2 border-dashed border-[#6D55A3]/30 hover:border-[#6D55A3] hover:bg-[#F3EEFF]/80 cursor-pointer px-1 rounded transition-colors inline-block`}
+        title="點擊直接修改，將同步更新雲端"
+      >
+        {currentValue || "(點選填寫)"}
+      </span>
+    );
   };
 
   // 全新品牌風格 - 載入畫面
@@ -341,7 +591,7 @@ export default function App() {
         </div>
       ) : (
         <div className="relative mt-2">
-          {/* 溫慢紫灰色的主時間軸 */}
+          {/* 溫慢主時間軸 */}
           <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
           
           {filteredNodes.map((node) => {
@@ -375,13 +625,14 @@ export default function App() {
                   
                   {/* 標題與時間列 */}
                   <div className="flex items-start justify-between mb-4">
-                    <div>
+                    <div className="w-full">
                       <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
-                        {node.title}
+                        {renderInlineEdit('node', node.id, 'title', node.title, "w-full")}
                       </h3>
                       <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
                         <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
-                          <Clock className="w-3 h-3" />{node.time}
+                          <Clock className="w-3 h-3" />
+                          {renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}
                         </span>
                         {active && (
                           <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
@@ -396,11 +647,15 @@ export default function App() {
                   <div className="flex flex-col gap-2.5 mt-2 text-[13px] text-[#7B7B74]">
                     <div className="flex items-center gap-2">
                       <MapPin className="w-4 h-4 text-[#F25D6B]/70 shrink-0" />
-                      <span className="font-medium text-[#1F2937]">{node.location}</span>
+                      <span className="font-medium text-[#1F2937]">
+                        {renderInlineEdit('node', node.id, 'location', node.location, "w-full")}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <User className="w-4 h-4 text-[#6D55A3]/70 shrink-0" />
-                      <span>{node.assignee}</span>
+                      <span className="font-medium text-[#1F2937]">
+                        {renderInlineEdit('node', node.id, 'assignee', node.assignee, "w-full")}
+                      </span>
                     </div>
                   </div>
                   
@@ -437,24 +692,33 @@ export default function App() {
                             <div 
                               className={`flex items-start gap-1.5 ${item.details ? 'cursor-pointer group' : ''}`}
                               onClick={() => {
-                                if (item.details) {
+                                // 如果管理員解鎖了，就不觸發 Modal，直接讓他們點擊修改
+                                if (!isAdminUnlocked && item.details) {
                                   setDetailModal({ isOpen: true, title: item.text, details: item.details });
                                 }
                               }}
                             >
                               <span className={`text-[14px] font-semibold leading-relaxed transition-all ${
                                 item.is_completed ? 'text-[#7B7B74] line-through opacity-70' : 'text-[#1F2937]'
-                              } ${item.details ? 'group-hover:text-[#F25D6B]' : ''}`}>
-                                {item.text}
+                              } ${(!isAdminUnlocked && item.details) ? 'group-hover:text-[#F25D6B]' : ''}`}>
+                                {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
                               </span>
                               
                               {/* Info Icon */}
-                              {item.details && (
+                              {!isAdminUnlocked && item.details && (
                                 <div className={`mt-0.5 shrink-0 transition-colors ${item.is_completed ? 'text-[#E6EAF0]' : 'text-[#00B8B8] group-hover:text-[#F25D6B]'}`}>
                                   <Info className="w-4 h-4" />
                                 </div>
                               )}
                             </div>
+
+                            {/* 管理員解鎖時，Checklist 的備註 details 也可以直接行內修改 */}
+                            {isAdminUnlocked && (
+                              <div className="mt-1 text-xs text-slate-500 bg-slate-50 p-1.5 rounded-lg border border-dashed border-slate-200">
+                                <span className="font-bold text-[10px] text-[#6D55A3] block mb-0.5">備註細節：</span>
+                                {renderInlineEdit('checklist', item.id, 'details', item.details, "w-full text-xs text-slate-600 block", "textarea")}
+                              </div>
+                            )}
                             
                             {/* 完成時間戳記 */}
                             {item.is_completed && item.completed_at && (
@@ -483,7 +747,7 @@ export default function App() {
     const completionRate = Math.round((completedTasks.length / (allTasks.length || 1)) * 100);
     const missedTasks = allTasks.filter(t => !t.is_completed);
 
-    // 依負責角色（assignee）進行任務分組 (修復變數未定義錯誤)
+    // 依負責角色（assignee）進行任務分組
     const groupedMissed: { [key: string]: any[] } = {};
     missedTasks.forEach((task: any) => {
       const parentNode = filteredNodes.find(n => n.checklist && n.checklist.some((c: any) => c.id === task.id));
@@ -586,7 +850,7 @@ export default function App() {
     );
   };
 
-  // 全新品牌風格 - 管理畫面 (擴充即時編輯更新功能)
+  // 全新品牌風格 - 管理畫面 (擴充即時編輯更新、子任務拖曳排序與手動上下移位)
   const renderAdminView = () => (
     <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
       <div className="mb-6 px-1 flex items-center justify-between">
@@ -654,13 +918,14 @@ export default function App() {
         </div>
       </form>
 
-      {/* 任務總覽區 (新增即時編輯功能) */}
+      {/* 任務總覽區 (新增即時編輯、展開子清單拖曳排序) */}
       <div>
         <h3 className="text-[11px] font-black text-[#7B7B74] mb-3 tracking-widest uppercase px-1">任務總覽與編輯 ({currentService})</h3>
         <div className="space-y-4">
           {filteredNodes.length === 0 && <p className="text-sm font-medium text-[#7B7B74] text-center py-6 bg-white rounded-[20px] border border-[#E6EAF0]">尚無任務資料</p>}
           {filteredNodes.map(node => {
             const isEditing = editingNodeId === node.id;
+            const isChecklistExpanded = expandedChecklistNodeId === node.id;
             return (
               <div key={node.id} className="p-4 bg-white border border-[#E6EAF0] rounded-[24px] shadow-sm transition-all duration-300">
                 {isEditing ? (
@@ -741,35 +1006,154 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  /* 唯讀模式展示 */
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-[14px] font-bold text-[#1F2937] mb-1 flex items-center gap-2">
-                         <span className="text-[#6D55A3] font-mono">{node.time}</span> {node.title}
+                  /* 唯讀與行內編輯模式展示 */
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="text-[14px] font-bold text-[#1F2937] mb-1 flex items-center gap-2">
+                           <span className="text-[#6D55A3] font-mono">{renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}</span> 
+                           {renderInlineEdit('node', node.id, 'title', node.title, "flex-1")}
+                        </div>
+                        <div className="text-xs font-medium text-[#7B7B74] flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="flex items-center gap-1">
+                            <User className="w-3 h-3 text-[#6D55A3]/70" /> 
+                            {renderInlineEdit('node', node.id, 'assignee', node.assignee, "")}
+                          </span>
+                          <span className="text-[#E6EAF0]">|</span> 
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-[#F25D6B]/70" /> 
+                            {renderInlineEdit('node', node.id, 'location', node.location, "")}
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-xs font-medium text-[#7B7B74] flex items-center gap-1.5">
-                        <User className="w-3 h-3" /> {node.assignee} 
-                        <span className="text-[#E6EAF0]">|</span> 
-                        <MapPin className="w-3 h-3" /> {node.location}
+                      
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                        {/* 即時編輯按鈕 */}
+                        <button 
+                          onClick={() => startEditing(node)}
+                          className="p-2 text-[#6D55A3]/60 hover:text-[#6D55A3] hover:bg-[#F3EEFF] rounded-[12px] transition-colors"
+                          title="開啟詳細編輯"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteNode(node.id, node.title)}
+                          className="p-2 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-[12px] transition-colors"
+                          title="刪除任務"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-                    
-                    <div className="flex items-center gap-1 shrink-0">
-                      {/* 即時編輯按鈕 */}
-                      <button 
-                        onClick={() => startEditing(node)}
-                        className="p-2.5 text-[#6D55A3]/60 hover:text-[#6D55A3] hover:bg-[#F3EEFF] rounded-[12px] transition-colors"
-                        title="編輯此任務"
+
+                    {/* Accordion 折疊控制：Checklist 拖曳排序管理區 */}
+                    <div className="mt-3 border-t border-slate-100 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedChecklistNodeId(isChecklistExpanded ? null : node.id)}
+                        className="text-xs font-bold text-[#6D55A3] hover:text-[#F25D6B] flex items-center gap-1 transition-colors"
                       >
-                        <Edit className="w-4 h-4" />
+                        {isChecklistExpanded ? "▲ 收起確認清單項目" : `▼ 管理確認項目 (${node.checklist?.length || 0})`}
                       </button>
-                      <button 
-                        onClick={() => handleDeleteNode(node.id, node.title)}
-                        className="p-2.5 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-[12px] transition-colors"
-                        title="刪除任務"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+
+                      {isChecklistExpanded && (
+                        <div className="mt-3 pl-2 border-l-2 border-[#6D55A3]/30 space-y-3">
+                          {/* 新增 Checklist 項目的迷你表單 */}
+                          <div className="bg-[#F3EEFF]/30 p-3 rounded-2xl border border-[#E6EAF0]">
+                            <p className="text-[10px] font-black text-[#6D55A3] mb-1.5">＋新增確認項目細項</p>
+                            <div className="space-y-2">
+                              <input 
+                                type="text"
+                                placeholder="項目名稱 (例如：準備對講機)"
+                                value={newChecklistItem.text}
+                                onChange={e => setNewChecklistItem({ ...newChecklistItem, text: e.target.value })}
+                                className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
+                              />
+                              <input 
+                                type="text"
+                                placeholder="細節備註 (可選)"
+                                value={newChecklistItem.details}
+                                onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
+                                className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAddChecklistItem(node.id)}
+                                className="w-full py-1.5 bg-[#6D55A3] hover:bg-[#6D55A3]/90 text-white font-bold rounded-xl text-[11px] shadow-sm transition-colors"
+                              >
+                                新增此確認細項
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 拖曳與排序清單 */}
+                          <div className="space-y-2">
+                            {node.checklist && node.checklist.length > 0 ? (
+                              node.checklist.map((item: any, idx: number) => (
+                                <div 
+                                  key={item.id}
+                                  draggable={true}
+                                  onDragStart={(e) => handleDragStart(e, idx, node.id)}
+                                  onDragOver={handleDragOver}
+                                  onDrop={(e) => handleDrop(e, idx, node.id)}
+                                  className="flex items-center justify-between p-2 bg-[#FFF9F3]/60 hover:bg-[#FFF2F4]/60 border border-[#E6EAF0] rounded-xl transition-all shadow-sm"
+                                >
+                                  <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                                    {/* 拖曳握把 */}
+                                    <div 
+                                      className="cursor-grab text-slate-400 hover:text-[#6D55A3] shrink-0" 
+                                      title="拖曳上下移動排序"
+                                    >
+                                      <GripVertical className="w-4 h-4" />
+                                    </div>
+
+                                    {/* 手動向上、向下移動按鈕（完美適應手機端） */}
+                                    <div className="flex flex-col shrink-0">
+                                      <button 
+                                        type="button"
+                                        disabled={idx === 0}
+                                        onClick={() => moveChecklistItem(node.id, idx, 'up')}
+                                        className="text-[10px] text-slate-400 hover:text-[#6D55A3] disabled:opacity-30 disabled:hover:text-slate-400"
+                                      >
+                                        <ArrowUp className="w-3 h-3" />
+                                      </button>
+                                      <button 
+                                        type="button"
+                                        disabled={idx === node.checklist.length - 1}
+                                        onClick={() => moveChecklistItem(node.id, idx, 'down')}
+                                        className="text-[10px] text-slate-400 hover:text-[#6D55A3] disabled:opacity-30 disabled:hover:text-slate-400"
+                                      >
+                                        <ArrowDown className="w-3 h-3" />
+                                      </button>
+                                    </div>
+
+                                    {/* 項目文字即時行內編輯 */}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-xs font-bold text-slate-800">
+                                        {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
+                                      </div>
+                                      <div className="text-[10px] text-slate-500 font-medium">
+                                        {renderInlineEdit('checklist', item.id, 'details', item.details || "點選填寫詳細細節說明", "w-full block", "textarea")}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <button 
+                                    type="button"
+                                    onClick={() => handleDeleteChecklistItem(item.id)}
+                                    className="p-1.5 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-lg transition-colors shrink-0"
+                                    title="刪除此確認細項"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-[11px] text-slate-400 text-center py-2">目前沒有確認事項，可在上方新增</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -867,7 +1251,7 @@ export default function App() {
           renderAdminView()
         )}
 
-        {/* 全新品牌風格 - 詳細備註彈跳視窗 */}
+        {/* 全新品牌風格 - 彈跳視窗 */}
         {detailModal.isOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-[#1F2937]/40 backdrop-blur-sm" onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}>
             <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[80vh] border border-[#E6EAF0]/50 transform transition-all" onClick={e => e.stopPropagation()}>
