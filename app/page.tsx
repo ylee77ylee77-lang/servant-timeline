@@ -352,7 +352,7 @@ export default function App() {
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e: React.DragEvent, id: string) => {
+  const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
   };
 
@@ -1093,9 +1093,9 @@ export default function App() {
                                 <div 
                                   key={item.id}
                                   draggable={true}
-                                  onDragStart={(e) => handleDragStart(e, idx, node.id)}
+                                  onDragStart={(e) => handleDragStart(e, item.id)}
                                   onDragOver={handleDragOver}
-                                  onDrop={(e) => handleDrop(e, idx, node.id)}
+                                  onDrop={(e) => handleDrop(e, node.id, item.id)}
                                   className="flex items-center justify-between p-2 bg-[#FFF9F3]/60 hover:bg-[#FFF2F4]/60 border border-[#E6EAF0] rounded-xl transition-all shadow-sm"
                                 >
                                   <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
