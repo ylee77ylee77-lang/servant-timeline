@@ -2,8 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  CheckCircle2, 
-  Circle, 
+  Check, 
   Clock, 
   MapPin, 
   User, 
@@ -14,7 +13,9 @@ import {
   Plus,     
   Trash2,
   X,        
-  Info      
+  Info,
+  Sparkles,
+  HeartHandshake
 } from 'lucide-react';
 
 // 1. 您的專屬雲端鑰匙 (維持原樣)
@@ -23,7 +24,7 @@ const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 const hasValidKeys = supabaseUrl.startsWith('http') && supabaseAnonKey.startsWith('eyJ');
 
-// 使用原生 fetch 方法連線雲端
+// 使用原生 fetch 方法連線雲端 (維持原樣)
 const supabaseFetch = async (endpoint: string, method = 'GET', body: any = null) => {
   if (!hasValidKeys) throw new Error("Missing keys");
   const headers: any = {
@@ -77,7 +78,7 @@ export default function ServantTimelineApp() {
     details: ''
   });
 
-  // 確保時鐘即時更新，並加入自動切換邏輯
+  // 確保時鐘即時更新，並加入自動切換邏輯 (維持原樣)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -104,8 +105,7 @@ export default function ServantTimelineApp() {
     return () => clearInterval(timer);
   }, []);
 
-  // --- 重大升級：背景自動同步雲端資料 ---
-  // isBackgroundSync = true 代表是「偷偷更新」，不要顯示大圈圈載入畫面
+  // 背景自動同步雲端資料 (維持原樣)
   const fetchData = async (isBackgroundSync = false) => {
     try {
       if (!isBackgroundSync) setFetchError("");
@@ -127,24 +127,19 @@ export default function ServantTimelineApp() {
     }
   };
 
-  // 網頁載入時啟動「10秒自動同步」計時器
   useEffect(() => {
     if (hasValidKeys) {
-      fetchData(); // 第一次開啟時的正常載入
-      
-      // 每 10 秒偷偷去雲端對答案，讓不同設備的資料自動同步！
+      fetchData(); 
       const syncTimer = setInterval(() => {
         fetchData(true); 
       }, 10000);
-      
-      return () => clearInterval(syncTimer); // 離開網頁時關閉計時器
+      return () => clearInterval(syncTimer); 
     } else {
       setIsLoading(false);
     }
   }, []);
 
   const filteredNodes = nodes.filter(n => n.service_type === currentService);
-
   const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
   const activeNodeId = filteredNodes.find(n => !isNodeCompleted(n))?.id;
 
@@ -166,7 +161,6 @@ export default function ServantTimelineApp() {
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const newCompletedAt = willBeCompleted ? timeStr : null;
 
-    // 1. 先讓畫面瞬間變動 (給使用者零延遲的爽快感)
     setNodes(prev => prev.map(node => {
       if (node.id !== nodeId) return node;
       return {
@@ -179,14 +173,12 @@ export default function ServantTimelineApp() {
       };
     }));
 
-    // 2. 背景偷偷送到雲端
     try {
       if (!hasValidKeys) return;
       await supabaseFetch(`checklist_items?id=eq.${checkId}`, 'PATCH', {
         is_completed: willBeCompleted,
         completed_at: newCompletedAt
       });
-      // 上傳成功後，背景再對一次答案
       fetchData(true);
     } catch (error) {
       console.error("更新資料庫失敗:", error);
@@ -197,10 +189,8 @@ export default function ServantTimelineApp() {
   const handleAddNode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNode.title || !newNode.time) return alert("請至少填寫時間與標題");
-
     setIsAdding(true);
     const newId = 'n_' + Math.random().toString(36).substr(2, 9);
-
     try {
       await supabaseFetch('timeline_nodes', 'POST', {
         id: newId,
@@ -211,9 +201,8 @@ export default function ServantTimelineApp() {
         location: newNode.location || '未指定',
         details: newNode.details || ''
       });
-      
       setNewNode({ service_type: currentService, time: '08:00', title: '', assignee: '', location: '', details: '' });
-      await fetchData(true); // 新增完用背景同步，不顯示全畫面 Loading
+      await fetchData(true);
       alert("新增成功！");
     } catch (error: any) {
       alert("新增失敗：" + error.message);
@@ -225,7 +214,6 @@ export default function ServantTimelineApp() {
   const handleDeleteNode = async (id: string, title: string) => {
     const confirmDelete = window.confirm(`確定要刪除「${title}」這個任務嗎？\n此動作將會一併刪除底下的所有 Checklist！`);
     if (!confirmDelete) return;
-
     try {
       await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'DELETE');
       await fetchData(true);
@@ -234,12 +222,15 @@ export default function ServantTimelineApp() {
     }
   };
 
+  // 全新品牌風格 - 載入畫面
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-900">
-        <div className="text-white flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="font-bold tracking-wider animate-pulse">正在連線至 Supabase 雲端資料庫...</p>
+      <div className="flex items-center justify-center min-h-screen bg-[#F3EEFF]">
+        <div className="flex flex-col items-center gap-6 p-8 bg-white/80 backdrop-blur-xl rounded-[32px] shadow-2xl shadow-[#6D55A3]/10">
+          <div className="relative flex items-center justify-center w-16 h-16 bg-gradient-to-br from-[#F25D6B] to-[#6D55A3] rounded-2xl shadow-lg animate-pulse">
+            <Sparkles className="w-8 h-8 text-white" />
+          </div>
+          <p className="text-[#6D55A3] font-bold tracking-widest text-sm uppercase">正在連線至夏凱納雲端...</p>
         </div>
       </div>
     );
@@ -247,68 +238,117 @@ export default function ServantTimelineApp() {
 
   if (!hasValidKeys) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-900 p-6">
-        <div className="bg-white p-8 rounded-2xl max-w-md w-full shadow-2xl">
-          <h2 className="text-xl font-bold text-red-600 mb-4 flex items-center gap-2">
+      <div className="flex items-center justify-center min-h-screen bg-[#FFF9F3] p-6">
+        <div className="bg-white p-8 rounded-[24px] max-w-md w-full shadow-xl shadow-[#F25D6B]/5 border border-[#FFE8A3]">
+          <h2 className="text-xl font-bold text-[#F25D6B] mb-4 flex items-center gap-2">
             <AlertCircle /> 系統警告：雲端鑰匙錯誤
           </h2>
-          <p className="text-slate-600 text-sm leading-relaxed">請確認程式碼中的網址與鑰匙設定正確。</p>
+          <p className="text-[#7B7B74] text-sm leading-relaxed">請確認程式碼中的網址與鑰匙設定正確。</p>
         </div>
       </div>
     );
   }
 
+  // 全新品牌風格 - 時間軸畫面
   const renderTimelineView = () => (
-    <div className="flex-1 overflow-y-auto pb-24 px-6 pt-6 bg-slate-50">
+    <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
       {filteredNodes.length === 0 ? (
-        <div className="text-center text-slate-500 mt-10 text-sm">
-          此場次目前沒有任務，請至「管理任務」新增。
+        <div className="text-center text-[#7B7B74] mt-16 text-sm bg-white p-6 rounded-[24px] shadow-sm border border-[#E6EAF0]">
+          <Sparkles className="w-8 h-8 text-[#E6EAF0] mx-auto mb-3" />
+          此堂次目前尚未安排服事任務
         </div>
       ) : (
-        <div className="relative">
-          <div className="absolute left-[15px] top-4 bottom-4 w-px bg-slate-200" />
+        <div className="relative mt-2">
+          {/* 溫暖紫灰色的主時間軸 */}
+          <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
+          
           {filteredNodes.map((node) => {
             const completed = isNodeCompleted(node);
             const active = node.id === activeNodeId;
             return (
               <div key={node.id} className="relative mb-8 transition-all duration-500" ref={active ? activeNodeRef : null}>
-                <div className="absolute left-0 top-1.5 flex items-center justify-center w-8 h-8 bg-slate-50 z-10">
+                
+                {/* 節點圓點 */}
+                <div className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10">
                   {completed ? (
-                    <CheckCircle2 className="w-6 h-6 text-slate-300 bg-white rounded-full" />
+                    <div className="w-7 h-7 rounded-full bg-[#00B8B8] flex items-center justify-center shadow-sm shadow-[#00B8B8]/30">
+                       <Check className="w-4 h-4 text-white" strokeWidth={3} />
+                    </div>
                   ) : active ? (
-                    <div className="relative flex items-center justify-center w-6 h-6">
-                      <span className="absolute inline-flex w-full h-full rounded-full opacity-75 bg-blue-400 animate-ping" />
-                      <span className="relative inline-flex w-4 h-4 rounded-full bg-blue-600" />
+                    <div className="relative flex items-center justify-center w-8 h-8">
+                      <span className="absolute inline-flex w-full h-full rounded-full opacity-30 bg-[#F25D6B] animate-ping" />
+                      <span className="relative inline-flex w-4 h-4 rounded-full bg-[#F25D6B] shadow-sm shadow-[#F25D6B]/50" />
                     </div>
                   ) : (
-                    <Circle className="w-5 h-5 text-slate-300 fill-white" />
+                    <div className="w-4 h-4 rounded-full border-[3px] border-[#E6EAF0] bg-white" />
                   )}
                 </div>
-                <div className={`ml-10 rounded-2xl p-5 border transition-all duration-300 ${completed ? 'bg-transparent border-slate-200/60 opacity-60' : active ? 'bg-white border-blue-500 shadow-lg ring-4 ring-blue-50/50' : 'bg-white border-slate-200 shadow-sm'}`}>
-                  <div className="flex items-start justify-between mb-3">
+
+                {/* 任務卡片 */}
+                <div className={`ml-12 rounded-[24px] p-5 transition-all duration-300 ${
+                  completed ? 'bg-white/60 border border-[#E6EAF0] opacity-70' : 
+                  active ? 'bg-[#FFF2F4] ring-2 ring-[#F25D6B] shadow-lg shadow-[#F25D6B]/15' : 
+                  'bg-white border border-[#E6EAF0] shadow-sm'
+                }`}>
+                  
+                  {/* 標題與時間列 */}
+                  <div className="flex items-start justify-between mb-4">
                     <div>
-                      <h3 className={`text-lg font-semibold tracking-tight ${completed ? 'text-slate-500 line-through decoration-slate-300' : 'text-slate-900'}`}>{node.title}</h3>
-                      <div className="flex items-center gap-3 mt-1 text-xs font-medium text-slate-500">
-                        <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{node.time}</span>
-                        {active && <span className="px-2 py-0.5 text-blue-700 bg-blue-50 rounded-full font-semibold">進行中</span>}
+                      <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
+                        {node.title}
+                      </h3>
+                      <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
+                        <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
+                          <Clock className="w-3 h-3" />{node.time}
+                        </span>
+                        {active && (
+                          <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
+                            進行中
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-2 mt-4 text-sm text-slate-600">
-                    <div className="flex items-start gap-2"><MapPin className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" /><span>{node.location}</span></div>
-                    <div className="flex items-start gap-2"><User className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" /><span>{node.assignee}</span></div>
+
+                  {/* 角色與地點資訊 */}
+                  <div className="flex flex-col gap-2.5 mt-2 text-[13px] text-[#7B7B74]">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="w-4 h-4 text-[#F25D6B]/70 shrink-0" />
+                      <span className="font-medium text-[#1F2937]">{node.location}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-[#6D55A3]/70 shrink-0" />
+                      <span>{node.assignee}</span>
+                    </div>
                   </div>
                   
+                  {/* Checklist 區域 */}
                   {node.checklist && node.checklist.length > 0 && (
-                    <div className="mt-5 space-y-2.5">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Checklist</div>
+                    <div className="mt-5 space-y-3">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="h-px bg-[#E6EAF0] flex-1"></div>
+                        <div className="text-[10px] font-black text-[#6D55A3]/40 uppercase tracking-widest">任務清單</div>
+                        <div className="h-px bg-[#E6EAF0] flex-1"></div>
                       </div>
+
                       {node.checklist.map((item: any) => (
-                        <div key={item.id} className={`flex items-start gap-3 p-3 rounded-xl transition-colors ${item.is_completed ? 'bg-slate-50/80' : 'bg-white border border-slate-100 shadow-sm'}`}>
+                        <div key={item.id} className={`flex items-start gap-3 p-3.5 rounded-[16px] transition-all duration-200 ${
+                          item.is_completed ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20' : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'
+                        }`}>
+                          
+                          {/* 圓角自訂 Checkbox */}
                           <label className="relative flex items-center justify-center shrink-0 mt-0.5 cursor-pointer">
-                            <input type="checkbox" className="w-5 h-5 transition-colors border-2 rounded-md appearance-none cursor-pointer border-slate-300 checked:bg-blue-600 checked:border-blue-600 focus:ring-blue-500 focus:outline-none" checked={item.is_completed} onChange={() => toggleChecklist(node.id, item.id)}/>
-                            {item.is_completed && <CheckCircle2 className="absolute w-4 h-4 text-white pointer-events-none" />}
+                            <input 
+                              type="checkbox" 
+                              className="peer sr-only" 
+                              checked={item.is_completed} 
+                              onChange={() => toggleChecklist(node.id, item.id)}
+                            />
+                            <div className={`w-5 h-5 rounded-[6px] border-2 transition-all flex items-center justify-center ${
+                              item.is_completed ? 'bg-[#00B8B8] border-[#00B8B8]' : 'bg-white border-[#E6EAF0] peer-focus:ring-2 ring-[#6D55A3]/30'
+                            }`}>
+                              {item.is_completed && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                            </div>
                           </label>
                           
                           <div className="flex-1">
@@ -320,14 +360,26 @@ export default function ServantTimelineApp() {
                                 }
                               }}
                             >
-                              <span className={`text-sm font-medium transition-all ${item.is_completed ? 'text-slate-400 line-through' : 'text-slate-700'} ${item.details ? 'group-hover:text-blue-600' : ''}`}>
+                              <span className={`text-[14px] font-semibold leading-relaxed transition-all ${
+                                item.is_completed ? 'text-[#7B7B74] line-through opacity-70' : 'text-[#1F2937]'
+                              } ${item.details ? 'group-hover:text-[#F25D6B]' : ''}`}>
                                 {item.text}
                               </span>
+                              
+                              {/* Info Icon */}
                               {item.details && (
-                                <Info className={`w-4 h-4 shrink-0 mt-0.5 transition-colors ${item.is_completed ? 'text-slate-300' : 'text-blue-400 group-hover:text-blue-600'}`} />
+                                <div className={`mt-0.5 shrink-0 transition-colors ${item.is_completed ? 'text-[#E6EAF0]' : 'text-[#00B8B8] group-hover:text-[#F25D6B]'}`}>
+                                  <Info className="w-4 h-4" />
+                                </div>
                               )}
                             </div>
-                            {item.is_completed && item.completed_at && <span className="text-[11px] text-slate-400 font-medium block mt-1">{item.completed_at}</span>}
+                            
+                            {/* 完成時間戳記 */}
+                            {item.is_completed && item.completed_at && (
+                              <span className="text-[10px] text-[#00B8B8] font-bold block mt-1.5 tracking-wider">
+                                DONE AT {item.completed_at}
+                              </span>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -342,6 +394,7 @@ export default function ServantTimelineApp() {
     </div>
   );
 
+  // 全新品牌風格 - 復盤畫面
   const renderReviewView = () => {
     const allTasks = filteredNodes.flatMap(n => n.checklist || []);
     const completedTasks = allTasks.filter(t => t.is_completed);
@@ -349,34 +402,46 @@ export default function ServantTimelineApp() {
     const missedTasks = allTasks.filter(t => !t.is_completed);
 
     return (
-      <div className="flex-1 overflow-y-auto pb-24 px-6 pt-6 bg-slate-50">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">活動復盤分析</h2>
-          <p className="text-sm text-slate-500 mt-1">即時執行數據與檢討 ({currentService})</p>
+      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        <div className="mb-6 px-1">
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">活動復盤分析</h2>
+          <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
+            <BarChart2 className="w-4 h-4 text-[#6D55A3]" /> 即時執行數據 ({currentService})
+          </p>
         </div>
-        <div className="p-5 mb-6 bg-white border shadow-sm rounded-2xl border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold tracking-wider text-slate-500">總體完成率</h3>
-            <span className="px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 rounded-full">雲端資料即時同步中</span>
+        
+        <div className="p-6 mb-8 bg-gradient-to-br from-white to-[#F3EEFF]/50 border shadow-lg shadow-[#6D55A3]/5 rounded-[24px] border-[#E6EAF0]">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-sm font-black tracking-widest text-[#6D55A3] uppercase">總體完成率</h3>
+            <span className="px-3 py-1 text-[10px] font-bold text-[#00B8B8] bg-[#00B8B8]/10 rounded-full border border-[#00B8B8]/20">
+              雲端即時同步中
+            </span>
           </div>
           <div className="flex items-end gap-3">
-            <span className="text-4xl font-extrabold tracking-tighter text-slate-900">{allTasks.length === 0 ? 0 : completionRate}%</span>
-            <span className="mb-1 text-sm font-medium text-slate-500">({completedTasks.length}/{allTasks.length} 任務)</span>
+            <span className="text-5xl font-black tracking-tighter text-[#F25D6B]">{allTasks.length === 0 ? 0 : completionRate}%</span>
+            <span className="mb-1.5 text-sm font-bold text-[#7B7B74]">({completedTasks.length}/{allTasks.length} 任務)</span>
           </div>
-          <div className="w-full h-2.5 mt-4 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full transition-all duration-1000 ease-out bg-blue-600 rounded-full" style={{ width: `${allTasks.length === 0 ? 0 : completionRate}%` }} />
+          <div className="w-full h-3 mt-6 overflow-hidden rounded-full bg-[#E6EAF0] shadow-inner">
+            <div className="h-full transition-all duration-1000 ease-out bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-full relative" style={{ width: `${allTasks.length === 0 ? 0 : completionRate}%` }}>
+               <div className="absolute inset-0 bg-white/20 w-full h-full animate-[shimmer_2s_infinite]"></div>
+            </div>
           </div>
         </div>
+
         {missedTasks.length > 0 && (
           <div className="mb-6">
-            <h3 className="flex items-center gap-2 mb-3 text-sm font-bold tracking-wider text-rose-500"><AlertCircle className="w-4 h-4" />未完成 / 漏掉項目</h3>
-            <div className="space-y-2">
+            <h3 className="flex items-center gap-2 mb-4 text-sm font-bold tracking-widest text-[#F25D6B] uppercase px-1">
+              <AlertCircle className="w-4 h-4" /> 待完成項目
+            </h3>
+            <div className="space-y-3">
               {missedTasks.map((task: any) => {
                 const parentNode = filteredNodes.find(n => n.checklist.some((c: any) => c.id === task.id));
                 return (
-                  <div key={task.id} className="flex flex-col p-3 bg-white border border-rose-100 shadow-sm rounded-xl">
-                    <span className="text-sm font-semibold text-slate-800">{task.text}</span>
-                    <span className="text-xs text-slate-500 mt-1">所屬節點：{parentNode?.time} {parentNode?.title}</span>
+                  <div key={task.id} className="flex flex-col p-4 bg-[#FFF2F4] border border-[#F25D6B]/20 shadow-sm rounded-[20px]">
+                    <span className="text-[14px] font-bold text-[#1F2937] leading-relaxed">{task.text}</span>
+                    <span className="text-xs font-medium text-[#F25D6B]/70 mt-2 flex items-center gap-1.5">
+                       <Clock className="w-3 h-3" /> {parentNode?.time} - {parentNode?.title}
+                    </span>
                   </div>
                 );
               })}
@@ -387,71 +452,78 @@ export default function ServantTimelineApp() {
     );
   };
 
+  // 全新品牌風格 - 管理畫面
   const renderAdminView = () => (
-    <div className="flex-1 overflow-y-auto pb-24 px-6 pt-6 bg-slate-50">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">管理服事任務</h2>
-        <p className="text-sm text-slate-500 mt-1">目前正在管理：{currentService}</p>
+    <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+      <div className="mb-6 px-1">
+        <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">管理服事任務</h2>
+        <p className="text-sm font-medium text-[#7B7B74] mt-1.5">目前管理區塊：<span className="text-[#6D55A3] font-bold">{currentService}</span></p>
       </div>
 
-      <form onSubmit={handleAddNode} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm mb-8">
-        <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <Plus className="w-4 h-4 text-blue-600" /> 新增任務節點
+      <form onSubmit={handleAddNode} className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-8">
+        <h3 className="text-[13px] font-black text-[#6D55A3] uppercase tracking-widest mb-5 flex items-center gap-2">
+          <Plus className="w-4 h-4 text-[#F25D6B]" /> 新增任務節點
         </h3>
-        <div className="space-y-3">
-          <div className="flex gap-3">
+        <div className="space-y-4">
+          <div className="flex gap-4">
             <div className="w-1/3">
-              <label className="block text-xs font-semibold text-slate-500 mb-1">所屬場次</label>
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">所屬場次</label>
               <select 
                 value={newNode.service_type} 
                 onChange={e => setNewNode({...newNode, service_type: e.target.value})}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow"
               >
                 {serviceOptions.map(srv => <option key={srv} value={srv}>{srv}</option>)}
               </select>
             </div>
             <div className="w-2/3">
-              <label className="block text-xs font-semibold text-slate-500 mb-1">時間</label>
-              <input type="time" required value={newNode.time} onChange={e => setNewNode({...newNode, time: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">時間</label>
+              <input type="time" required value={newNode.time} onChange={e => setNewNode({...newNode, time: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
             </div>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">標題</label>
-            <input type="text" required placeholder="例如：敬拜團彩排" value={newNode.title} onChange={e => setNewNode({...newNode, title: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+            <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">任務標題</label>
+            <input type="text" required placeholder="例如：招待同工就位" value={newNode.title} onChange={e => setNewNode({...newNode, title: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-4">
             <div className="w-1/2">
-              <label className="block text-xs font-semibold text-slate-500 mb-1">負責人</label>
-              <input type="text" placeholder="例如：李大華" value={newNode.assignee} onChange={e => setNewNode({...newNode, assignee: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">負責角色</label>
+              <input type="text" placeholder="例如：大堂專招" value={newNode.assignee} onChange={e => setNewNode({...newNode, assignee: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
             </div>
             <div className="w-1/2">
-              <label className="block text-xs font-semibold text-slate-500 mb-1">地點</label>
-              <input type="text" placeholder="例如：大會堂" value={newNode.location} onChange={e => setNewNode({...newNode, location: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">服事地點</label>
+              <input type="text" placeholder="例如：大會堂" value={newNode.location} onChange={e => setNewNode({...newNode, location: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
             </div>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">備註細節 (選填)</label>
-            <textarea rows={2} value={newNode.details} onChange={e => setNewNode({...newNode, details: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 resize-none" />
+            <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">備註細節 (選填)</label>
+            <textarea rows={2} value={newNode.details} onChange={e => setNewNode({...newNode, details: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow resize-none" />
           </div>
-          <button disabled={isAdding} type="submit" className="w-full mt-2 py-2.5 bg-blue-600 text-white font-bold rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors">
-            {isAdding ? '新增中...' : '確認新增到雲端'}
+          <button disabled={isAdding} type="submit" className="w-full mt-4 py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[14px] text-sm hover:opacity-90 disabled:opacity-50 transition-all shadow-md shadow-[#F25D6B]/20">
+            {isAdding ? '新增至雲端中...' : '確認建立任務'}
           </button>
         </div>
       </form>
 
       <div>
-        <h3 className="text-sm font-bold text-slate-500 mb-3 tracking-wider uppercase">目前的任務列表 ({currentService})</h3>
+        <h3 className="text-[11px] font-black text-[#7B7B74] mb-3 tracking-widest uppercase px-1">任務總覽 ({currentService})</h3>
         <div className="space-y-3">
-          {filteredNodes.length === 0 && <p className="text-sm text-slate-400">目前沒有資料。</p>}
+          {filteredNodes.length === 0 && <p className="text-sm font-medium text-[#7B7B74] text-center py-6 bg-white rounded-[20px] border border-[#E6EAF0]">尚無任務資料</p>}
           {filteredNodes.map(node => (
-            <div key={node.id} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
+            <div key={node.id} className="flex items-center justify-between p-4 bg-white border border-[#E6EAF0] rounded-[20px] shadow-sm">
               <div>
-                <div className="text-sm font-bold text-slate-800">{node.time} - {node.title}</div>
-                <div className="text-xs text-slate-500">{node.assignee} · {node.location}</div>
+                <div className="text-[14px] font-bold text-[#1F2937] mb-1 flex items-center gap-2">
+                   <span className="text-[#6D55A3] font-mono">{node.time}</span> {node.title}
+                </div>
+                <div className="text-xs font-medium text-[#7B7B74] flex items-center gap-1.5">
+                  <User className="w-3 h-3" /> {node.assignee} 
+                  <span className="text-[#E6EAF0]">|</span> 
+                  <MapPin className="w-3 h-3" /> {node.location}
+                </div>
               </div>
               <button 
                 onClick={() => handleDeleteNode(node.id, node.title)}
-                className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                className="p-2.5 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-[12px] transition-colors"
                 title="刪除任務"
               >
                 <Trash2 className="w-4 h-4" />
@@ -464,30 +536,47 @@ export default function ServantTimelineApp() {
   );
 
   return (
-    <div className="flex justify-center w-full min-h-screen bg-slate-900 sm:p-4 md:p-8">
-      <div className="relative flex flex-col w-full max-w-md bg-white sm:rounded-[2.5rem] sm:border-[8px] border-slate-800 overflow-hidden shadow-2xl">
-        <header className="sticky top-0 z-20 px-6 py-4 bg-white/90 backdrop-blur-xl border-b border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between">
+    <div className="flex justify-center w-full min-h-screen bg-[#F3EEFF] sm:p-6 md:p-10 font-sans">
+      <div className="relative flex flex-col w-full max-w-[420px] bg-[#FFF9F3] sm:rounded-[40px] sm:border-[10px] border-[#6D55A3]/5 overflow-hidden shadow-2xl shadow-[#6D55A3]/20">
+        
+        {/* 全新品牌風格 - 頂部 Header */}
+        <header className="sticky top-0 z-20 px-5 pt-8 pb-4 bg-gradient-to-br from-[#FFF9F3] via-[#F3EEFF] to-[#FFF2F4] border-b border-[#E6EAF0] rounded-b-[32px] shadow-sm mb-2">
+          
+          <div className="flex items-start justify-between relative">
+            {/* 品牌星芒裝飾 */}
+            <Sparkles className="absolute -top-4 -right-2 w-20 h-20 text-[#6D55A3] opacity-[0.03] rotate-12 pointer-events-none" />
+            
             <div>
-              <h1 className="text-lg font-extrabold tracking-tight text-slate-900">
+              <h1 className="text-2xl font-black tracking-tight text-[#1F2937] flex items-center gap-2.5">
+                {/* 品牌幾何 Logo 意象 */}
+                <div className="w-9 h-9 rounded-[10px] bg-gradient-to-br from-[#F25D6B] to-[#6D55A3] flex items-center justify-center shadow-md shadow-[#F25D6B]/20 rotate-3">
+                  <Sparkles className="w-5 h-5 text-white -rotate-3" />
+                </div>
                 主日崇拜招待
               </h1>
-              <p className="text-xs font-medium text-slate-500 mt-0.5 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                已連線至雲端 (自動同步)
+              <p className="text-[13px] font-bold text-[#6D55A3] mt-2.5 flex items-center gap-1.5 opacity-90">
+                <HeartHandshake className="w-4 h-4" />
+                今天，我們一起歡迎人回家
               </p>
             </div>
-            <div className="flex flex-col items-end">
-              <span className="text-xs font-semibold tracking-wider text-blue-600 uppercase">
-                當前時間
+
+            {/* 時間與雲端狀態 */}
+            <div className="flex flex-col items-end pt-1">
+              <span className="text-[10px] font-black tracking-widest text-[#7B7B74] uppercase mb-0.5 opacity-70">
+                目前時間
               </span>
-              <span className="text-xl font-bold font-mono text-slate-800 tracking-tighter">
+              <span className="text-2xl font-black font-mono text-[#1F2937] tracking-tighter">
                 {currentTime || "載入中"}
               </span>
+              <div className="flex items-center gap-1.5 mt-2 bg-white/70 backdrop-blur-md px-2.5 py-1 rounded-full border border-[#00B8B8]/20 shadow-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#00B8B8] animate-pulse"></span>
+                <span className="text-[9px] font-black text-[#00B8B8] tracking-wider">已連線至雲端</span>
+              </div>
             </div>
           </div>
           
-          <div className="flex gap-2 mt-4 overflow-x-auto pb-1 scrollbar-hide">
+          {/* 堂次切換膠囊按鈕 */}
+          <div className="flex gap-2.5 mt-6 overflow-x-auto pb-2 scrollbar-hide px-1">
             {serviceOptions.map(srv => (
               <button
                 key={srv}
@@ -496,10 +585,10 @@ export default function ServantTimelineApp() {
                   hasManuallySwitchedRef.current = true;
                   setNewNode(prev => ({...prev, service_type: srv}));
                 }}
-                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                className={`whitespace-nowrap px-5 py-2.5 rounded-full text-[14px] font-bold transition-all duration-300 ${
                   currentService === srv 
-                    ? 'bg-slate-800 text-white shadow-md' 
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    ? 'bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-md shadow-[#F25D6B]/20 transform scale-105' 
+                    : 'bg-white text-[#7B7B74] border border-[#E6EAF0] hover:bg-[#F3EEFF] hover:text-[#6D55A3]'
                 }`}
               >
                 {srv}
@@ -508,12 +597,17 @@ export default function ServantTimelineApp() {
           </div>
         </header>
 
+        {/* 主內容區 */}
         {fetchError ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50 text-center overflow-y-auto pb-24">
-            <AlertCircle className="w-12 h-12 text-rose-500 mb-4" />
-            <h3 className="text-lg font-bold text-slate-800 mb-2">無法讀取雲端資料</h3>
-            <p className="text-sm text-slate-600 bg-white p-4 rounded-xl border shadow-sm break-all">{fetchError}</p>
-            <button onClick={() => { setIsLoading(true); fetchData(); }} className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-full text-sm font-semibold hover:bg-blue-700">重新整理</button>
+          <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#FFF9F3] text-center overflow-y-auto pb-28">
+            <div className="w-16 h-16 bg-[#FFF2F4] rounded-full flex items-center justify-center mb-4">
+               <AlertCircle className="w-8 h-8 text-[#F25D6B]" />
+            </div>
+            <h3 className="text-lg font-black text-[#1F2937] mb-2">無法讀取雲端資料</h3>
+            <p className="text-sm font-medium text-[#7B7B74] bg-white p-4 rounded-[20px] border border-[#E6EAF0] shadow-sm break-all">{fetchError}</p>
+            <button onClick={() => { setIsLoading(true); fetchData(); }} className="mt-6 px-8 py-3 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white rounded-full text-sm font-bold shadow-md hover:opacity-90 transition-opacity">
+              重新連線
+            </button>
           </div>
         ) : activeTab === 'timeline' ? (
           renderTimelineView()
@@ -523,52 +617,66 @@ export default function ServantTimelineApp() {
           renderAdminView()
         )}
 
+        {/* 全新品牌風格 - 彈跳視窗 */}
         {detailModal.isOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}>
-            <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-[#1F2937]/40 backdrop-blur-sm" onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}>
+            <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[80vh] border border-[#E6EAF0]/50 transform transition-all" onClick={e => e.stopPropagation()}>
               
-              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
-                <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                  <Info className="w-4 h-4 text-blue-600" />
-                  {detailModal.title}
+              <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-[#FFF9F3] to-[#F3EEFF] border-b border-[#E6EAF0]">
+                <h3 className="font-extrabold text-[#1F2937] flex items-center gap-2.5 text-[15px]">
+                  <div className="w-6 h-6 rounded-full bg-[#00B8B8]/10 flex items-center justify-center">
+                    <Info className="w-3.5 h-3.5 text-[#00B8B8]" />
+                  </div>
+                  任務提醒
                 </h3>
-                <button onClick={() => setDetailModal({isOpen: false, title: '', details: ''})} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+                <button onClick={() => setDetailModal({isOpen: false, title: '', details: ''})} className="p-2 text-[#7B7B74] hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-full transition-colors">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="p-5 overflow-y-auto">
-                <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+              <div className="p-6 overflow-y-auto bg-white">
+                <h4 className="text-[16px] font-bold text-[#6D55A3] mb-4 pb-3 border-b border-[#E6EAF0]">{detailModal.title}</h4>
+                <div className="text-[15px] font-medium text-[#1F2937] leading-loose whitespace-pre-wrap">
                   {detailModal.details}
                 </div>
+              </div>
+              
+              <div className="p-4 bg-white border-t border-[#E6EAF0]">
+                <button 
+                  onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}
+                  className="w-full py-3.5 bg-[#F3EEFF] text-[#6D55A3] font-bold rounded-[16px] hover:bg-[#6D55A3] hover:text-white transition-colors"
+                >
+                  我知道了
+                </button>
               </div>
             </div>
           </div>
         )}
 
-        <nav className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-around px-2 py-4 bg-white border-t pb-safe border-slate-200">
+        {/* 底部功能導覽列 */}
+        <nav className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-around px-2 py-3 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] pb-safe rounded-b-[40px] sm:rounded-b-[32px]">
           <button 
             onClick={() => setActiveTab('timeline')}
-            className={`flex flex-col items-center gap-1.5 transition-colors w-1/3 ${activeTab === 'timeline' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'timeline' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
             <ListTodo className="w-5 h-5" strokeWidth={activeTab === 'timeline' ? 2.5 : 2} />
-            <span className="text-[10px] font-bold tracking-wider">我的服事</span>
+            <span className="text-[10px] font-black tracking-widest">今日流程</span>
           </button>
           
           <button 
             onClick={() => setActiveTab('review')}
-            className={`flex flex-col items-center gap-1.5 transition-colors w-1/3 border-l border-r border-slate-100 ${activeTab === 'review' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'review' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
             <BarChart2 className="w-5 h-5" strokeWidth={activeTab === 'review' ? 2.5 : 2} />
-            <span className="text-[10px] font-bold tracking-wider">復盤數據</span>
+            <span className="text-[10px] font-black tracking-widest">服事動態</span>
           </button>
 
           <button 
             onClick={() => setActiveTab('admin')}
-            className={`flex flex-col items-center gap-1.5 transition-colors w-1/3 ${activeTab === 'admin' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'admin' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
             <Settings className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
-            <span className="text-[10px] font-bold tracking-wider">管理任務</span>
+            <span className="text-[10px] font-black tracking-widest">任務管理</span>
           </button>
         </nav>
       </div>
