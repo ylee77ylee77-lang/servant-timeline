@@ -13,8 +13,8 @@ import {
   Settings, 
   Plus,     
   Trash2,
-  X,        /* 新增 X 圖示用來關閉視窗 */
-  Info      /* 新增 Info 圖示用來提示有詳細內容 */
+  X,        
+  Info      
 } from 'lucide-react';
 
 // 1. 您的專屬雲端鑰匙 (維持原樣)
@@ -60,17 +60,13 @@ export default function ServantTimelineApp() {
   const [currentTime, setCurrentTime] = useState("");
   const activeNodeRef = useRef<HTMLDivElement>(null);
 
-  // --- 新增：詳細內容彈跳視窗的狀態 ---
   const [detailModal, setDetailModal] = useState<{isOpen: boolean, title: string, details: string}>({isOpen: false, title: '', details: ''});
 
-  // --- 當前選擇的場次狀態 ---
   const [currentService, setCurrentService] = useState('主一堂'); 
   const serviceOptions = ['六晚崇', '主一堂', '主二堂'];
   
-  // --- 新增：智慧判斷是否手動切換過 ---
   const hasManuallySwitchedRef = useRef(false);
 
-  // --- 管理員表單的狀態 ---
   const [isAdding, setIsAdding] = useState(false);
   const [newNode, setNewNode] = useState({
     service_type: '主一堂', 
@@ -87,32 +83,32 @@ export default function ServantTimelineApp() {
       const now = new Date();
       setCurrentTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
 
-      // 如果使用者還沒有「手動」按過上面的切換按鈕，我們就幫他自動判斷
       if (!hasManuallySwitchedRef.current) {
-        const day = now.getDay(); // 0 是週日，6 是週六
-        const timeValue = now.getHours() + now.getMinutes() / 60; // 將時間轉為小數方便判斷 (例如 10:30 = 10.5)
+        const day = now.getDay(); 
+        const timeValue = now.getHours() + now.getMinutes() / 60; 
 
         if (day === 6) {
           setCurrentService('六晚崇');
         } else if (day === 0) {
-          if (timeValue < 10.5) { // 早上 10:30 之前
+          if (timeValue < 10.5) { 
             setCurrentService('主一堂');
-          } else { // 早上 10:30 之後
+          } else { 
             setCurrentService('主二堂');
           }
         }
       }
     };
     
-    updateTime(); // 載入時先執行一次
-    const timer = setInterval(updateTime, 60000); // 每分鐘檢查一次
+    updateTime(); 
+    const timer = setInterval(updateTime, 60000); 
     return () => clearInterval(timer);
   }, []);
 
-  // 從 Supabase 雲端抓取真實資料
-  const fetchData = async () => {
+  // --- 重大升級：背景自動同步雲端資料 ---
+  // isBackgroundSync = true 代表是「偷偷更新」，不要顯示大圈圈載入畫面
+  const fetchData = async (isBackgroundSync = false) => {
     try {
-      setFetchError("");
+      if (!isBackgroundSync) setFetchError("");
       const nodesData = await supabaseFetch('timeline_nodes?order=time.asc');
       const checklistData = await supabaseFetch('checklist_items?order=id.asc');
 
@@ -125,21 +121,30 @@ export default function ServantTimelineApp() {
       }
     } catch (error: any) {
       console.error("讀取資料失敗:", error);
-      setFetchError(error.message);
+      if (!isBackgroundSync) setFetchError(error.message);
     } finally {
-      setIsLoading(false);
+      if (!isBackgroundSync) setIsLoading(false);
     }
   };
 
+  // 網頁載入時啟動「10秒自動同步」計時器
   useEffect(() => {
-    if (hasValidKeys) fetchData();
-    else setIsLoading(false);
+    if (hasValidKeys) {
+      fetchData(); // 第一次開啟時的正常載入
+      
+      // 每 10 秒偷偷去雲端對答案，讓不同設備的資料自動同步！
+      const syncTimer = setInterval(() => {
+        fetchData(true); 
+      }, 10000);
+      
+      return () => clearInterval(syncTimer); // 離開網頁時關閉計時器
+    } else {
+      setIsLoading(false);
+    }
   }, []);
 
-  // 只挑選當前場次的節點
   const filteredNodes = nodes.filter(n => n.service_type === currentService);
 
-  // 決定節點狀態與自動定位
   const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
   const activeNodeId = filteredNodes.find(n => !isNodeCompleted(n))?.id;
 
@@ -151,7 +156,6 @@ export default function ServantTimelineApp() {
     }
   }, [activeTab, isLoading, fetchError, filteredNodes.length, currentService]);
 
-  // 處理 Checklist 勾選
   const toggleChecklist = async (nodeId: string, checkId: string) => {
     const nodeToUpdate = nodes.find(n => n.id === nodeId);
     const itemToUpdate = nodeToUpdate?.checklist.find((c: any) => c.id === checkId);
@@ -162,6 +166,7 @@ export default function ServantTimelineApp() {
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const newCompletedAt = willBeCompleted ? timeStr : null;
 
+    // 1. 先讓畫面瞬間變動 (給使用者零延遲的爽快感)
     setNodes(prev => prev.map(node => {
       if (node.id !== nodeId) return node;
       return {
@@ -174,15 +179,18 @@ export default function ServantTimelineApp() {
       };
     }));
 
+    // 2. 背景偷偷送到雲端
     try {
       if (!hasValidKeys) return;
       await supabaseFetch(`checklist_items?id=eq.${checkId}`, 'PATCH', {
         is_completed: willBeCompleted,
         completed_at: newCompletedAt
       });
+      // 上傳成功後，背景再對一次答案
+      fetchData(true);
     } catch (error) {
       console.error("更新資料庫失敗:", error);
-      fetchData(); 
+      fetchData(true); 
     }
   };
 
@@ -205,7 +213,7 @@ export default function ServantTimelineApp() {
       });
       
       setNewNode({ service_type: currentService, time: '08:00', title: '', assignee: '', location: '', details: '' });
-      await fetchData();
+      await fetchData(true); // 新增完用背景同步，不顯示全畫面 Loading
       alert("新增成功！");
     } catch (error: any) {
       alert("新增失敗：" + error.message);
@@ -220,7 +228,7 @@ export default function ServantTimelineApp() {
 
     try {
       await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'DELETE');
-      await fetchData();
+      await fetchData(true);
     } catch (error: any) {
       alert("刪除失敗：" + error.message);
     }
@@ -289,7 +297,6 @@ export default function ServantTimelineApp() {
                   <div className="flex flex-col gap-2 mt-4 text-sm text-slate-600">
                     <div className="flex items-start gap-2"><MapPin className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" /><span>{node.location}</span></div>
                     <div className="flex items-start gap-2"><User className="w-4 h-4 mt-0.5 text-slate-400 shrink-0" /><span>{node.assignee}</span></div>
-                    {/* 我們把原本佔版面的 inline details 移除了，改用彈跳視窗 */}
                   </div>
                   
                   {node.checklist && node.checklist.length > 0 && (
@@ -299,13 +306,11 @@ export default function ServantTimelineApp() {
                       </div>
                       {node.checklist.map((item: any) => (
                         <div key={item.id} className={`flex items-start gap-3 p-3 rounded-xl transition-colors ${item.is_completed ? 'bg-slate-50/80' : 'bg-white border border-slate-100 shadow-sm'}`}>
-                          {/* 左側：純粹用來打勾的區域 */}
                           <label className="relative flex items-center justify-center shrink-0 mt-0.5 cursor-pointer">
                             <input type="checkbox" className="w-5 h-5 transition-colors border-2 rounded-md appearance-none cursor-pointer border-slate-300 checked:bg-blue-600 checked:border-blue-600 focus:ring-blue-500 focus:outline-none" checked={item.is_completed} onChange={() => toggleChecklist(node.id, item.id)}/>
                             {item.is_completed && <CheckCircle2 className="absolute w-4 h-4 text-white pointer-events-none" />}
                           </label>
                           
-                          {/* 右側：點擊會跳出詳細視窗的文字區域 */}
                           <div className="flex-1">
                             <div 
                               className={`flex items-start gap-1.5 ${item.details ? 'cursor-pointer group' : ''}`}
@@ -318,7 +323,6 @@ export default function ServantTimelineApp() {
                               <span className={`text-sm font-medium transition-all ${item.is_completed ? 'text-slate-400 line-through' : 'text-slate-700'} ${item.details ? 'group-hover:text-blue-600' : ''}`}>
                                 {item.text}
                               </span>
-                              {/* 如果該任務有詳細內容，就顯示一個藍色的 ⓘ 提示圖示 */}
                               {item.details && (
                                 <Info className={`w-4 h-4 shrink-0 mt-0.5 transition-colors ${item.is_completed ? 'text-slate-300' : 'text-blue-400 group-hover:text-blue-600'}`} />
                               )}
@@ -338,7 +342,6 @@ export default function ServantTimelineApp() {
     </div>
   );
 
-  // 2. 原有的復盤畫面 (改用 filteredNodes 統計當前場次)
   const renderReviewView = () => {
     const allTasks = filteredNodes.flatMap(n => n.checklist || []);
     const completedTasks = allTasks.filter(t => t.is_completed);
@@ -354,7 +357,7 @@ export default function ServantTimelineApp() {
         <div className="p-5 mb-6 bg-white border shadow-sm rounded-2xl border-slate-200">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-bold tracking-wider text-slate-500">總體完成率</h3>
-            <span className="px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 rounded-full">雲端資料即時統計</span>
+            <span className="px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 rounded-full">雲端資料即時同步中</span>
           </div>
           <div className="flex items-end gap-3">
             <span className="text-4xl font-extrabold tracking-tighter text-slate-900">{allTasks.length === 0 ? 0 : completionRate}%</span>
@@ -471,7 +474,7 @@ export default function ServantTimelineApp() {
               </h1>
               <p className="text-xs font-medium text-slate-500 mt-0.5 flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                已連線至雲端
+                已連線至雲端 (自動同步)
               </p>
             </div>
             <div className="flex flex-col items-end">
@@ -484,14 +487,12 @@ export default function ServantTimelineApp() {
             </div>
           </div>
           
-          {/* --- 場次切換列 (包含三顆按鈕) --- */}
           <div className="flex gap-2 mt-4 overflow-x-auto pb-1 scrollbar-hide">
             {serviceOptions.map(srv => (
               <button
                 key={srv}
                 onClick={() => {
                   setCurrentService(srv);
-                  // 標記為手動切換，系統就會停止自動幫您跳轉場次
                   hasManuallySwitchedRef.current = true;
                   setNewNode(prev => ({...prev, service_type: srv}));
                 }}
@@ -522,12 +523,10 @@ export default function ServantTimelineApp() {
           renderAdminView()
         )}
 
-        {/* --- 新增：詳細內容彈出視窗 (Modal) --- */}
         {detailModal.isOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}>
             <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
               
-              {/* 彈跳視窗的標題列 */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                   <Info className="w-4 h-4 text-blue-600" />
@@ -538,7 +537,6 @@ export default function ServantTimelineApp() {
                 </button>
               </div>
 
-              {/* 彈跳視窗的詳細內容區塊 */}
               <div className="p-5 overflow-y-auto">
                 <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                   {detailModal.details}
@@ -548,7 +546,6 @@ export default function ServantTimelineApp() {
           </div>
         )}
 
-        {/* 導覽列 */}
         <nav className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-around px-2 py-4 bg-white border-t pb-safe border-slate-200">
           <button 
             onClick={() => setActiveTab('timeline')}
