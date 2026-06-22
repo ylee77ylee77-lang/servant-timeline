@@ -15,7 +15,10 @@ import {
   X,        
   Info,
   Sparkles,
-  HeartHandshake
+  HeartHandshake,
+  Edit,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 // 1. 您的專屬雲端鑰匙 (維持原樣)
@@ -68,9 +71,31 @@ export default function App() {
   
   const hasManuallySwitchedRef = useRef(false);
 
+  // --- 權限鎖定相關狀態 ---
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const ADMIN_PASSWORD = '1234'; // 管理員驗證密碼，可自由更改
+
+  // --- 自訂精美 Modal 提示框狀態 (取代冷冰冰的 alert & confirm) ---
+  const [customAlert, setCustomAlert] = useState<{isOpen: boolean, message: string}>({ isOpen: false, message: "" });
+  const [customConfirm, setCustomConfirm] = useState<{isOpen: boolean, message: string, onConfirm: () => void}>({ isOpen: false, message: "", onConfirm: () => {} });
+
+  // --- 管理與編輯任務狀態 ---
   const [isAdding, setIsAdding] = useState(false);
   const [newNode, setNewNode] = useState({
     service_type: '主一堂', 
+    time: '08:00',
+    title: '',
+    assignee: '',
+    location: '',
+    details: ''
+  });
+
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    service_type: '主一堂',
     time: '08:00',
     title: '',
     assignee: '',
@@ -188,7 +213,10 @@ export default function App() {
 
   const handleAddNode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newNode.title || !newNode.time) return alert("請至少填寫時間與標題");
+    if (!newNode.title || !newNode.time) {
+      setCustomAlert({ isOpen: true, message: "請務必填寫時間與標題！" });
+      return;
+    }
     setIsAdding(true);
     const newId = 'n_' + Math.random().toString(36).substr(2, 9);
     try {
@@ -203,22 +231,76 @@ export default function App() {
       });
       setNewNode({ service_type: currentService, time: '08:00', title: '', assignee: '', location: '', details: '' });
       await fetchData(true);
-      alert("新增成功！");
+      setCustomAlert({ isOpen: true, message: "任務建立成功！" });
     } catch (error: any) {
-      alert("新增失敗：" + error.message);
+      setCustomAlert({ isOpen: true, message: "新增失敗：" + error.message });
     } finally {
       setIsAdding(false);
     }
   };
 
-  const handleDeleteNode = async (id: string, title: string) => {
-    const confirmDelete = window.confirm(`確定要刪除「${title}」這個任務嗎？\n此動作將會一併刪除底下的所有 Checklist！`);
-    if (!confirmDelete) return;
+  // 即時編輯儲存功能 (擴充管理功能，同步更新 Supabase)
+  const handleUpdateNode = async (id: string) => {
+    if (!editForm.title || !editForm.time) {
+      setCustomAlert({ isOpen: true, message: "請填寫時間與標題！" });
+      return;
+    }
     try {
-      await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'DELETE');
+      await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'PATCH', {
+        service_type: editForm.service_type,
+        time: editForm.time,
+        title: editForm.title,
+        assignee: editForm.assignee || '未指定',
+        location: editForm.location || '未指定',
+        details: editForm.details || ''
+      });
+      setEditingNodeId(null);
       await fetchData(true);
+      setCustomAlert({ isOpen: true, message: "任務編輯成功，已同步至雲端！" });
     } catch (error: any) {
-      alert("刪除失敗：" + error.message);
+      setCustomAlert({ isOpen: true, message: "更新雲端失敗：" + error.message });
+    }
+  };
+
+  const startEditing = (node: any) => {
+    setEditingNodeId(node.id);
+    setEditForm({
+      service_type: node.service_type,
+      time: node.time,
+      title: node.title,
+      assignee: node.assignee,
+      location: node.location,
+      details: node.details || ''
+    });
+  };
+
+  const handleDeleteNode = async (id: string, title: string) => {
+    setCustomConfirm({
+      isOpen: true,
+      message: `確定要刪除「${title}」這個任務嗎？\n此動作將會一併刪除底下的所有 Checklist！`,
+      onConfirm: async () => {
+        try {
+          await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'DELETE');
+          await fetchData(true);
+          setCustomAlert({ isOpen: true, message: "任務已成功刪除！" });
+        } catch (error: any) {
+          setCustomAlert({ isOpen: true, message: "刪除失敗：" + error.message });
+        }
+      }
+    });
+  };
+
+  // 驗證管理密碼並進入管理面板
+  const handleVerifyPassword = () => {
+    if (passwordInput === ADMIN_PASSWORD) {
+      setIsAdminUnlocked(true);
+      setShowPasswordModal(false);
+      setActiveTab('admin');
+      setPasswordError("");
+      setPasswordInput("");
+    } else {
+      setPasswordError("密碼錯誤，請重新輸入！");
+      setPasswordInput("");
     }
   };
 
@@ -259,7 +341,7 @@ export default function App() {
         </div>
       ) : (
         <div className="relative mt-2">
-          {/* 溫暖紫灰色的主時間軸 */}
+          {/* 溫慢紫灰色的主時間軸 */}
           <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
           
           {filteredNodes.map((node) => {
@@ -394,12 +476,27 @@ export default function App() {
     </div>
   );
 
-  // 全新品牌風格 - 復盤畫面
+  // 全新品牌風格 - 服事動態（方案 B：依負責角色分組）
   const renderReviewView = () => {
     const allTasks = filteredNodes.flatMap(n => n.checklist || []);
     const completedTasks = allTasks.filter(t => t.is_completed);
     const completionRate = Math.round((completedTasks.length / (allTasks.length || 1)) * 100);
     const missedTasks = allTasks.filter(t => !t.is_completed);
+
+    // 依負責角色（assignee）進行任務分組 (修復變數未定義錯誤)
+    const groupedMissed: { [key: string]: any[] } = {};
+    missedTasks.forEach((task: any) => {
+      const parentNode = filteredNodes.find(n => n.checklist && n.checklist.some((c: any) => c.id === task.id));
+      const role = parentNode?.assignee || '未指定角色';
+      if (!groupedMissed[role]) {
+        groupedMissed[role] = [];
+      }
+      groupedMissed[role].push({
+        ...task,
+        nodeTitle: parentNode?.title,
+        nodeTime: parentNode?.time
+      });
+    });
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -428,38 +525,90 @@ export default function App() {
           </div>
         </div>
 
-        {missedTasks.length > 0 && (
-          <div className="mb-6">
-            <h3 className="flex items-center gap-2 mb-4 text-sm font-bold tracking-widest text-[#F25D6B] uppercase px-1">
-              <AlertCircle className="w-4 h-4" /> 待完成項目
-            </h3>
-            <div className="space-y-3">
-              {missedTasks.map((task: any) => {
-                const parentNode = filteredNodes.find(n => n.checklist.some((c: any) => c.id === task.id));
-                return (
-                  <div key={task.id} className="flex flex-col p-4 bg-[#FFF2F4] border border-[#F25D6B]/20 shadow-sm rounded-[20px]">
-                    <span className="text-[14px] font-bold text-[#1F2937] leading-relaxed">{task.text}</span>
-                    <span className="text-xs font-medium text-[#F25D6B]/70 mt-2 flex items-center gap-1.5">
-                       <Clock className="w-3 h-3" /> {parentNode?.time} - {parentNode?.title}
+        {/* 方案 B：分組待完成清單 */}
+        <div className="mb-6">
+          <h3 className="flex items-center gap-2 mb-4 text-sm font-black tracking-widest text-[#F25D6B] uppercase px-1">
+            <AlertCircle className="w-4 h-4" /> 待完成服事清單（依角色分組）
+          </h3>
+          
+          {Object.keys(groupedMissed).length === 0 ? (
+            <div className="text-center text-[#7B7B74] py-8 bg-white/60 rounded-[24px] border border-[#E6EAF0] text-sm">
+              🎉 恭喜！當前場次的所有任務均已圓滿完成！
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {Object.entries(groupedMissed).map(([role, tasks]) => (
+                <div key={role} className="bg-white p-5 rounded-[24px] border border-[#E6EAF0] shadow-sm">
+                  {/* 分組標題 */}
+                  <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#F3EEFF]">
+                    <span className="font-extrabold text-[15px] text-[#6D55A3] flex items-center gap-1.5">
+                      <User className="w-4 h-4 text-[#F25D6B]" /> {role}
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 bg-[#FFF2F4] text-[#F25D6B] rounded-full">
+                      待辦 {tasks.length} 項
                     </span>
                   </div>
-                );
-              })}
+                  
+                  {/* 任務卡片內列表 */}
+                  <div className="space-y-2.5">
+                    {tasks.map((task: any) => (
+                      <div 
+                        key={task.id}
+                        onClick={() => {
+                          setDetailModal({
+                            isOpen: true,
+                            title: task.text,
+                            details: task.details || '本項目目前沒有額外的詳細提醒說明。'
+                          });
+                        }}
+                        className="p-3 bg-[#FFF2F4]/40 hover:bg-[#FFF2F4]/80 border border-[#F25D6B]/10 rounded-[16px] cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-1.5">
+                          <span className="text-[14px] font-bold text-[#1F2937] leading-relaxed">
+                            {task.text}
+                          </span>
+                          <div className="mt-0.5 shrink-0 text-[#00B8B8]">
+                            <Info className="w-3.5 h-3.5" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 mt-1 text-[11px] text-[#7B7B74] font-medium">
+                          <Clock className="w-3 h-3" /> {task.nodeTime} - {task.nodeTitle}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   };
 
-  // 全新品牌風格 - 管理畫面
+  // 全新品牌風格 - 管理畫面 (擴充即時編輯更新功能)
   const renderAdminView = () => (
     <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
-      <div className="mb-6 px-1">
-        <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">管理服事任務</h2>
-        <p className="text-sm font-medium text-[#7B7B74] mt-1.5">目前管理區塊：<span className="text-[#6D55A3] font-bold">{currentService}</span></p>
+      <div className="mb-6 px-1 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">管理服事任務</h2>
+          <p className="text-sm font-medium text-[#7B7B74] mt-1.5">目前管理區塊：<span className="text-[#6D55A3] font-bold">{currentService}</span></p>
+        </div>
+        
+        {/* 一鍵重新鎖定按鈕 */}
+        <button
+          onClick={() => {
+            setIsAdminUnlocked(false);
+            setActiveTab('timeline');
+          }}
+          className="px-3 py-1.5 bg-[#F25D6B]/10 hover:bg-[#F25D6B]/25 text-[#F25D6B] border border-[#F25D6B]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
+        >
+          <Lock className="w-3.5 h-3.5" />
+          鎖定登出
+        </button>
       </div>
 
+      {/* 新增任務節點表單 */}
       <form onSubmit={handleAddNode} className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-8">
         <h3 className="text-[13px] font-black text-[#6D55A3] uppercase tracking-widest mb-5 flex items-center gap-2">
           <Plus className="w-4 h-4 text-[#F25D6B]" /> 新增任務節點
@@ -505,31 +654,128 @@ export default function App() {
         </div>
       </form>
 
+      {/* 任務總覽區 (新增即時編輯功能) */}
       <div>
-        <h3 className="text-[11px] font-black text-[#7B7B74] mb-3 tracking-widest uppercase px-1">任務總覽 ({currentService})</h3>
-        <div className="space-y-3">
+        <h3 className="text-[11px] font-black text-[#7B7B74] mb-3 tracking-widest uppercase px-1">任務總覽與編輯 ({currentService})</h3>
+        <div className="space-y-4">
           {filteredNodes.length === 0 && <p className="text-sm font-medium text-[#7B7B74] text-center py-6 bg-white rounded-[20px] border border-[#E6EAF0]">尚無任務資料</p>}
-          {filteredNodes.map(node => (
-            <div key={node.id} className="flex items-center justify-between p-4 bg-white border border-[#E6EAF0] rounded-[20px] shadow-sm">
-              <div>
-                <div className="text-[14px] font-bold text-[#1F2937] mb-1 flex items-center gap-2">
-                   <span className="text-[#6D55A3] font-mono">{node.time}</span> {node.title}
-                </div>
-                <div className="text-xs font-medium text-[#7B7B74] flex items-center gap-1.5">
-                  <User className="w-3 h-3" /> {node.assignee} 
-                  <span className="text-[#E6EAF0]">|</span> 
-                  <MapPin className="w-3 h-3" /> {node.location}
-                </div>
+          {filteredNodes.map(node => {
+            const isEditing = editingNodeId === node.id;
+            return (
+              <div key={node.id} className="p-4 bg-white border border-[#E6EAF0] rounded-[24px] shadow-sm transition-all duration-300">
+                {isEditing ? (
+                  /* 編輯模式表單 */
+                  <div className="space-y-3.5">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#F3EEFF] mb-1">
+                      <span className="text-xs font-black text-[#6D55A3]">編輯任務節點</span>
+                      <span className="text-[10px] font-mono text-[#7B7B74]">ID: {node.id}</span>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">時間</label>
+                        <input 
+                          type="time" 
+                          value={editForm.time} 
+                          onChange={e => setEditForm({...editForm, time: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">標題</label>
+                        <input 
+                          type="text" 
+                          value={editForm.title} 
+                          onChange={e => setEditForm({...editForm, title: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">角色</label>
+                        <input 
+                          type="text" 
+                          value={editForm.assignee} 
+                          onChange={e => setEditForm({...editForm, assignee: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">地點</label>
+                        <input 
+                          type="text" 
+                          value={editForm.location} 
+                          onChange={e => setEditForm({...editForm, location: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">詳細備註</label>
+                      <textarea 
+                        rows={2} 
+                        value={editForm.details} 
+                        onChange={e => setEditForm({...editForm, details: e.target.value})} 
+                        className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none resize-none" 
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button 
+                        type="button" 
+                        onClick={() => setEditingNodeId(null)}
+                        className="px-3 py-1.5 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] text-xs font-bold rounded-lg transition-all"
+                      >
+                        取消
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => handleUpdateNode(node.id)}
+                        className="px-4 py-1.5 bg-gradient-to-r from-[#00B8B8] to-[#6D55A3] text-white text-xs font-bold rounded-lg shadow-sm hover:opacity-90 transition-all"
+                      >
+                        儲存更新
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* 唯讀模式展示 */
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-[14px] font-bold text-[#1F2937] mb-1 flex items-center gap-2">
+                         <span className="text-[#6D55A3] font-mono">{node.time}</span> {node.title}
+                      </div>
+                      <div className="text-xs font-medium text-[#7B7B74] flex items-center gap-1.5">
+                        <User className="w-3 h-3" /> {node.assignee} 
+                        <span className="text-[#E6EAF0]">|</span> 
+                        <MapPin className="w-3 h-3" /> {node.location}
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-1 shrink-0">
+                      {/* 即時編輯按鈕 */}
+                      <button 
+                        onClick={() => startEditing(node)}
+                        className="p-2.5 text-[#6D55A3]/60 hover:text-[#6D55A3] hover:bg-[#F3EEFF] rounded-[12px] transition-colors"
+                        title="編輯此任務"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteNode(node.id, node.title)}
+                        className="p-2.5 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-[12px] transition-colors"
+                        title="刪除任務"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <button 
-                onClick={() => handleDeleteNode(node.id, node.title)}
-                className="p-2.5 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-[12px] transition-colors"
-                title="刪除任務"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -621,7 +867,7 @@ export default function App() {
           renderAdminView()
         )}
 
-        {/* 全新品牌風格 - 彈跳視窗 */}
+        {/* 全新品牌風格 - 詳細備註彈跳視窗 */}
         {detailModal.isOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-[#1F2937]/40 backdrop-blur-sm" onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}>
             <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[80vh] border border-[#E6EAF0]/50 transform transition-all" onClick={e => e.stopPropagation()}>
@@ -657,6 +903,101 @@ export default function App() {
           </div>
         )}
 
+        {/* 密碼驗證解鎖彈窗 */}
+        {showPasswordModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm" onClick={() => setShowPasswordModal(false)}>
+            <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0]/50 text-center" onClick={e => e.stopPropagation()}>
+              <div className="w-12 h-12 rounded-2xl bg-[#F3EEFF] flex items-center justify-center mx-auto mb-4">
+                <Lock className="w-6 h-6 text-[#6D55A3]" />
+              </div>
+              <h3 className="text-lg font-bold text-[#1F2937] mb-1">管理員身分驗證</h3>
+              <p className="text-xs text-[#7B7B74] mb-4">請輸入任務管理驗證密碼</p>
+              
+              <input 
+                type="password" 
+                placeholder="請輸入密碼" 
+                value={passwordInput}
+                onChange={e => setPasswordInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleVerifyPassword();
+                }}
+                className="w-full text-center px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-2xl text-base font-bold text-[#1F2937] tracking-widest focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/40 mb-2"
+                autoFocus
+              />
+              
+              {passwordError && (
+                <p className="text-xs font-bold text-[#F25D6B] mb-3">{passwordError}</p>
+              )}
+
+              <div className="flex gap-3 mt-4">
+                <button 
+                  onClick={() => setShowPasswordModal(false)}
+                  className="flex-1 py-3 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] font-bold rounded-2xl text-sm transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={handleVerifyPassword}
+                  className="flex-1 py-3 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-2xl text-sm shadow-md shadow-[#F25D6B]/25 hover:opacity-95 transition-all"
+                >
+                  確認解鎖
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 自訂品牌質感通知視窗 (取代原生 alert) */}
+        {customAlert.isOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
+            <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0] text-center">
+              <div className="w-12 h-12 rounded-2xl bg-[#00B8B8]/10 flex items-center justify-center mx-auto mb-4">
+                <Sparkles className="w-6 h-6 text-[#00B8B8]" />
+              </div>
+              <p className="text-[15px] font-bold text-[#1F2937] leading-relaxed mb-6 whitespace-pre-line">
+                {customAlert.message}
+              </p>
+              <button 
+                onClick={() => setCustomAlert({ isOpen: false, message: "" })}
+                className="w-full py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[16px] hover:opacity-90 transition-opacity"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 自訂品牌質感確認視窗 (取代原生 confirm) */}
+        {customConfirm.isOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
+            <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0] text-center">
+              <div className="w-12 h-12 rounded-2xl bg-[#F25D6B]/10 flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="w-6 h-6 text-[#F25D6B]" />
+              </div>
+              <p className="text-[15px] font-bold text-[#1F2937] leading-relaxed mb-6 whitespace-pre-line">
+                {customConfirm.message}
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setCustomConfirm({ isOpen: false, message: "", onConfirm: () => {} })}
+                  className="flex-1 py-3 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] font-bold rounded-[16px] text-sm transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={() => {
+                    customConfirm.onConfirm();
+                    setCustomConfirm({ isOpen: false, message: "", onConfirm: () => {} });
+                  }}
+                  className="flex-1 py-3 bg-[#F25D6B] hover:bg-[#F25D6B]/90 text-white font-bold rounded-[16px] text-sm shadow-md shadow-[#F25D6B]/20 transition-all"
+                >
+                  確認執行
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 底部功能導覽列 */}
         <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-2 py-3 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] pb-safe rounded-t-[32px] sm:rounded-t-[32px] sm:w-[420px] sm:mx-auto">
           <button 
@@ -676,10 +1017,22 @@ export default function App() {
           </button>
 
           <button 
-            onClick={() => setActiveTab('admin')}
+            onClick={() => {
+              if (isAdminUnlocked) {
+                setActiveTab('admin');
+              } else {
+                setShowPasswordModal(true);
+                setPasswordInput("");
+                setPasswordError("");
+              }
+            }}
             className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'admin' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
-            <Settings className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
+            {isAdminUnlocked ? (
+              <Unlock className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
+            ) : (
+              <Settings className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
+            )}
             <span className="text-[10px] font-black tracking-widest">任務管理</span>
           </button>
         </nav>
