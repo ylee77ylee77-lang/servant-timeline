@@ -551,7 +551,7 @@ export default function ServantTimelineApp() {
                 {/* 新版品牌 Logo */}
                 <div className="w-9 h-9 rounded-[10px] bg-white flex items-center justify-center shadow-md shadow-[#6D55A3]/10">
                   <img
-                    src="https://raw.githubusercontent.com/ylee77ylee77-lang/servant-timeline/main/public/logo.png"
+                    src="/Logo.png"
                     alt="Logo"
                     className="w-7 h-7 object-contain"
                   />
