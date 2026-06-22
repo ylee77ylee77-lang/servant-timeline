@@ -178,15 +178,50 @@ export default function App() {
 
   const filteredNodes = nodes.filter(n => n.service_type === currentService);
   const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
-  const activeNodeId = filteredNodes.find(n => !isNodeCompleted(n))?.id;
 
+  // --- 智慧跟隨當下時鐘判定 activeNodeId ---
+  const timeToMinutes = (tStr: string) => {
+    if (!tStr) return 0;
+    const [h, m] = tStr.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  const getActiveNodeIdByTime = () => {
+    if (filteredNodes.length === 0) return null;
+    const currentMinutes = timeToMinutes(currentTime);
+
+    // 依據時間進行排序升序排列
+    const sortedNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+
+    // 1. 如果當前時間還沒到第一個任務的時間，預設第一個任務進行中
+    if (currentMinutes < timeToMinutes(sortedNodes[0].time)) {
+      return sortedNodes[0].id;
+    }
+
+    // 2. 尋找當前時間介於哪個區間
+    for (let i = 0; i < sortedNodes.length; i++) {
+      const nodeMin = timeToMinutes(sortedNodes[i].time);
+      const nextNodeMin = sortedNodes[i + 1] ? timeToMinutes(sortedNodes[i + 1].time) : Infinity;
+
+      if (currentMinutes >= nodeMin && currentMinutes < nextNodeMin) {
+        return sortedNodes[i].id;
+      }
+    }
+
+    // 3. 超過最後一個任務時間，則最後一個進行中
+    return sortedNodes[sortedNodes.length - 1].id;
+  };
+
+  const activeNodeId = getActiveNodeIdByTime();
+
+  // 當 activeNodeId 隨著時間改變或切換場次時，全自動平滑捲動到該節點
   useEffect(() => {
     if (!isLoading && !fetchError && filteredNodes.length > 0 && activeTab === 'timeline' && activeNodeRef.current) {
       setTimeout(() => {
         activeNodeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 300);
     }
-  }, [activeTab, isLoading, fetchError, filteredNodes.length, currentService]);
+  }, [activeTab, isLoading, fetchError, filteredNodes.length, currentService, activeNodeId]);
 
   const toggleChecklist = async (nodeId: string, checkId: string) => {
     const nodeToUpdate = nodes.find(n => n.id === nodeId);
@@ -1256,7 +1291,7 @@ export default function App() {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-[#1F2937]/40 backdrop-blur-sm" onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}>
             <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[80vh] border border-[#E6EAF0]/50 transform transition-all" onClick={e => e.stopPropagation()}>
               
-              <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-r from-[#FFF9F3] to-[#F3EEFF] border-b border-[#E6EAF0]">
+              <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-br from-[#FFF9F3] to-[#F3EEFF] border-b border-[#E6EAF0]">
                 <h3 className="font-extrabold text-[#1F2937] flex items-center gap-2.5 text-[15px]">
                   <div className="w-6 h-6 rounded-full bg-[#00B8B8]/10 flex items-center justify-center">
                     <Info className="w-3.5 h-3.5 text-[#00B8B8]" />
@@ -1331,7 +1366,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 自訂品牌質感通知視窗 (取代原生 alert) */}
+        {/* 自訂 brand 質感通知視窗 (取代原生 alert) */}
         {customAlert.isOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
             <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0] text-center">
@@ -1351,7 +1386,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 自訂品牌質感確認視窗 (取代原生 confirm) */}
+        {/* 自訂 brand 質感確認視窗 (取代原生 confirm) */}
         {customConfirm.isOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
             <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0] text-center">
