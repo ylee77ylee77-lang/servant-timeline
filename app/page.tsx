@@ -47,7 +47,7 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#a855f7', // 青春紫
     label: '男女洗手間',
     kind: 'service',
-    desc: '位於1F共享空間後側通道，備有精緻寬敞的男、女洗手洗手間區域。'
+    desc: '位於 1F 共享空間後側通道，備有寬敞的男、女洗手間區域。'
   },
   {
     id: '1f-recycle',
@@ -56,7 +56,7 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#fbbf24', // 淡金色
     label: '不鏽鋼分類回收',
     kind: 'service',
-    desc: '設於1F大廳手扶梯與地下室樓梯旁，提供便捷的垃圾分類與資源回收點。'
+    desc: '設於 1F 大廳手扶梯與地下室樓梯旁，提供便捷的垃圾分類與資源回收點。'
   },
   {
     id: '1f-lobby-sofa',
@@ -65,7 +65,7 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#fbbf24',
     label: '落地窗交誼沙發區',
     kind: 'service',
-    desc: '在大片採光落地玻璃窗旁，配有高雅舒適的橘、灰雙色長椅及茶几，供同工與新友接待休憩。'
+    desc: '在大片採光落地玻璃窗旁，配有舒適的橘、灰雙色長椅及茶几，供同工與新友接待休憩。'
   },
   {
     id: '1f-desk',
@@ -74,14 +74,14 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#fbbf24',
     label: '島型前台保全台',
     kind: 'service',
-    desc: '1F大門進場最核心的島型立體保全服務台，設有圓角大理石厚度，配備訪客登記與社區諮詢。'
+    desc: '1F 大門進場最核心的島型立體保全服務台，設有圓角設計，配備訪客登記與社區諮詢。'
   },
   {
     id: '1f-aed',
     floor: '1F',
     position: [-2.5, 0.8, 3],
     color: '#dc2626', // 消防紅
-    label: '1F大廳 AED 裝置',
+    label: '1F 大廳 AED 裝置',
     kind: 'safety',
     desc: '【實測新發現】位於一樓大門旁、緊鄰落地窗玻璃處，配置直立式自動體外心臟電擊去顫器。'
   },
@@ -90,9 +90,9 @@ const HOTSPOTS_DB: HotspotData[] = [
     floor: '1F',
     position: [4, 0.8, 0],
     color: '#dc2626',
-    label: '1F牆體消火栓',
+    label: '1F 牆體消火栓',
     kind: 'safety',
-    desc: '位於1F手扶梯下側白牆轉角，配置標準消火栓箱與高壓手提式滅火器。'
+    desc: '位於 1F 手扶梯下側白牆轉角，配置標準消火栓箱與高壓手提式滅火器。'
   },
 
   // --- 2F 主會堂低層及大堂 ---
@@ -103,7 +103,7 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#a855f7',
     label: '女廁與無障礙廁所',
     kind: 'service',
-    desc: '2F公共走道大堂西側，備有女廁與無障礙洗手間，保障行動不便會友的使用需求。'
+    desc: '2F 公共走道大堂西側，備有女廁與無障礙洗手間，保障行動不便會友的使用需求。'
   },
   {
     id: '2f-box',
@@ -112,25 +112,25 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#fbbf24',
     label: '大會堂入口奉獻箱',
     kind: 'service',
-    desc: '座落於2F主會堂雙開玻璃管制大門旁、木質弧形裝飾牆前，方便會友主日奉獻。'
+    desc: '座落於 2F 主會堂雙開玻璃管制大門旁、木質弧形裝飾牆前，方便會友主日奉獻。'
   },
   {
     id: '2f-fire-wall',
     floor: '2F',
     position: [4, 0.8, -4],
     color: '#dc2626',
-    label: '北1號梯間消防栓',
+    label: '北 1 號梯間消防栓',
     kind: 'safety',
-    desc: '2F北側1號逃生梯出口旁，設有嵌牆式消防箱與高頻緊急警報喇叭。'
+    desc: '2F 北側 1 號逃生梯出口旁，設有嵌牆式消防箱與高頻緊急警報喇叭。'
   },
   {
     id: '2f-aed',
     floor: '2F',
     position: [2, 0.8, 2],
     color: '#dc2626',
-    label: '3號電梯旁 AED 裝置',
+    label: '3 號電梯旁 AED 裝置',
     kind: 'safety',
-    desc: '精確座落於2F大堂3號電梯旁的流線型木牆面上，配有發光外盒與語音警報引導。'
+    desc: '精確座落於 2F 大堂 3 號電梯旁的流線型木牆面上，配有發光外盒與語音警報引導。'
   },
 
   // --- 3F 主會堂中層看台及大堂 ---
@@ -139,9 +139,9 @@ const HOTSPOTS_DB: HotspotData[] = [
     floor: '3F',
     position: [-3, 0.8, 3],
     color: '#a855f7',
-    label: '3F大堂男洗手間',
+    label: '3F 大堂男洗手間',
     kind: 'service',
-    desc: '3F大廳走道旁，【特點】本樓層僅配置男洗手間（無女廁），請同工與會友留意。'
+    desc: '3F 大廳走道旁，本樓層僅配置男洗手間（無女廁），請同工與會友留意。'
   },
   {
     id: '3f-wooden-cabinet',
@@ -150,7 +150,7 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#fbbf24',
     label: '電梯對面招待新人櫃',
     kind: 'service',
-    desc: '精確座落於3F客梯正對面之弧形木飾牆內，為招待同工存放新人迎賓禮、宣傳 DM 的核心資材櫃。'
+    desc: '精確座落於 3F 客梯正對面之弧形木飾牆內，為招待同工存放新人迎賓禮、宣傳 DM 的核心資材櫃。'
   },
   {
     id: '3f-welcome-desk',
@@ -159,14 +159,14 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#fbbf24',
     label: '大落地窗招待集合桌',
     kind: 'service',
-    desc: '座落於3F大落地窗面外側，配有長條形接待桌與三座蔚藍色招待物資置物櫃。'
+    desc: '座落於 3F 大落地窗面外側，配有長條形接待桌與三座蔚藍色招待物資置物櫃。'
   },
   {
     id: '3f-escape-lever',
     floor: '3F',
     position: [4, 0.8, 4],
     color: '#ffffff', // 純白避難光點
-    label: '3F落地窗避難緩降機',
+    label: '3F 落地窗避難緩降機',
     kind: 'safety',
     desc: '靠近大堂面外落地窗之特定開窗格邊緣，配備標準鋼製避難緩降器具與垂掛繩索。'
   },
@@ -179,16 +179,16 @@ const HOTSPOTS_DB: HotspotData[] = [
     color: '#a855f7',
     label: '行政走廊女洗手間',
     kind: 'service',
-    desc: '位於4F行政辦公走廊最深處通道內，專供行政同工與會友使用之女洗手間。'
+    desc: '位於 4F 行政辦公走廊最深處通道內，專供行政同工與會友使用之女洗手間。'
   },
   {
     id: '4f-escape-lever',
     floor: '4F',
     position: [3, 0.5, -3],
     color: '#ffffff',
-    label: '4F高空避難緩降機',
+    label: '4F 高空避難緩降機',
     kind: 'safety',
-    desc: '位於4F東側大面高空採光窗旁，裝設高空緊急逃生緩降固定鋼架與金屬器具。'
+    desc: '位於 4F 東側大面高空採光窗旁，裝設高空緊急逃生緩降固定鋼架與金屬器具。'
   }
 ];
 
@@ -207,23 +207,19 @@ const CameraController = ({
 
     switch (viewMode) {
       case 'exterior':
-        // 整體外牆環繞視角
         targetPos.set(18, 14, 18);
         targetLook.set(0, 2, 0);
         break;
       case 'interior':
-        // 透視大堂中空剖切
         targetPos.set(0, 15, 15);
         targetLook.set(0, 3, 0);
         break;
       case 'hall':
-        // 舞台看台仰望視角
         targetPos.set(0, 4.5, -7.5);
         targetLook.set(0, 2.5, 4);
         break;
       case 'hybrid':
       default:
-        // 科技感對角俯瞰視角
         targetPos.set(14, 9, 14);
         targetLook.set(0, 2, 0);
         break;
@@ -240,6 +236,7 @@ const CameraController = ({
 };
 
 // --- 3D 樓層組件 ---
+// 採用純淨的原生 3D Group 控制，不包含 Html Portal，徹底根絕 React Reconciler 崩潰
 const FloorBlock = ({ 
   floorNum, 
   yOffset, 
@@ -283,7 +280,6 @@ const FloorBlock = ({
 };
 
 // --- 3D 裝飾細節元件 ---
-// 用於提供 3D 模型內部的實體感，防止模型過於空洞，完美貼合夏凱納空間平面特徵
 const FloorInteriorDecoration = ({ floor }: { floor: FloorKey }) => {
   if (floor === '1F') {
     return (
@@ -388,6 +384,7 @@ interface HotspotRenderProps extends HotspotProps {
 }
 
 const Hotspot3D = ({ position, color, visible, onClick }: HotspotRenderProps) => {
+  // 純 3D 原生幾何結構，確保渲染樹極其穩定，不使用 Html Portal 元件
   return (
     <group position={position} visible={visible}>
       {/* 外部呼吸光暈 */}
@@ -438,14 +435,6 @@ export default function App() {
   const offset3F = isExploded ? baseSpacing * 2 : 3.0;
   const offset4F = isExploded ? baseSpacing * 3 : 4.5;
 
-  // 過濾當前需要顯示的 Hotspots
-  const activeHotspots = useMemo(() => {
-    return HOTSPOTS_DB.filter(h => {
-      if (mode === 'all') return true;
-      return h.kind === mode;
-    });
-  }, [mode]);
-
   if (!mounted) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-950 font-sans text-white">
@@ -483,7 +472,7 @@ export default function App() {
             <Compass className="h-3.5 w-3.5 text-amber-400" />
             場景視角控制
           </h3>
-          <div className="grid grid-columns grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {[
               ['hybrid', '對角俯瞰 📐'],
               ['exterior', '環繞外牆 🏢'],
@@ -506,40 +495,57 @@ export default function App() {
           </div>
         </div>
 
-        {/* 2D HUD 指示圖例 */}
+        {/* 2D HUD 指示與樓層層級對照表 (原本 3D 內的 1F~4F 標記已完美整合至此，避開 WebGL 崩潰) */}
         <div className="pointer-events-auto rounded-3xl border border-slate-700/60 bg-slate-900/80 p-5 shadow-2xl backdrop-blur-md">
           <h3 className="text-xs font-semibold text-slate-400 tracking-wider mb-3 flex items-center gap-1.5 uppercase border-b border-slate-800 pb-2">
             <Layers className="h-3.5 w-3.5 text-purple-400" />
-            全息圖層標示
+            全息圖層與標示對照
           </h3>
           <div className="flex flex-col gap-2.5 text-xs font-medium text-slate-300">
             <div className="flex items-center justify-between">
+              <span className="text-amber-400 font-bold">4F 行政看台層</span>
+              <span className="text-[10px] text-slate-400">Y 軸偏移: {offset4F.toFixed(1)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-400 font-bold">3F 主會堂看台層</span>
+              <span className="text-[10px] text-slate-400">Y 軸偏移: {offset3F.toFixed(1)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-400 font-bold">2F 主會堂平面層</span>
+              <span className="text-[10px] text-slate-400">Y 軸偏移: {offset2F.toFixed(1)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-400 font-bold">1F 共享大廳地基</span>
+              <span className="text-[10px] text-slate-400">Y 軸偏移: 0.0 (錨定)</span>
+            </div>
+            <div className="h-px bg-slate-800 my-1" />
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="h-3 w-3 rounded-full bg-[#a855f7] shadow-[0_0_8px_#a855f7]"></span>
-                <span>男女洗手間</span>
+                <span>男女洗手洗手間</span>
               </div>
-              <span className="text-[10px] text-slate-500">1F / 2F / 3F / 4F</span>
+              <span className="text-[10px] text-slate-500">1F ~ 4F 跨層</span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="h-3 w-3 rounded-full bg-[#fbbf24] shadow-[0_0_8px_#fbbf24]"></span>
-                <span>物資 / 奉獻箱 / 集合點</span>
+                <span>奉獻箱 / 招待資材 / 交誼</span>
               </div>
-              <span className="text-[10px] text-slate-500">1F / 2F / 3F</span>
+              <span className="text-[10px] text-slate-500">營運節點</span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="h-3 w-3 rounded-full bg-[#dc2626] shadow-[0_0_8px_#dc2626]"></span>
                 <span>應急 AED / 消防栓</span>
               </div>
-              <span className="text-[10px] text-slate-500 text-red-400/80">1F / 2F 關鍵安全</span>
+              <span className="text-[10px] text-slate-500 text-red-400/80">核心消防</span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="h-3 w-3 rounded-full bg-[#ffffff] shadow-[0_0_8px_#ffffff]"></span>
-                <span>高空避難緩降機</span>
+                <span>避難緩降機</span>
               </div>
-              <span className="text-[10px] text-slate-500">3F / 4F 落地窗邊</span>
+              <span className="text-[10px] text-slate-500">落地窗邊</span>
             </div>
           </div>
         </div>
