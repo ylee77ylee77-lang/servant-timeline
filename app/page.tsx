@@ -1,845 +1,1460 @@
-'use client';
+"use client";
 
-import React, { Suspense, useEffect, useRef, useState, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
-import * as THREE from 'three';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Layers, 
+  Check, 
+  Clock, 
+  MapPin, 
+  User, 
+  BarChart2, 
+  ListTodo,
+  AlertCircle,
   Settings, 
-  ShieldAlert, 
-  Info, 
-  Sparkles, 
-  X, 
-  RotateCcw, 
-  Compass, 
-  Activity,
+  Plus,      
   Trash2,
-  MapPin,
-  HeartHandshake
+  X,        
+  Info,
+  Sparkles,
+  HeartHandshake,
+  Edit,
+  Lock,
+  Unlock,
+  GripVertical,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
-// 自訂的線性插值函數，確保跨版本 WebGL 穩定度
-const lerp = (start: number, end: number, t: number) => start * (1 - t) + end * t;
+// 1. 您的專屬雲端鑰匙 (維持原樣)
+const supabaseUrl = 'https://mhltzoirtzoiinuaauwy.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1obHR6b2lydHpvaWludWFhdXd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Njk5NTcsImV4cCI6MjA5NzM0NTk1N30.eS_ZJlyDGuAMjBmAA8gxHcSgjxgzm9PdID8Zolvxdtc';
 
-// --- 型別與資料結構定義 ---
-type Mode = 'service' | 'safety' | 'all';
-type ViewMode = 'hybrid' | 'exterior' | 'interior' | 'hall';
-type FloorKey = '1F' | '2F' | '3F' | '4F' | '主會堂';
+const hasValidKeys = supabaseUrl.startsWith('http') && supabaseAnonKey.startsWith('eyJ');
 
-interface HotspotData {
-  id: string;
-  floor: FloorKey;
-  position: [number, number, number];
-  color: string;
-  label: string;
-  kind: 'service' | 'safety';
-  desc: string;
-}
+// 使用原生 fetch 方法連線雲端 (維持原樣)
+const supabaseFetch = async (endpoint: string, method = 'GET', body: any = null) => {
+  if (!hasValidKeys) throw new Error("Missing keys");
+  const headers: any = {
+    'apikey': supabaseAnonKey,
+    'Authorization': `Bearer ${supabaseAnonKey}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+  };
+  const options: RequestInit = { method, headers };
+  if (body) options.body = JSON.stringify(body);
 
-// --- 夏凱納實測 Hotspots 完整資料庫 ---
-const HOTSPOTS_DB: HotspotData[] = [
-  // --- 1F 共享大廳及周邊 ---
-  {
-    id: '1f-wc',
-    floor: '1F',
-    position: [2, 0.8, -2],
-    color: '#a855f7', // 青春紫
-    label: '男女洗手間',
-    kind: 'service',
-    desc: '位於 1F 共享空間後側通道，備有寬敞的男、女洗手間區域。'
-  },
-  {
-    id: '1f-recycle',
-    floor: '1F',
-    position: [3, 0.8, 1],
-    color: '#fbbf24', // 淡金色
-    label: '不鏽鋼分類回收',
-    kind: 'service',
-    desc: '設於 1F 大廳手扶梯與地下室樓梯旁，提供便捷的垃圾分類與資源回收點。'
-  },
-  {
-    id: '1f-lobby-sofa',
-    floor: '1F',
-    position: [-1.5, 0.8, -2],
-    color: '#fbbf24',
-    label: '落地窗交誼沙發區',
-    kind: 'service',
-    desc: '在大片採光落地玻璃窗旁，配有舒適的橘、灰雙色長椅及茶几，供同工與新友接待休憩。'
-  },
-  {
-    id: '1f-desk',
-    floor: '1F',
-    position: [-3.5, 0.8, 1.5],
-    color: '#fbbf24',
-    label: '島型前台保全台',
-    kind: 'service',
-    desc: '1F 大門進場最核心的島型立體保全服務台，設有圓角設計，配備訪客登記與社區諮詢。'
-  },
-  {
-    id: '1f-aed',
-    floor: '1F',
-    position: [-2.5, 0.8, 3],
-    color: '#dc2626', // 消防紅
-    label: '1F 大廳 AED 裝置',
-    kind: 'safety',
-    desc: '【實測新發現】位於一樓大門旁、緊鄰落地窗玻璃處，配置直立式自動體外心臟電擊去顫器。'
-  },
-  {
-    id: '1f-fire',
-    floor: '1F',
-    position: [4, 0.8, 0],
-    color: '#dc2626',
-    label: '1F 牆體消火栓',
-    kind: 'safety',
-    desc: '位於 1F 手扶梯下側白牆轉角，配置標準消火栓箱與高壓手提式滅火器。'
-  },
-
-  // --- 2F 主會堂低層及大堂 ---
-  {
-    id: '2f-wc',
-    floor: '2F',
-    position: [-3, 0.8, 3],
-    color: '#a855f7',
-    label: '女廁與無障礙廁所',
-    kind: 'service',
-    desc: '2F 公共走道大堂西側，備有女廁與無障礙洗手間，保障行動不便會友的使用需求。'
-  },
-  {
-    id: '2f-box',
-    floor: '2F',
-    position: [0, 0.8, 4],
-    color: '#fbbf24',
-    label: '大會堂入口奉獻箱',
-    kind: 'service',
-    desc: '座落於 2F 主會堂雙開玻璃管制大門旁、木質弧形裝飾牆前，方便會友主日奉獻。'
-  },
-  {
-    id: '2f-fire-wall',
-    floor: '2F',
-    position: [4, 0.8, -4],
-    color: '#dc2626',
-    label: '北 1 號梯間消防栓',
-    kind: 'safety',
-    desc: '2F 北側 1 號逃生梯出口旁，設有嵌牆式消防箱與高頻緊急警報喇叭。'
-  },
-  {
-    id: '2f-aed',
-    floor: '2F',
-    position: [2, 0.8, 2],
-    color: '#dc2626',
-    label: '3 號電梯旁 AED 裝置',
-    kind: 'safety',
-    desc: '精確座落於 2F 大堂 3 號電梯旁的流線型木牆面上，配有發光外盒與語音警報引導。'
-  },
-
-  // --- 3F 主會堂中層看台及大堂 ---
-  {
-    id: '3f-wc-men',
-    floor: '3F',
-    position: [-3, 0.8, 3],
-    color: '#a855f7',
-    label: '3F 大堂男洗手間',
-    kind: 'service',
-    desc: '3F 大廳走道旁，本樓層僅配置男洗手間（無女廁），請同工與會友留意。'
-  },
-  {
-    id: '3f-wooden-cabinet',
-    floor: '3F',
-    position: [0, 0.8, -4],
-    color: '#fbbf24',
-    label: '電梯對面招待新人櫃',
-    kind: 'service',
-    desc: '精確座落於 3F 客梯正對面之弧形木飾牆內，為招待同工存放新人迎賓禮、宣傳 DM 的核心資材櫃。'
-  },
-  {
-    id: '3f-welcome-desk',
-    floor: '3F',
-    position: [3.5, 0.8, -2],
-    color: '#fbbf24',
-    label: '大落地窗招待集合桌',
-    kind: 'service',
-    desc: '座落於 3F 大落地窗面外側，配有長條形接待桌與三座蔚藍色招待物資置物櫃。'
-  },
-  {
-    id: '3f-escape-lever',
-    floor: '3F',
-    position: [4, 0.8, 4],
-    color: '#ffffff', // 純白避難光點
-    label: '3F 落地窗避難緩降機',
-    kind: 'safety',
-    desc: '靠近大堂面外落地窗之特定開窗格邊緣，配備標準鋼製避難緩降器具與垂掛繩索。'
-  },
-
-  // --- 4F 行政區及最上層看台 ---
-  {
-    id: '4f-wc-women',
-    floor: '4F',
-    position: [-2, 0.5, 2],
-    color: '#a855f7',
-    label: '行政走廊女洗手間',
-    kind: 'service',
-    desc: '位於 4F 行政辦公走廊最深處通道內，專供行政同工與會友使用之女洗手間。'
-  },
-  {
-    id: '4f-escape-lever',
-    floor: '4F',
-    position: [3, 0.5, -3],
-    color: '#ffffff',
-    label: '4F 高空避難緩降機',
-    kind: 'safety',
-    desc: '位於 4F 東側大面高空採光窗旁，裝設高空緊急逃生緩降固定鋼架與金屬器具。'
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/${endpoint}`, options);
+    if (!res.ok) {
+      let errMessage = res.statusText;
+      try {
+        const errData = await res.json();
+        if (errData.message) errMessage = errData.message;
+      } catch (e) {}
+      throw new Error(errMessage);
+    }
+    if (method === 'DELETE') return true;
+    return await res.json();
+  } catch (err: any) {
+    throw new Error(err.message || "網路連線失敗，或遭到瀏覽器阻擋");
   }
-];
-
-// --- 鏡頭與 OrbitControls 控制器 ---
-const CameraController = ({ 
-  viewMode, 
-  controlsRef 
-}: { 
-  viewMode: ViewMode; 
-  controlsRef: React.RefObject<any>; 
-}) => {
-  useFrame((state) => {
-    const cam = state.camera;
-    const targetPos = new THREE.Vector3();
-    const targetLook = new THREE.Vector3(0, 2, 0);
-
-    switch (viewMode) {
-      case 'exterior':
-        targetPos.set(18, 14, 18);
-        targetLook.set(0, 2, 0);
-        break;
-      case 'interior':
-        targetPos.set(0, 15, 15);
-        targetLook.set(0, 3, 0);
-        break;
-      case 'hall':
-        targetPos.set(0, 4.5, -7.5);
-        targetLook.set(0, 2.5, 4);
-        break;
-      case 'hybrid':
-      default:
-        targetPos.set(14, 9, 14);
-        targetLook.set(0, 2, 0);
-        break;
-    }
-
-    cam.position.lerp(targetPos, 0.05);
-    if (controlsRef.current) {
-      controlsRef.current.target.lerp(targetLook, 0.05);
-      controlsRef.current.update();
-    }
-  });
-
-  return null;
 };
 
-// --- 3D 樓層組件 ---
-// 採用純淨的原生 3D Group 控制，不包含 Html Portal，徹底根絕 React Reconciler 崩潰
-const FloorBlock = ({ 
-  floorNum, 
-  yOffset, 
-  baseHeight, 
-  children, 
-  isExploded 
-}: FloorBlockProps) => {
-  const groupRef = useRef<THREE.Group>(null);
-  const matRef = useRef<THREE.MeshStandardMaterial>(null);
-
-  useFrame(() => {
-    if (groupRef.current) {
-      groupRef.current.position.y = lerp(groupRef.current.position.y, yOffset, 0.1);
-    }
-    if (matRef.current) {
-      const targetOpacity = isExploded ? 0.25 : 0.8;
-      matRef.current.opacity = lerp(matRef.current.opacity, targetOpacity, 0.1);
-    }
-  });
-
-  return (
-    <group ref={groupRef}>
-      {/* 樓層主體外殼 (金輪白半透明質感) */}
-      <mesh position={[0, 0, 0]}>
-        <boxGeometry args={[10, baseHeight, 10]} />
-        <meshStandardMaterial 
-          ref={matRef}
-          color="#f1f5f9" // 金輪白
-          transparent={true}
-          opacity={0.8}
-          roughness={0.2}
-          metalness={0.1}
-          wireframe={isExploded}
-        />
-      </mesh>
-      
-      {/* 該樓層的 Hotspots 及 3D 結構模擬點 */}
-      {children}
-    </group>
-  );
-};
-
-// --- 3D 裝飾細節元件 ---
-const FloorInteriorDecoration = ({ floor }: { floor: FloorKey }) => {
-  if (floor === '1F') {
-    return (
-      <group>
-        {/* 島型前台 */}
-        <mesh position={[-3.5, -0.4, 1.5]}>
-          <boxGeometry args={[1.2, 0.6, 2.2]} />
-          <meshStandardMaterial color="#64748b" roughness={0.8} />
-        </mesh>
-        {/* 沙發交誼桌 */}
-        <mesh position={[-1.5, -0.5, -2]}>
-          <cylinderGeometry args={[0.8, 0.8, 0.3, 16]} />
-          <meshStandardMaterial color="#f97316" />
-        </mesh>
-        {/* 不鏽鋼垃圾桶 */}
-        <mesh position={[3, -0.4, 1]}>
-          <cylinderGeometry args={[0.2, 0.2, 0.7, 12]} />
-          <meshStandardMaterial color="#94a3b8" metalness={0.8} />
-        </mesh>
-      </group>
-    );
-  }
-
-  if (floor === '2F') {
-    return (
-      <group position={[0, 0, 0]}>
-        {/* 半圓弧大舞台 */}
-        <mesh position={[0, -0.6, -3]}>
-          <boxGeometry args={[8, 0.2, 3]} />
-          <meshStandardMaterial color="#1e1b4b" roughness={0.5} />
-        </mesh>
-        {/* 舞台 LED 背景發光牆 */}
-        <mesh position={[0, 0.4, -4.6]}>
-          <boxGeometry args={[9, 2.0, 0.15]} />
-          <meshStandardMaterial color="#1e293b" emissive="#1e1b4b" emissiveIntensity={0.5} />
-        </mesh>
-        {/* 發光金黃色十字架 */}
-        <group position={[0, 0.7, -4.5]}>
-          <mesh position={[0, 0.3, 0]}>
-            <boxGeometry args={[0.12, 1.6, 0.05]} />
-            <meshBasicMaterial color="#fbbf24" />
-          </mesh>
-          <mesh position={[0, 0.6, 0]}>
-            <boxGeometry args={[1.0, 0.12, 0.05]} />
-            <meshBasicMaterial color="#fbbf24" />
-          </mesh>
-        </group>
-        {/* 2F 主會堂珊瑚紅放射狀座席模擬 */}
-        <group position={[0, -0.5, 1.5]}>
-          <mesh position={[-2.2, 0, 0]}>
-            <boxGeometry args={[1.8, 0.3, 2]} />
-            <meshStandardMaterial color="#dc2626" roughness={0.9} />
-          </mesh>
-          <mesh position={[2.2, 0, 0]}>
-            <boxGeometry args={[1.8, 0.3, 2]} />
-            <meshStandardMaterial color="#dc2626" roughness={0.9} />
-          </mesh>
-        </group>
-      </group>
-    );
-  }
-
-  if (floor === '3F') {
-    return (
-      <group>
-        {/* 3F 招待團隊新人木櫃 */}
-        <mesh position={[0, -0.3, -4.5]}>
-          <boxGeometry args={[2.0, 0.8, 0.5]} />
-          <meshStandardMaterial color="#b45309" roughness={0.9} />
-        </mesh>
-        {/* 3F 後側音/光控中控台 */}
-        <mesh position={[0, -0.3, 3]}>
-          <boxGeometry args={[2.5, 0.6, 1.0]} />
-          <meshStandardMaterial color="#334155" roughness={0.4} />
-        </mesh>
-      </group>
-    );
-  }
-
-  if (floor === '4F') {
-    return (
-      <group>
-        {/* 行政區白屏風 / 辦公桌模擬 */}
-        <mesh position={[-3, -0.2, -2]}>
-          <boxGeometry args={[2, 0.6, 1.5]} />
-          <meshStandardMaterial color="#e2e8f0" />
-        </mesh>
-        <mesh position={[-3, 0.4, -2.7]}>
-          <boxGeometry args={[2, 0.6, 0.05]} />
-          <meshStandardMaterial color="#38bdf8" transparent opacity={0.6} />
-        </mesh>
-      </group>
-    );
-  }
-
-  return null;
-};
-
-// --- Hotspot 點擊指示元件 ---
-interface HotspotRenderProps extends HotspotProps {
-  onClick: () => void;
-}
-
-const Hotspot3D = ({ position, color, visible, onClick }: HotspotRenderProps) => {
-  // 純 3D 原生幾何結構，確保渲染樹極其穩定，不使用 Html Portal 元件
-  return (
-    <group position={position} visible={visible}>
-      {/* 外部呼吸光暈 */}
-      <mesh onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}>
-        <sphereGeometry args={[0.34, 16, 16]} />
-        <meshBasicMaterial 
-          color={color} 
-          transparent={true} 
-          opacity={0.3} 
-        />
-      </mesh>
-      {/* 核心亮點 */}
-      <mesh>
-        <sphereGeometry args={[0.2, 16, 16]} />
-        <meshStandardMaterial 
-          color={color} 
-          emissive={color} 
-          emissiveIntensity={3} 
-        />
-      </mesh>
-    </group>
-  );
-};
-
-// --- 主裝載元件 ---
 export default function App() {
-  const [mounted, setMounted] = useState<boolean>(false);
-  const [isExploded, setIsExploded] = useState<boolean>(false);
-  const [explosionDistance, setExplosionDistance] = useState<number>(50);
-  const [mode, setMode] = useState<Mode>('all');
-  const [viewMode, setViewMode] = useState<ViewMode>('hybrid');
-  const [selectedHotspot, setSelectedHotspot] = useState<HotspotData | null>(null);
+  const [nodes, setNodes] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState("");
+  const [activeTab, setActiveTab] = useState('timeline');
+  const [currentTime, setCurrentTime] = useState("");
+  const activeNodeRef = useRef<HTMLDivElement>(null);
 
-  const controlsRef = useRef<any>(null);
+  const [detailModal, setDetailModal] = useState<{isOpen: boolean, title: string, details: string}>({isOpen: false, title: '', details: ''});
 
-  // 確保只在瀏覽器端渲染 Canvas，防止 Next.js SSR 導致 window / WebGL 報錯
+  const [currentService, setCurrentService] = useState('主一堂'); 
+  const serviceOptions = ['六晚崇', '主一堂', '主二堂'];
+  
+  const hasManuallySwitchedRef = useRef(false);
+
+  // --- 權限鎖定相關狀態 ---
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const ADMIN_PASSWORD = '1234'; // 管理員驗證密碼
+
+  // --- 自訂精美 Modal 提示框狀態 (取代冷冰冰的 alert & confirm) ---
+  const [customAlert, setCustomAlert] = useState<{isOpen: boolean, message: string}>({ isOpen: false, message: "" });
+  const [customConfirm, setCustomConfirm] = useState<{isOpen: boolean, message: string, onConfirm: () => void}>({ isOpen: false, message: "", onConfirm: () => {} });
+
+  // --- 管理與編輯任務狀態 ---
+  const [isAdding, setIsAdding] = useState(false);
+  const [newNode, setNewNode] = useState({
+    service_type: '主一堂', 
+    time: '08:00',
+    title: '',
+    assignee: '',
+    location: '',
+    details: ''
+  });
+
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    service_type: '主一堂',
+    time: '08:00',
+    title: '',
+    assignee: '',
+    location: '',
+    details: ''
+  });
+
+  // --- 行內即時修改（Inline Editing）狀態 ---
+  const [activeInlineEdit, setActiveInlineEdit] = useState<{ type: 'node' | 'checklist', id: string, field: string } | null>(null);
+  const [inlineEditValue, setInlineEditValue] = useState("");
+
+  // --- 展開折疊管理確認項目狀態 (Accordion) ---
+  const [expandedChecklistNodeId, setExpandedChecklistNodeId] = useState<string | null>(null);
+  const [newChecklistItem, setNewChecklistItem] = useState({ text: "", details: "" });
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+
+  // 確保時鐘即時更新，並加入自動切換邏輯 (維持原樣)
   useEffect(() => {
-    setMounted(true);
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+
+      if (!hasManuallySwitchedRef.current) {
+        const day = now.getDay(); 
+        const timeValue = now.getHours() + now.getMinutes() / 60; 
+
+        if (day === 6) {
+          setCurrentService('六晚崇');
+        } else if (day === 0) {
+          if (timeValue < 10.5) { 
+            setCurrentService('主一堂');
+          } else { 
+            setCurrentService('主二堂');
+          }
+        }
+      }
+    };
+    
+    updateTime(); 
+    const timer = setInterval(updateTime, 60000); 
+    return () => clearInterval(timer);
   }, []);
 
-  // 1F ~ 4F 抽屜位移公式
-  const baseSpacing = 4.2 * (explosionDistance / 50);
-  const offset1F = 0;
-  const offset2F = isExploded ? baseSpacing * 1 : 1.5;
-  const offset3F = isExploded ? baseSpacing * 2 : 3.0;
-  const offset4F = isExploded ? baseSpacing * 3 : 4.5;
+  // 背景自動同步雲端資料，改由 sort_order 升序排序
+  const fetchData = async (isBackgroundSync = false) => {
+    try {
+      if (!isBackgroundSync) setFetchError("");
+      const nodesData = await supabaseFetch('timeline_nodes?order=time.asc');
+      const checklistData = await supabaseFetch('checklist_items?order=sort_order.asc,id.asc');
 
-  if (!mounted) {
+      if (nodesData && checklistData) {
+        const formattedNodes = nodesData.map((node: any) => ({
+          ...node,
+          checklist: checklistData.filter((c: any) => c.node_id === node.id)
+        }));
+        setNodes(formattedNodes);
+      }
+    } catch (error: any) {
+      console.error("讀取資料失敗:", error);
+      if (!isBackgroundSync) setFetchError(error.message);
+    } finally {
+      if (!isBackgroundSync) setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (hasValidKeys) {
+      fetchData(); 
+      const syncTimer = setInterval(() => {
+        fetchData(true); 
+      }, 10000);
+      return () => clearInterval(syncTimer); 
+    } else {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const filteredNodes = nodes.filter(n => n.service_type === currentService);
+  const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
+
+  // --- 智慧跟隨當下時鐘判定 activeNodeId ---
+  const timeToMinutes = (tStr: string) => {
+    if (!tStr) return 0;
+    const [h, m] = tStr.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  const getActiveNodeIdByTime = () => {
+    if (filteredNodes.length === 0) return null;
+    const currentMinutes = timeToMinutes(currentTime);
+
+    // 依據時間進行排序升序排列
+    const sortedNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+
+    // 1. 如果當前時間還沒到第一個任務的時間，預設第一個任務進行中
+    if (currentMinutes < timeToMinutes(sortedNodes[0].time)) {
+      return sortedNodes[0].id;
+    }
+
+    // 2. 尋找當前時間介於哪個區間
+    for (let i = 0; i < sortedNodes.length; i++) {
+      const nodeMin = timeToMinutes(sortedNodes[i].time);
+      const nextNodeMin = sortedNodes[i + 1] ? timeToMinutes(sortedNodes[i + 1].time) : Infinity;
+
+      if (currentMinutes >= nodeMin && currentMinutes < nextNodeMin) {
+        return sortedNodes[i].id;
+      }
+    }
+
+    // 3. 超過最後一個任務時間，則最後一個進行中
+    return sortedNodes[sortedNodes.length - 1].id;
+  };
+
+  const activeNodeId = getActiveNodeIdByTime();
+
+  // 當 activeNodeId 隨著時間改變或切換場次時，全自動平滑捲動到該節點
+  useEffect(() => {
+    if (!isLoading && !fetchError && filteredNodes.length > 0 && activeTab === 'timeline' && activeNodeRef.current) {
+      setTimeout(() => {
+        activeNodeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 300);
+    }
+  }, [activeTab, isLoading, fetchError, filteredNodes.length, currentService, activeNodeId]);
+
+  const toggleChecklist = async (nodeId: string, checkId: string) => {
+    const nodeToUpdate = nodes.find(n => n.id === nodeId);
+    const itemToUpdate = nodeToUpdate?.checklist.find((c: any) => c.id === checkId);
+    if (!itemToUpdate) return;
+
+    const willBeCompleted = !itemToUpdate.is_completed;
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const newCompletedAt = willBeCompleted ? timeStr : null;
+
+    setNodes(prev => prev.map(node => {
+      if (node.id !== nodeId) return node;
+      return {
+        ...node,
+        checklist: node.checklist.map((item: any) => 
+          item.id === checkId 
+            ? { ...item, is_completed: willBeCompleted, completed_at: newCompletedAt } 
+            : item
+        )
+      };
+    }));
+
+    try {
+      if (!hasValidKeys) return;
+      await supabaseFetch(`checklist_items?id=eq.${checkId}`, 'PATCH', {
+        is_completed: willBeCompleted,
+        completed_at: newCompletedAt
+      });
+      fetchData(true);
+    } catch (error) {
+      console.error("更新資料庫失敗:", error);
+      fetchData(true); 
+    }
+  };
+
+  const handleAddNode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNode.title || !newNode.time) {
+      setCustomAlert({ isOpen: true, message: "請務必填寫時間與標題！" });
+      return;
+    }
+    setIsAdding(true);
+    const newId = 'n_' + Math.random().toString(36).substr(2, 9);
+    try {
+      await supabaseFetch('timeline_nodes', 'POST', {
+        id: newId,
+        service_type: newNode.service_type,
+        time: newNode.time,
+        title: newNode.title,
+        assignee: newNode.assignee || '未指定',
+        location: newNode.location || '未指定',
+        details: newNode.details || ''
+      });
+      setNewNode({ service_type: currentService, time: '08:00', title: '', assignee: '', location: '', details: '' });
+      await fetchData(true);
+      setCustomAlert({ isOpen: true, message: "任務建立成功！" });
+    } catch (error: any) {
+      setCustomAlert({ isOpen: true, message: "新增失敗：" + error.message });
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  // 即時編輯儲存功能 (擴充管理功能，同步更新 Supabase)
+  const handleUpdateNode = async (id: string) => {
+    if (!editForm.title || !editForm.time) {
+      setCustomAlert({ isOpen: true, message: "請填寫時間與標題！" });
+      return;
+    }
+    try {
+      await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'PATCH', {
+        service_type: editForm.service_type,
+        time: editForm.time,
+        title: editForm.title,
+        assignee: editForm.assignee || '未指定',
+        location: editForm.location || '未指定',
+        details: editForm.details || ''
+      });
+      setEditingNodeId(null);
+      await fetchData(true);
+      setCustomAlert({ isOpen: true, message: "任務編輯成功，已同步至雲端！" });
+    } catch (error: any) {
+      setCustomAlert({ isOpen: true, message: "更新雲端失敗：" + error.message });
+    }
+  };
+
+  const startEditing = (node: any) => {
+    setEditingNodeId(node.id);
+    setEditForm({
+      service_type: node.service_type,
+      time: node.time,
+      title: node.title,
+      assignee: node.assignee,
+      location: node.location,
+      details: node.details || ''
+    });
+  };
+
+  const handleDeleteNode = async (id: string, title: string) => {
+    setCustomConfirm({
+      isOpen: true,
+      message: `確定要刪除「${title}」這個任務嗎？\n此動作將會一併刪除底下的所有 Checklist！`,
+      onConfirm: async () => {
+        try {
+          await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'DELETE');
+          await fetchData(true);
+          setCustomAlert({ isOpen: true, message: "任務已成功刪除！" });
+        } catch (error: any) {
+          setCustomAlert({ isOpen: true, message: "刪除失敗：" + error.message });
+        }
+      }
+    });
+  };
+
+  // --- 行內即時修改（Inline Editing）核心邏輯 ---
+  const handleInlineClick = (type: 'node' | 'checklist', id: string, field: string, currentValue: string) => {
+    if (!isAdminUnlocked) return; // 沒密碼解鎖就當作防誤觸唯讀狀態
+    setActiveInlineEdit({ type, id, field });
+    setInlineEditValue(currentValue);
+  };
+
+  const handleInlineBlur = async () => {
+    if (!activeInlineEdit) return;
+    const { type, id, field } = activeInlineEdit;
+    const updatedValue = inlineEditValue.trim();
+
+    // 先在前端 UI 即時反應
+    if (type === 'node') {
+      setNodes(prev => prev.map(node => {
+        if (node.id !== id) return node;
+        return { ...node, [field]: updatedValue };
+      }));
+    } else if (type === 'checklist') {
+      setNodes(prev => prev.map(node => ({
+        ...node,
+        checklist: node.checklist.map((item: any) => 
+          item.id === id ? { ...item, [field]: updatedValue } : item
+        )
+      })));
+    }
+
+    setActiveInlineEdit(null);
+
+    // 同步到 Supabase 雲端
+    try {
+      if (type === 'node') {
+        await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
+      } else if (type === 'checklist') {
+        await supabaseFetch(`checklist_items?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
+      }
+      fetchData(true); // 背景安靜同步
+    } catch (err: any) {
+      console.error("行內修改同步失敗:", err);
+      setCustomAlert({ isOpen: true, message: "行內即時同步失敗，正在復原最新雲端數據..." });
+      fetchData(true);
+    }
+  };
+
+  // --- Checklist 拖曳與排序核心功能 (Drag & Drop) ---
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    setDraggedItemId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (e: React.DragEvent, nodeId: string, targetId: string) => {
+    e.preventDefault();
+    if (!draggedItemId || draggedItemId === targetId) return;
+
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node || !node.checklist) return;
+
+    const items = [...node.checklist].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const draggedIndex = items.findIndex(item => item.id === draggedItemId);
+    const targetIndex = items.findIndex(item => item.id === targetId);
+
+    if (draggedIndex === -1 || targetIndex === -1) return;
+
+    // 搬移
+    const [removed] = items.splice(draggedIndex, 1);
+    items.splice(targetIndex, 0, removed);
+
+    // 重新編排 sort_order
+    const updatedItems = items.map((item, index) => ({
+      ...item,
+      sort_order: index
+    }));
+
+    // 本地預先渲染
+    setNodes(prev => prev.map(n => {
+      if (n.id !== nodeId) return n;
+      return { ...n, checklist: updatedItems };
+    }));
+
+    setDraggedItemId(null);
+
+    // 依序寫入雲端
+    try {
+      for (const item of updatedItems) {
+        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
+          sort_order: item.sort_order
+        });
+      }
+      fetchData(true);
+    } catch (err) {
+      console.error("更新排序失敗:", err);
+    }
+  };
+
+  // 提供給手機端的箭頭一鍵移位功能 (完美補位 HTML5 Drag&Drop)
+  const moveChecklistItem = async (nodeId: string, index: number, direction: 'up' | 'down') => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node || !node.checklist) return;
+
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= node.checklist.length) return;
+
+    const items = [...node.checklist].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    
+    // 交換
+    const temp = items[index];
+    items[index] = items[targetIndex];
+    items[targetIndex] = temp;
+
+    // 重新排序
+    const updatedItems = items.map((item, idx) => ({
+      ...item,
+      sort_order: idx
+    }));
+
+    // 本地預先渲染
+    setNodes(prev => prev.map(n => {
+      if (n.id !== nodeId) return n;
+      return { ...n, checklist: updatedItems };
+    }));
+
+    // 雲端同步
+    try {
+      for (const item of updatedItems) {
+        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
+          sort_order: item.sort_order
+        });
+      }
+      fetchData(true);
+    } catch (err) {
+      console.error("箭頭移動更新失敗:", err);
+    }
+  };
+
+  // --- 新增、刪除 Checklist 子項目邏輯 ---
+  const handleAddChecklistItem = async (nodeId: string) => {
+    if (!newChecklistItem.text.trim()) {
+      setCustomAlert({ isOpen: true, message: "請輸入確認項目的標題！" });
+      return;
+    }
+
+    const node = nodes.find(n => n.id === nodeId);
+    const maxOrder = node?.checklist && node.checklist.length > 0 
+      ? Math.max(...node.checklist.map((c: any) => c.sort_order || 0)) 
+      : -1;
+
+    const newItemId = 'c_' + Math.random().toString(36).substr(2, 9);
+    try {
+      await supabaseFetch('checklist_items', 'POST', {
+        id: newItemId,
+        node_id: nodeId,
+        text: newChecklistItem.text.trim(),
+        details: newChecklistItem.details.trim() || '',
+        is_completed: false,
+        sort_order: maxOrder + 1
+      });
+      setNewChecklistItem({ text: "", details: "" });
+      fetchData(true);
+    } catch (err: any) {
+      setCustomAlert({ isOpen: true, message: "新增確認項目失敗：" + err.message });
+    }
+  };
+
+  const handleDeleteChecklistItem = async (itemId: string) => {
+    setCustomConfirm({
+      isOpen: true,
+      message: "確定要刪除這筆任務清單細項嗎？",
+      onConfirm: async () => {
+        try {
+          await supabaseFetch(`checklist_items?id=eq.${itemId}`, 'DELETE');
+          fetchData(true);
+        } catch (err: any) {
+          setCustomAlert({ isOpen: true, message: "刪除清單細項失敗：" + err.message });
+        }
+      }
+    });
+  };
+
+  // 驗證管理密碼並進入管理面板
+  const handleVerifyPassword = () => {
+    if (passwordInput === ADMIN_PASSWORD) {
+      setIsAdminUnlocked(true);
+      setShowPasswordModal(false);
+      setActiveTab('admin');
+      setPasswordError("");
+      setPasswordInput("");
+    } else {
+      setPasswordError("密碼錯誤，請重新輸入！");
+      setPasswordInput("");
+    }
+  };
+
+  // 渲染行內即時編輯輸入欄位
+  const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
+    const isEditing = activeInlineEdit?.type === type && activeInlineEdit?.id === id && activeInlineEdit?.field === field;
+
+    if (!isAdminUnlocked) {
+      return <span className={styleClass}>{currentValue || "(未填寫)"}</span>;
+    }
+
+    if (isEditing) {
+      if (inputType === 'textarea') {
+        return (
+          <textarea
+            value={inlineEditValue}
+            onChange={e => setInlineEditValue(e.target.value)}
+            onBlur={handleInlineBlur}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleInlineBlur();
+              }
+            }}
+            className="border-2 border-[#6D55A3] rounded-lg p-2 bg-white text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 w-full resize-none"
+            autoFocus
+          />
+        );
+      }
+      return (
+        <input
+          type={inputType}
+          value={inlineEditValue}
+          onChange={e => setInlineEditValue(e.target.value)}
+          onBlur={handleInlineBlur}
+          onKeyDown={e => {
+            if (e.key === 'Enter') handleInlineBlur();
+            if (e.key === 'Escape') setActiveInlineEdit(null);
+          }}
+          className="border-2 border-[#6D55A3] rounded-lg px-2 py-1 bg-white text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 w-full"
+          autoFocus
+        />
+      );
+    }
+
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-950 font-sans text-white">
-        <Activity className="h-10 w-10 animate-spin text-amber-500 mb-4" />
-        <p className="text-sm text-slate-400 tracking-wider">夏凱納全息導覽系統加載中...</p>
+      <span
+        onClick={(e) => {
+          e.stopPropagation();
+          handleInlineClick(type, id, field, currentValue);
+        }}
+        className={`${styleClass} border-b-2 border-dashed border-[#6D55A3]/30 hover:border-[#6D55A3] hover:bg-[#F3EEFF]/80 cursor-pointer px-1 rounded transition-colors inline-block`}
+        title="點擊直接修改，將同步更新雲端"
+      >
+        {currentValue || "(點選填寫)"}
+      </span>
+    );
+  };
+
+  // 全新品牌風格 - 載入畫面
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#F3EEFF]">
+        <div className="flex flex-col items-center gap-6 p-8 bg-white/80 backdrop-blur-xl rounded-[32px] shadow-2xl shadow-[#6D55A3]/10">
+          <div className="relative flex items-center justify-center w-16 h-16 bg-gradient-to-br from-[#F25D6B] to-[#6D55A3] rounded-2xl shadow-lg animate-pulse">
+            <Sparkles className="w-8 h-8 text-white" />
+          </div>
+          <p className="text-[#6D55A3] font-bold tracking-widest text-sm uppercase">正在連線至夏凱納雲端...</p>
+        </div>
       </div>
     );
   }
 
-  return (
-    <div className="relative h-screen w-full overflow-hidden bg-slate-950 text-white font-sans">
-      
-      {/* --- 左側懸浮 HUD 面板 (Legend and Info) --- */}
-      <div className="absolute top-6 left-6 z-50 flex max-w-sm flex-col gap-4 pointer-events-none">
-        
-        {/* 系統標題卡片 */}
-        <div className="pointer-events-auto flex flex-col gap-1 rounded-3xl border border-slate-700/60 bg-slate-900/80 p-5 shadow-2xl backdrop-blur-md">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-            </span>
-            <h1 className="text-2xl font-extrabold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-amber-200">
-              夏凱納全息導覽
-            </h1>
-          </div>
-          <p className="text-xs text-slate-400 leading-relaxed mt-1">
-            大直堂 1F ~ 4F 實境 3D 疊層全息投影系統。
+  if (!hasValidKeys) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#FFF9F3] p-6">
+        <div className="bg-white p-8 rounded-[24px] max-w-md w-full shadow-xl shadow-[#F25D6B]/5 border border-[#FFE8A3]">
+          <h2 className="text-xl font-bold text-[#F25D6B] mb-4 flex items-center gap-2">
+            <AlertCircle /> 系統警告：雲端鑰匙錯誤
+          </h2>
+          <p className="text-[#7B7B74] text-sm leading-relaxed">請確認程式碼中的網址與鑰匙設定正確。</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 全新品牌風格 - 時間軸畫面
+  const renderTimelineView = () => (
+    <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+      {filteredNodes.length === 0 ? (
+        <div className="text-center text-[#7B7B74] mt-16 text-sm bg-white p-6 rounded-[24px] shadow-sm border border-[#E6EAF0]">
+          <Sparkles className="w-8 h-8 text-[#E6EAF0] mx-auto mb-3" />
+          此堂次目前尚未安排服事任務
+        </div>
+      ) : (
+        <div className="relative mt-2">
+          {/* 溫慢主時間軸 */}
+          <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
+          
+          {filteredNodes.map((node) => {
+            const completed = isNodeCompleted(node);
+            const active = node.id === activeNodeId;
+            return (
+              <div key={node.id} className="relative mb-8 transition-all duration-500" ref={active ? activeNodeRef : null}>
+                
+                {/* 節點圓點 */}
+                <div className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10">
+                  {completed ? (
+                    <div className="w-7 h-7 rounded-full bg-[#00B8B8] flex items-center justify-center shadow-sm shadow-[#00B8B8]/30">
+                       <Check className="w-4 h-4 text-white" strokeWidth={3} />
+                    </div>
+                  ) : active ? (
+                    <div className="relative flex items-center justify-center w-8 h-8">
+                      <span className="absolute inline-flex w-full h-full rounded-full opacity-30 bg-[#F25D6B] animate-ping" />
+                      <span className="relative inline-flex w-4 h-4 rounded-full bg-[#F25D6B] shadow-sm shadow-[#F25D6B]/50" />
+                    </div>
+                  ) : (
+                    <div className="w-4 h-4 rounded-full border-[3px] border-[#E6EAF0] bg-white" />
+                  )}
+                </div>
+
+                {/* 任務卡片 */}
+                <div className={`ml-12 rounded-[24px] p-5 transition-all duration-300 ${
+                  completed ? 'bg-white/60 border border-[#E6EAF0] opacity-70' : 
+                  active ? 'bg-[#FFF2F4] ring-2 ring-[#F25D6B] shadow-lg shadow-[#F25D6B]/15' : 
+                  'bg-white border border-[#E6EAF0] shadow-sm'
+                }`}>
+                  
+                  {/* 標題與時間列 */}
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="w-full">
+                      <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
+                        {renderInlineEdit('node', node.id, 'title', node.title, "w-full")}
+                      </h3>
+                      <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
+                        <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
+                          <Clock className="w-3 h-3" />
+                          {renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}
+                        </span>
+                        {active && (
+                          <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
+                            進行中
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 角色與地點資訊 */}
+                  <div className="flex flex-col gap-2.5 mt-2 text-[13px] text-[#7B7B74]">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="w-4 h-4 text-[#F25D6B]/70 shrink-0" />
+                      <span className="font-medium text-[#1F2937]">
+                        {renderInlineEdit('node', node.id, 'location', node.location, "w-full")}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-[#6D55A3]/70 shrink-0" />
+                      <span className="font-medium text-[#1F2937]">
+                        {renderInlineEdit('node', node.id, 'assignee', node.assignee, "w-full")}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {/* Checklist 區域 */}
+                  {node.checklist && node.checklist.length > 0 && (
+                    <div className="mt-5 space-y-3">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="h-px bg-[#E6EAF0] flex-1"></div>
+                        <div className="text-[10px] font-black text-[#6D55A3]/40 uppercase tracking-widest">任務清單</div>
+                        <div className="h-px bg-[#E6EAF0] flex-1"></div>
+                      </div>
+
+                      {node.checklist.map((item: any) => (
+                        <div key={item.id} className={`flex items-start gap-3 p-3.5 rounded-[16px] transition-all duration-200 ${
+                          item.is_completed ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20' : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'
+                        }`}>
+                          
+                          {/* 圓角自訂 Checkbox */}
+                          <label className="relative flex items-center justify-center shrink-0 mt-0.5 cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              className="peer sr-only" 
+                              checked={item.is_completed} 
+                              onChange={() => toggleChecklist(node.id, item.id)}
+                            />
+                            <div className={`w-5 h-5 rounded-[6px] border-2 transition-all flex items-center justify-center ${
+                              item.is_completed ? 'bg-[#00B8B8] border-[#00B8B8]' : 'bg-white border-[#E6EAF0] peer-focus:ring-2 ring-[#6D55A3]/30'
+                            }`}>
+                              {item.is_completed && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                            </div>
+                          </label>
+                          
+                          <div className="flex-1">
+                            <div 
+                              className={`flex items-start gap-1.5 ${item.details ? 'cursor-pointer group' : ''}`}
+                              onClick={() => {
+                                // 如果管理員解鎖了，就不觸發 Modal，直接讓他們點擊修改
+                                if (!isAdminUnlocked && item.details) {
+                                  setDetailModal({ isOpen: true, title: item.text, details: item.details });
+                                }
+                              }}
+                            >
+                              <span className={`text-[14px] font-semibold leading-relaxed transition-all ${
+                                item.is_completed ? 'text-[#7B7B74] line-through opacity-70' : 'text-[#1F2937]'
+                              } ${(!isAdminUnlocked && item.details) ? 'group-hover:text-[#F25D6B]' : ''}`}>
+                                {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
+                              </span>
+                              
+                              {/* Info Icon */}
+                              {!isAdminUnlocked && item.details && (
+                                <div className={`mt-0.5 shrink-0 transition-colors ${item.is_completed ? 'text-[#E6EAF0]' : 'text-[#00B8B8] group-hover:text-[#F25D6B]'}`}>
+                                  <Info className="w-4 h-4" />
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 管理員解鎖時，Checklist 的備註 details 也可以直接行內修改 */}
+                            {isAdminUnlocked && (
+                              <div className="mt-1 text-xs text-slate-500 bg-slate-50 p-1.5 rounded-lg border border-dashed border-slate-200">
+                                <span className="font-bold text-[10px] text-[#6D55A3] block mb-0.5">備註細節：</span>
+                                {renderInlineEdit('checklist', item.id, 'details', item.details, "w-full text-xs text-slate-600 block", "textarea")}
+                              </div>
+                            )}
+                            
+                            {/* 完成時間戳記 */}
+                            {item.is_completed && item.completed_at && (
+                              <span className="text-[10px] text-[#00B8B8] font-bold block mt-1.5 tracking-wider">
+                                DONE AT {item.completed_at}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  // 全新品牌風格 - 服事動態（方案 B：依負責角色分組）
+  const renderReviewView = () => {
+    const allTasks = filteredNodes.flatMap(n => n.checklist || []);
+    const completedTasks = allTasks.filter(t => t.is_completed);
+    const completionRate = Math.round((completedTasks.length / (allTasks.length || 1)) * 100);
+    const missedTasks = allTasks.filter(t => !t.is_completed);
+
+    // 依負責角色（assignee）進行任務分組
+    const groupedMissed: { [key: string]: any[] } = {};
+    missedTasks.forEach((task: any) => {
+      const parentNode = filteredNodes.find(n => n.checklist && n.checklist.some((c: any) => c.id === task.id));
+      const role = parentNode?.assignee || '未指定角色';
+      if (!groupedMissed[role]) {
+        groupedMissed[role] = [];
+      }
+      groupedMissed[role].push({
+        ...task,
+        nodeTitle: parentNode?.title,
+        nodeTime: parentNode?.time
+      });
+    });
+
+    return (
+      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        <div className="mb-6 px-1">
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">活動復盤分析</h2>
+          <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
+            <BarChart2 className="w-4 h-4 text-[#6D55A3]" /> 即時執行數據 ({currentService})
           </p>
         </div>
-
-        {/* 四大視角切換器 */}
-        <div className="pointer-events-auto rounded-3xl border border-slate-700/60 bg-slate-900/80 p-4 shadow-2xl backdrop-blur-md">
-          <h3 className="text-xs font-semibold text-slate-400 tracking-wider mb-2.5 flex items-center gap-1.5 uppercase">
-            <Compass className="h-3.5 w-3.5 text-amber-400" />
-            場景視角控制
-          </h3>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              ['hybrid', '對角俯瞰 📐'],
-              ['exterior', '環繞外牆 🏢'],
-              ['interior', '大堂剖切 🔍'],
-              ['hall', '舞台視角 🎭'],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setViewMode(value as ViewMode)}
-                className={`rounded-xl py-2 px-3 text-xs font-semibold transition-all duration-200 border ${
-                  viewMode === value
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
-                    : 'bg-slate-800/80 text-slate-300 border-slate-700/50 hover:bg-slate-700/60 hover:text-white'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 2D HUD 指示與樓層層級對照表 (原本 3D 內的 1F~4F 標記已完美整合至此，避開 WebGL 崩潰) */}
-        <div className="pointer-events-auto rounded-3xl border border-slate-700/60 bg-slate-900/80 p-5 shadow-2xl backdrop-blur-md">
-          <h3 className="text-xs font-semibold text-slate-400 tracking-wider mb-3 flex items-center gap-1.5 uppercase border-b border-slate-800 pb-2">
-            <Layers className="h-3.5 w-3.5 text-purple-400" />
-            全息圖層與標示對照
-          </h3>
-          <div className="flex flex-col gap-2.5 text-xs font-medium text-slate-300">
-            <div className="flex items-center justify-between">
-              <span className="text-amber-400 font-bold">4F 行政看台層</span>
-              <span className="text-[10px] text-slate-400">Y 軸偏移: {offset4F.toFixed(1)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-amber-400 font-bold">3F 主會堂看台層</span>
-              <span className="text-[10px] text-slate-400">Y 軸偏移: {offset3F.toFixed(1)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-amber-400 font-bold">2F 主會堂平面層</span>
-              <span className="text-[10px] text-slate-400">Y 軸偏移: {offset2F.toFixed(1)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-amber-400 font-bold">1F 共享大廳地基</span>
-              <span className="text-[10px] text-slate-400">Y 軸偏移: 0.0 (錨定)</span>
-            </div>
-            <div className="h-px bg-slate-800 my-1" />
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-[#a855f7] shadow-[0_0_8px_#a855f7]"></span>
-                <span>男女洗手洗手間</span>
-              </div>
-              <span className="text-[10px] text-slate-500">1F ~ 4F 跨層</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-[#fbbf24] shadow-[0_0_8px_#fbbf24]"></span>
-                <span>奉獻箱 / 招待資材 / 交誼</span>
-              </div>
-              <span className="text-[10px] text-slate-500">營運節點</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-[#dc2626] shadow-[0_0_8px_#dc2626]"></span>
-                <span>應急 AED / 消防栓</span>
-              </div>
-              <span className="text-[10px] text-slate-500 text-red-400/80">核心消防</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full bg-[#ffffff] shadow-[0_0_8px_#ffffff]"></span>
-                <span>避難緩降機</span>
-              </div>
-              <span className="text-[10px] text-slate-500">落地窗邊</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 點選 Hotspot 細節說明視窗 */}
-        {selectedHotspot && (
-          <div className="pointer-events-auto relative flex flex-col gap-2 rounded-3xl border border-amber-500/40 bg-slate-900/95 p-5 shadow-2xl backdrop-blur-md animate-fade-in">
-            <button
-              type="button"
-              onClick={() => setSelectedHotspot(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white transition"
-              aria-label="關閉細節"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="rounded-lg bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold text-amber-400 border border-amber-500/20">
-                {selectedHotspot.floor}
-              </span>
-              <span className={`rounded-lg px-2 py-0.5 text-[9px] font-extrabold text-white ${
-                selectedHotspot.kind === 'service' ? 'bg-purple-600' : 'bg-red-600'
-              }`}>
-                {selectedHotspot.kind === 'service' ? '營運' : '安全'}
-              </span>
-            </div>
-            <h2 className="text-md font-bold text-white mt-1">{selectedHotspot.label}</h2>
-            <p className="text-xs leading-relaxed text-slate-300">{selectedHotspot.desc}</p>
-          </div>
-        )}
-      </div>
-
-      {/* --- 3D WebGL Canvas 渲染引擎 --- */}
-      <div className="absolute inset-0">
-        <Canvas camera={{ position: [15, 10, 15], fov: 45 }}>
-          <ambientLight intensity={0.55} />
-          <directionalLight position={[10, 15, 5]} intensity={1.2} />
-          <pointLight position={[-10, -10, -10]} intensity={0.5} />
-          
-          {/* 鏡頭動畫與軌道控制器 */}
-          <CameraController viewMode={viewMode} controlsRef={controlsRef} />
-          
-          <OrbitControls 
-            ref={controlsRef}
-            enablePan={true} 
-            enableZoom={true} 
-            enableRotate={true}
-            autoRotate={!isExploded && viewMode === 'hybrid'} 
-            autoRotateSpeed={0.4}
-            maxPolarAngle={Math.PI / 2 - 0.05} // 防止鏡頭穿透地板
-          />
-
-          {/* --- 1 樓 (共享空間) --- */}
-          <FloorBlock floorNum={1} yOffset={offset1F} isExploded={isExploded} baseHeight={1.5}>
-            <FloorInteriorDecoration floor="1F" />
-            
-            {/* 1F 男女廁 */}
-            <Hotspot3D 
-              position={[2, 0.8, -2]} 
-              color="#a855f7" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '1f-wc') || null)}
-            />
-            {/* 1F 分類不鏽鋼回收桶 */}
-            <Hotspot3D 
-              position={[3, 0.8, 1]} 
-              color="#fbbf24" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '1f-recycle') || null)}
-            />
-            {/* 1F 落地沙發交誼區 */}
-            <Hotspot3D 
-              position={[-1.5, 0.8, -2]} 
-              color="#fbbf24" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '1f-lobby-sofa') || null)}
-            />
-            {/* 1F 保全前台 */}
-            <Hotspot3D 
-              position={[-3.5, 0.8, 1.5]} 
-              color="#fbbf24" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '1f-desk') || null)}
-            />
-            {/* 1F AED 裝置 */}
-            <Hotspot3D 
-              position={[-2.5, 0.8, 3]} 
-              color="#dc2626" 
-              visible={mode === 'all' || mode === 'safety'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '1f-aed') || null)}
-            />
-            {/* 1F 消火栓 */}
-            <Hotspot3D 
-              position={[4, 0.8, 0]} 
-              color="#dc2626" 
-              visible={mode === 'all' || mode === 'safety'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '1f-fire') || null)}
-            />
-          </FloorBlock>
-
-          {/* --- 2 樓 (大堂與主會堂低層觀眾席) --- */}
-          <FloorBlock floorNum={2} yOffset={offset2F} isExploded={isExploded} baseHeight={1.5}>
-            <FloorInteriorDecoration floor="2F" />
-
-            {/* 2F 入口女廁 */}
-            <Hotspot3D 
-              position={[-3, 0.8, 3]} 
-              color="#a855f7" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '2f-wc') || null)}
-            />
-            {/* 2F 大門奉獻箱 */}
-            <Hotspot3D 
-              position={[0, 0.8, 4]} 
-              color="#fbbf24" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '2f-box') || null)}
-            />
-            {/* 2F 北1號梯間消防栓 */}
-            <Hotspot3D 
-              position={[4, 0.8, -4]} 
-              color="#dc2626" 
-              visible={mode === 'all' || mode === 'safety'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '2f-fire-wall') || null)}
-            />
-            {/* 2F 電梯旁 AED */}
-            <Hotspot3D 
-              position={[2, 0.8, 2]} 
-              color="#dc2626" 
-              visible={mode === 'all' || mode === 'safety'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '2f-aed') || null)}
-            />
-          </FloorBlock>
-
-          {/* --- 3 樓 (大堂與主會堂中層看台) --- */}
-          <FloorBlock floorNum={3} yOffset={offset3F} isExploded={isExploded} baseHeight={1.5}>
-            <FloorInteriorDecoration floor="3F" />
-
-            {/* 3F 男洗手間 */}
-            <Hotspot3D 
-              position={[-3, 0.8, 3]} 
-              color="#a855f7" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '3f-wc-men') || null)}
-            />
-            {/* 3F 招待新人櫃 */}
-            <Hotspot3D 
-              position={[0, 0.8, -4]} 
-              color="#fbbf24" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '3f-wooden-cabinet') || null)}
-            />
-            {/* 3F 招待集合長桌 */}
-            <Hotspot3D 
-              position={[3.5, 0.8, -2]} 
-              color="#fbbf24" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '3f-welcome-desk') || null)}
-            />
-            {/* 3F 落地窗避難緩降機 */}
-            <Hotspot3D 
-              position={[4, 0.8, 4]} 
-              color="#ffffff" 
-              visible={mode === 'all' || mode === 'safety'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '3f-escape-lever') || null)}
-            />
-          </FloorBlock>
-
-          {/* --- 4 樓 (行政辦公區與頂層看台) --- */}
-          <FloorBlock floorNum={4} yOffset={offset4F} isExploded={isExploded} baseHeight={1.0}>
-            <FloorInteriorDecoration floor="4F" />
-
-            {/* 4F 行政女廁 */}
-            <Hotspot3D 
-              position={[-2, 0.5, 2]} 
-              color="#a855f7" 
-              visible={mode === 'all' || mode === 'service'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '4f-wc-women') || null)}
-            />
-            {/* 4F 避難緩降機 */}
-            <Hotspot3D 
-              position={[3, 0.5, -3]} 
-              color="#ffffff" 
-              visible={mode === 'all' || mode === 'safety'} 
-              onClick={() => setSelectedHotspot(HOTSPOTS_DB.find(h => h.id === '4f-escape-lever') || null)}
-            />
-          </FloorBlock>
-
-          {/* 中心流光引導柱 (串聯垂直通道) */}
-          <mesh position={[0, offset4F / 2, 0]} scale={[1, offset4F || 0.1, 1]} visible={isExploded}>
-            <cylinderGeometry args={[0.15, 0.15, 1, 16]} />
-            <meshBasicMaterial color="#fbbf24" transparent={true} opacity={0.3} />
-          </mesh>
-        </Canvas>
-      </div>
-
-      {/* --- 底部懸浮科技控制面板 (Bottom Interactive Dashboard) --- */}
-      <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-6 rounded-full border border-slate-700/60 bg-slate-900/90 px-6 py-4 text-white shadow-2xl backdrop-blur-md transition-all duration-300">
         
-        {/* 1. 爆炸拆解控制組 (合併/爆炸與手動微調距離) */}
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => {
-              setIsExploded((prev) => {
-                if (!prev) setExplosionDistance(50); // 開啟時給予預設 50%
-                return !prev;
-              });
-            }}
-            className={`rounded-full px-5 py-2.5 text-xs font-bold transition-all duration-200 ${
-              isExploded 
-                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30' 
-                : 'bg-slate-800 hover:bg-slate-700 border border-slate-600/60 hover:text-white'
-            }`}
-          >
-            {isExploded ? '合併全息模型 🏢' : '垂直爆炸拆解 🥞'}
-          </button>
+        <div className="p-6 mb-8 bg-gradient-to-br from-white to-[#F3EEFF]/50 border shadow-lg shadow-[#6D55A3]/5 rounded-[24px] border-[#E6EAF0]">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-sm font-black tracking-widest text-[#6D55A3] uppercase">總體完成率</h3>
+            <span className="px-3 py-1 text-[10px] font-bold text-[#00B8B8] bg-[#00B8B8]/10 rounded-full border border-[#00B8B8]/20">
+              雲端即時同步中
+            </span>
+          </div>
+          <div className="flex items-end gap-3">
+            <span className="text-5xl font-black tracking-tighter text-[#F25D6B]">{allTasks.length === 0 ? 0 : completionRate}%</span>
+            <span className="mb-1.5 text-sm font-bold text-[#7B7B74]">({completedTasks.length}/{allTasks.length} 任務)</span>
+          </div>
+          <div className="w-full h-3 mt-6 overflow-hidden rounded-full bg-[#E6EAF0] shadow-inner">
+            <div className="h-full transition-all duration-1000 ease-out bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-full relative" style={{ width: `${allTasks.length === 0 ? 0 : completionRate}%` }}>
+               <div className="absolute inset-0 bg-white/20 w-full h-full animate-[shimmer_2s_infinite]"></div>
+            </div>
+          </div>
+        </div>
 
-          {isExploded && (
-            <div className="flex items-center gap-2.5">
-              <span className="text-[10px] font-bold text-slate-400 tracking-wider">層間距離</span>
-              <input
-                type="range"
-                min="10"
-                max="100"
-                value={explosionDistance}
-                onChange={(e) => setExplosionDistance(Number(e.target.value))}
-                className="h-1 w-24 cursor-pointer appearance-none rounded-lg bg-slate-700 accent-amber-500 transition-all duration-150"
-                aria-label="展開距離"
-              />
-              <span className="font-mono text-xs font-bold text-amber-400 w-8">{explosionDistance}%</span>
+        {/* 方案 B：分組待完成清單 */}
+        <div className="mb-6">
+          <h3 className="flex items-center gap-2 mb-4 text-sm font-black tracking-widest text-[#F25D6B] uppercase px-1">
+            <AlertCircle className="w-4 h-4" /> 待完成服事清單（依角色分組）
+          </h3>
+          
+          {Object.keys(groupedMissed).length === 0 ? (
+            <div className="text-center text-[#7B7B74] py-8 bg-white/60 rounded-[24px] border border-[#E6EAF0] text-sm">
+              🎉 恭喜！當前場次的所有任務均已圓滿完成！
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {Object.entries(groupedMissed).map(([role, tasks]) => (
+                <div key={role} className="bg-white p-5 rounded-[24px] border border-[#E6EAF0] shadow-sm">
+                  {/* 分組標題 */}
+                  <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#F3EEFF]">
+                    <span className="font-extrabold text-[15px] text-[#6D55A3] flex items-center gap-1.5">
+                      <User className="w-4 h-4 text-[#F25D6B]" /> {role}
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 bg-[#FFF2F4] text-[#F25D6B] rounded-full">
+                      待辦 {tasks.length} 項
+                    </span>
+                  </div>
+                  
+                  {/* 任務卡片內列表 */}
+                  <div className="space-y-2.5">
+                    {tasks.map((task: any) => (
+                      <div 
+                        key={task.id}
+                        onClick={() => {
+                          setDetailModal({
+                            isOpen: true,
+                            title: task.text,
+                            details: task.details || '本項目目前沒有額外的詳細提醒說明。'
+                          });
+                        }}
+                        className="p-3 bg-[#FFF2F4]/40 hover:bg-[#FFF2F4]/80 border border-[#F25D6B]/10 rounded-[16px] cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-1.5">
+                          <span className="text-[14px] font-bold text-[#1F2937] leading-relaxed">
+                            {task.text}
+                          </span>
+                          <div className="mt-0.5 shrink-0 text-[#00B8B8]">
+                            <Info className="w-3.5 h-3.5" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 mt-1 text-[11px] text-[#7B7B74] font-medium">
+                          <Clock className="w-3 h-3" /> {task.nodeTime} - {task.nodeTitle}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
+      </div>
+    );
+  };
 
-        <div className="h-6 w-px bg-slate-700/80" />
+  // 全新品牌風格 - 管理畫面 (擴充即時編輯更新、子任務拖曳排序與手動上下移位)
+  const renderAdminView = () => (
+    <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+      <div className="mb-6 px-1 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">管理服事任務</h2>
+          <p className="text-sm font-medium text-[#7B7B74] mt-1.5">目前管理區塊：<span className="text-[#6D55A3] font-bold">{currentService}</span></p>
+        </div>
+        
+        {/* 一鍵重新鎖定按鈕 */}
+        <button
+          onClick={() => {
+            setIsAdminUnlocked(false);
+            setActiveTab('timeline');
+          }}
+          className="px-3 py-1.5 bg-[#F25D6B]/10 hover:bg-[#F25D6B]/25 text-[#F25D6B] border border-[#F25D6B]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
+        >
+          <Lock className="w-3.5 h-3.5" />
+          鎖定登出
+        </button>
+      </div>
 
-        {/* 2. 模式切換分類開關 (營運、安全、全部) */}
-        <div className="flex rounded-full border border-slate-800 bg-slate-950 p-1 shrink-0">
-          <button
-            type="button"
-            onClick={() => setMode('service')}
-            className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ${
-              mode === 'service'
-                ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>⚙️</span> 營運服事
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMode('safety')}
-            className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ${
-              mode === 'safety'
-                ? 'bg-red-600 text-white shadow-lg shadow-red-600/30'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>🚨</span> 應急安全
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMode('all')}
-            className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ${
-              mode === 'all'
-                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Sparkles className="h-3 w-3" />
-            顯示全部
+      {/* 新增任務節點表單 */}
+      <form onSubmit={handleAddNode} className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-8">
+        <h3 className="text-[13px] font-black text-[#6D55A3] uppercase tracking-widest mb-5 flex items-center gap-2">
+          <Plus className="w-4 h-4 text-[#F25D6B]" /> 新增任務節點
+        </h3>
+        <div className="space-y-4">
+          <div className="flex gap-4">
+            <div className="w-1/3">
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">所屬場次</label>
+              <select 
+                value={newNode.service_type} 
+                onChange={e => setNewNode({...newNode, service_type: e.target.value})}
+                className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow"
+              >
+                {serviceOptions.map(srv => <option key={srv} value={srv}>{srv}</option>)}
+              </select>
+            </div>
+            <div className="w-2/3">
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">時間</label>
+              <input type="time" required value={newNode.time} onChange={e => setNewNode({...newNode, time: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">任務標題</label>
+            <input type="text" required placeholder="例如：招待同工就位" value={newNode.title} onChange={e => setNewNode({...newNode, title: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
+          </div>
+          <div className="flex gap-4">
+            <div className="w-1/2">
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">負責角色</label>
+              <input type="text" placeholder="例如：大堂專招" value={newNode.assignee} onChange={e => setNewNode({...newNode, assignee: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
+            </div>
+            <div className="w-1/2">
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">服事地點</label>
+              <input type="text" placeholder="例如：大會堂" value={newNode.location} onChange={e => setNewNode({...newNode, location: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">備註細節 (選填)</label>
+            <textarea rows={2} value={newNode.details} onChange={e => setNewNode({...newNode, details: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow resize-none" />
+          </div>
+          <button disabled={isAdding} type="submit" className="w-full mt-4 py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[14px] text-sm hover:opacity-90 disabled:opacity-50 transition-all shadow-md shadow-[#F25D6B]/20">
+            {isAdding ? '新增至雲端中...' : '確認建立任務'}
           </button>
         </div>
+      </form>
 
-        {/* 3. 系統重設按鈕 */}
-        <div className="flex items-center">
-          <button
-            type="button"
+      {/* 任務總覽區 (新增即時編輯、展開子清單拖曳排序) */}
+      <div>
+        <h3 className="text-[11px] font-black text-[#7B7B74] mb-3 tracking-widest uppercase px-1">任務總覽與編輯 ({currentService})</h3>
+        <div className="space-y-4">
+          {filteredNodes.length === 0 && <p className="text-sm font-medium text-[#7B7B74] text-center py-6 bg-white rounded-[20px] border border-[#E6EAF0]">尚無任務資料</p>}
+          {filteredNodes.map(node => {
+            const isEditing = editingNodeId === node.id;
+            const isChecklistExpanded = expandedChecklistNodeId === node.id;
+            return (
+              <div key={node.id} className="p-4 bg-white border border-[#E6EAF0] rounded-[24px] shadow-sm transition-all duration-300">
+                {isEditing ? (
+                  /* 編輯模式表單 */
+                  <div className="space-y-3.5">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#F3EEFF] mb-1">
+                      <span className="text-xs font-black text-[#6D55A3]">編輯任務節點</span>
+                      <span className="text-[10px] font-mono text-[#7B7B74]">ID: {node.id}</span>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">時間</label>
+                        <input 
+                          type="time" 
+                          value={editForm.time} 
+                          onChange={e => setEditForm({...editForm, time: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">標題</label>
+                        <input 
+                          type="text" 
+                          value={editForm.title} 
+                          onChange={e => setEditForm({...editForm, title: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">角色</label>
+                        <input 
+                          type="text" 
+                          value={editForm.assignee} 
+                          onChange={e => setEditForm({...editForm, assignee: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">地點</label>
+                        <input 
+                          type="text" 
+                          value={editForm.location} 
+                          onChange={e => setEditForm({...editForm, location: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">詳細備註</label>
+                      <textarea 
+                        rows={2} 
+                        value={editForm.details} 
+                        onChange={e => setEditForm({...editForm, details: e.target.value})} 
+                        className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none resize-none" 
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button 
+                        type="button" 
+                        onClick={() => setEditingNodeId(null)}
+                        className="px-3 py-1.5 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] text-xs font-bold rounded-lg transition-all"
+                      >
+                        取消
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => handleUpdateNode(node.id)}
+                        className="px-4 py-1.5 bg-gradient-to-r from-[#00B8B8] to-[#6D55A3] text-white text-xs font-bold rounded-lg shadow-sm hover:opacity-90 transition-all"
+                      >
+                        儲存更新
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* 唯讀與行內編輯模式展示 */
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="text-[14px] font-bold text-[#1F2937] mb-1 flex items-center gap-2">
+                           <span className="text-[#6D55A3] font-mono">{renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}</span> 
+                           {renderInlineEdit('node', node.id, 'title', node.title, "flex-1")}
+                        </div>
+                        <div className="text-xs font-medium text-[#7B7B74] flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="flex items-center gap-1">
+                            <User className="w-3 h-3 text-[#6D55A3]/70" /> 
+                            {renderInlineEdit('node', node.id, 'assignee', node.assignee, "")}
+                          </span>
+                          <span className="text-[#E6EAF0]">|</span> 
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-[#F25D6B]/70" /> 
+                            {renderInlineEdit('node', node.id, 'location', node.location, "")}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                        {/* 即時編輯按鈕 */}
+                        <button 
+                          onClick={() => startEditing(node)}
+                          className="p-2 text-[#6D55A3]/60 hover:text-[#6D55A3] hover:bg-[#F3EEFF] rounded-[12px] transition-colors"
+                          title="開啟詳細編輯"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteNode(node.id, node.title)}
+                          className="p-2 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-[12px] transition-colors"
+                          title="刪除任務"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Accordion 折疊控制：Checklist 拖曳排序管理區 */}
+                    <div className="mt-3 border-t border-slate-100 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedChecklistNodeId(isChecklistExpanded ? null : node.id)}
+                        className="text-xs font-bold text-[#6D55A3] hover:text-[#F25D6B] flex items-center gap-1 transition-colors"
+                      >
+                        {isChecklistExpanded ? "▲ 收起確認清單項目" : `▼ 管理確認項目 (${node.checklist?.length || 0})`}
+                      </button>
+
+                      {isChecklistExpanded && (
+                        <div className="mt-3 pl-2 border-l-2 border-[#6D55A3]/30 space-y-3">
+                          {/* 新增 Checklist 項目的迷你表單 */}
+                          <div className="bg-[#F3EEFF]/30 p-3 rounded-2xl border border-[#E6EAF0]">
+                            <p className="text-[10px] font-black text-[#6D55A3] mb-1.5">＋新增確認項目細項</p>
+                            <div className="space-y-2">
+                              <input 
+                                type="text"
+                                placeholder="項目名稱 (例如：準備對講機)"
+                                value={newChecklistItem.text}
+                                onChange={e => setNewChecklistItem({ ...newChecklistItem, text: e.target.value })}
+                                className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
+                              />
+                              <input 
+                                type="text"
+                                placeholder="細節備註 (可選)"
+                                value={newChecklistItem.details}
+                                onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
+                                className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAddChecklistItem(node.id)}
+                                className="w-full py-1.5 bg-[#6D55A3] hover:bg-[#6D55A3]/90 text-white font-bold rounded-xl text-[11px] shadow-sm transition-colors"
+                              >
+                                新增此確認細項
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 拖曳與排序清單 */}
+                          <div className="space-y-2">
+                            {node.checklist && node.checklist.length > 0 ? (
+                              node.checklist.map((item: any, idx: number) => (
+                                <div 
+                                  key={item.id}
+                                  draggable={true}
+                                  onDragStart={(e) => handleDragStart(e, item.id)}
+                                  onDragOver={handleDragOver}
+                                  onDrop={(e) => handleDrop(e, node.id, item.id)}
+                                  className="flex items-center justify-between p-2 bg-[#FFF9F3]/60 hover:bg-[#FFF2F4]/60 border border-[#E6EAF0] rounded-xl transition-all shadow-sm"
+                                >
+                                  <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                                    {/* 拖曳握把 */}
+                                    <div 
+                                      className="cursor-grab text-slate-400 hover:text-[#6D55A3] shrink-0" 
+                                      title="拖曳上下移動排序"
+                                    >
+                                      <GripVertical className="w-4 h-4" />
+                                    </div>
+
+                                    {/* 手動向上、向下移動按鈕（完美適應手機端） */}
+                                    <div className="flex flex-col shrink-0">
+                                      <button 
+                                        type="button"
+                                        disabled={idx === 0}
+                                        onClick={() => moveChecklistItem(node.id, idx, 'up')}
+                                        className="text-[10px] text-slate-400 hover:text-[#6D55A3] disabled:opacity-30 disabled:hover:text-slate-400"
+                                      >
+                                        <ArrowUp className="w-3 h-3" />
+                                      </button>
+                                      <button 
+                                        type="button"
+                                        disabled={idx === node.checklist.length - 1}
+                                        onClick={() => moveChecklistItem(node.id, idx, 'down')}
+                                        className="text-[10px] text-slate-400 hover:text-[#6D55A3] disabled:opacity-30 disabled:hover:text-slate-400"
+                                      >
+                                        <ArrowDown className="w-3 h-3" />
+                                      </button>
+                                    </div>
+
+                                    {/* 項目文字即時行內編輯 */}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-xs font-bold text-slate-800">
+                                        {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
+                                      </div>
+                                      <div className="text-[10px] text-slate-500 font-medium">
+                                        {renderInlineEdit('checklist', item.id, 'details', item.details || "點選填寫詳細細節說明", "w-full block", "textarea")}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <button 
+                                    type="button"
+                                    onClick={() => handleDeleteChecklistItem(item.id)}
+                                    className="p-1.5 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-lg transition-colors shrink-0"
+                                    title="刪除此確認細項"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-[11px] text-slate-400 text-center py-2">目前沒有確認事項，可在上方新增</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex justify-center w-full min-h-screen bg-[#F3EEFF] sm:p-6 md:p-10 font-sans">
+      <div className="relative flex flex-col w-full max-w-[420px] bg-[#FFF9F3] sm:rounded-[40px] sm:border-[10px] border-[#6D55A3]/5 overflow-hidden shadow-2xl shadow-[#6D55A3]/20">
+        
+        {/* 全新品牌風格 - 頂部 Header */}
+        <header className="sticky top-0 z-20 px-5 pt-8 pb-4 bg-gradient-to-br from-[#FFF9F3] via-[#F3EEFF] to-[#FFF2F4] border-b border-[#E6EAF0] rounded-b-[32px] shadow-sm mb-2">
+          
+          <div className="flex items-start justify-between relative">
+            {/* 品牌星芒裝飾 */}
+            <Sparkles className="absolute -top-4 -right-2 w-20 h-20 text-[#6D55A3] opacity-[0.03] rotate-12 pointer-events-none" />
+            
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-[#1F2937] flex items-center gap-2.5">
+                {/* 新版品牌 Logo */}
+                <div className="w-9 h-9 rounded-[10px] bg-white flex items-center justify-center shadow-md shadow-[#6D55A3]/10">
+                  <img 
+                    src="/Logo.png" 
+                    alt="Logo" 
+                    className="w-7 h-7 object-contain" 
+                  />
+                </div>
+                主日崇拜招待
+              </h1>
+              <p className="text-[13px] font-bold text-[#6D55A3] mt-2.5 flex items-center gap-1.5 opacity-90">
+                <HeartHandshake className="w-4 h-4" />
+                今天，我們一起歡迎人回家
+              </p>
+            </div>
+
+            {/* 時間與雲端狀態 */}
+            <div className="flex flex-col items-end pt-1">
+              <span className="text-[10px] font-black tracking-widest text-[#7B7B74] uppercase mb-0.5 opacity-70">
+                目前時間
+              </span>
+              <span className="text-2xl font-black font-mono text-[#1F2937] tracking-tighter">
+                {currentTime || "載入中"}
+              </span>
+              <div className="flex items-center gap-1.5 mt-2 bg-white/70 backdrop-blur-md px-2.5 py-1 rounded-full border border-[#00B8B8]/20 shadow-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#00B8B8] animate-pulse"></span>
+                <span className="text-[9px] font-black text-[#00B8B8] tracking-wider">已連線至雲端</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* 堂次切換膠囊按鈕 */}
+          <div className="flex gap-2.5 mt-6 overflow-x-auto pb-2 scrollbar-hide px-1">
+            {serviceOptions.map(srv => (
+              <button
+                key={srv}
+                onClick={() => {
+                  setCurrentService(srv);
+                  hasManuallySwitchedRef.current = true;
+                  setNewNode(prev => ({...prev, service_type: srv}));
+                }}
+                className={`whitespace-nowrap px-5 py-2.5 rounded-full text-[14px] font-bold transition-all duration-300 ${
+                  currentService === srv 
+                    ? 'bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-md shadow-[#F25D6B]/20 transform scale-105' 
+                    : 'bg-white text-[#7B7B74] border border-[#E6EAF0] hover:bg-[#F3EEFF] hover:text-[#6D55A3]'
+                }`}
+              >
+                {srv}
+              </button>
+            ))}
+          </div>
+        </header>
+
+        {/* 主內容區 */}
+        {fetchError ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#FFF9F3] text-center overflow-y-auto pb-28">
+            <div className="w-16 h-16 bg-[#FFF2F4] rounded-full flex items-center justify-center mb-4">
+               <AlertCircle className="w-8 h-8 text-[#F25D6B]" />
+            </div>
+            <h3 className="text-lg font-black text-[#1F2937] mb-2">無法讀取雲端資料</h3>
+            <p className="text-sm font-medium text-[#7B7B74] bg-white p-4 rounded-[20px] border border-[#E6EAF0] shadow-sm break-all">{fetchError}</p>
+            <button onClick={() => { setIsLoading(true); fetchData(); }} className="mt-6 px-8 py-3 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white rounded-full text-sm font-bold shadow-md hover:opacity-90 transition-opacity">
+              重新連線
+            </button>
+          </div>
+        ) : activeTab === 'timeline' ? (
+          renderTimelineView()
+        ) : activeTab === 'review' ? (
+          renderReviewView()
+        ) : (
+          renderAdminView()
+        )}
+
+        {/* 全新品牌風格 - 彈跳視窗 */}
+        {detailModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-[#1F2937]/40 backdrop-blur-sm" onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}>
+            <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[80vh] border border-[#E6EAF0]/50 transform transition-all" onClick={e => e.stopPropagation()}>
+              
+              <div className="flex items-center justify-between px-6 py-5 bg-gradient-to-br from-[#FFF9F3] to-[#F3EEFF] border-b border-[#E6EAF0]">
+                <h3 className="font-extrabold text-[#1F2937] flex items-center gap-2.5 text-[15px]">
+                  <div className="w-6 h-6 rounded-full bg-[#00B8B8]/10 flex items-center justify-center">
+                    <Info className="w-3.5 h-3.5 text-[#00B8B8]" />
+                  </div>
+                  任務提醒
+                </h3>
+                <button onClick={() => setDetailModal({isOpen: false, title: '', details: ''})} className="p-2 text-[#7B7B74] hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-full transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto bg-white">
+                <h4 className="text-[16px] font-bold text-[#6D55A3] mb-4 pb-3 border-b border-[#E6EAF0]">{detailModal.title}</h4>
+                <div className="text-[15px] font-medium text-[#1F2937] leading-loose whitespace-pre-wrap">
+                  {detailModal.details}
+                </div>
+              </div>
+              
+              <div className="p-4 bg-white border-t border-[#E6EAF0]">
+                <button 
+                  onClick={() => setDetailModal({isOpen: false, title: '', details: ''})}
+                  className="w-full py-3.5 bg-[#F3EEFF] text-[#6D55A3] font-bold rounded-[16px] hover:bg-[#6D55A3] hover:text-white transition-colors"
+                >
+                  我知道了
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 密碼驗證解鎖彈窗 */}
+        {showPasswordModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm" onClick={() => setShowPasswordModal(false)}>
+            <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0]/50 text-center" onClick={e => e.stopPropagation()}>
+              <div className="w-12 h-12 rounded-2xl bg-[#F3EEFF] flex items-center justify-center mx-auto mb-4">
+                <Lock className="w-6 h-6 text-[#6D55A3]" />
+              </div>
+              <h3 className="text-lg font-bold text-[#1F2937] mb-1">管理員身分驗證</h3>
+              <p className="text-xs text-[#7B7B74] mb-4">請輸入任務管理驗證密碼</p>
+              
+              <input 
+                type="password" 
+                placeholder="請輸入密碼" 
+                value={passwordInput}
+                onChange={e => setPasswordInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleVerifyPassword();
+                }}
+                className="w-full text-center px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-2xl text-base font-bold text-[#1F2937] tracking-widest focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/40 mb-2"
+                autoFocus
+              />
+              
+              {passwordError && (
+                <p className="text-xs font-bold text-[#F25D6B] mb-3">{passwordError}</p>
+              )}
+
+              <div className="flex gap-3 mt-4">
+                <button 
+                  onClick={() => setShowPasswordModal(false)}
+                  className="flex-1 py-3 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] font-bold rounded-2xl text-sm transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={handleVerifyPassword}
+                  className="flex-1 py-3 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-2xl text-sm shadow-md shadow-[#F25D6B]/25 hover:opacity-95 transition-all"
+                >
+                  確認解鎖
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 自訂 brand 質感通知視窗 (取代原生 alert) */}
+        {customAlert.isOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
+            <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0] text-center">
+              <div className="w-12 h-12 rounded-2xl bg-[#00B8B8]/10 flex items-center justify-center mx-auto mb-4">
+                <Sparkles className="w-6 h-6 text-[#00B8B8]" />
+              </div>
+              <p className="text-[15px] font-bold text-[#1F2937] leading-relaxed mb-6 whitespace-pre-line">
+                {customAlert.message}
+              </p>
+              <button 
+                onClick={() => setCustomAlert({ isOpen: false, message: "" })}
+                className="w-full py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[16px] hover:opacity-90 transition-opacity"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 自訂 brand 質感確認視窗 (取代原生 confirm) */}
+        {customConfirm.isOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
+            <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0] text-center">
+              <div className="w-12 h-12 rounded-2xl bg-[#F25D6B]/10 flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="w-6 h-6 text-[#F25D6B]" />
+              </div>
+              <p className="text-[15px] font-bold text-[#1F2937] leading-relaxed mb-6 whitespace-pre-line">
+                {customConfirm.message}
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setCustomConfirm({ isOpen: false, message: "", onConfirm: () => {} })}
+                  className="flex-1 py-3 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] font-bold rounded-[16px] text-sm transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={() => {
+                    customConfirm.onConfirm();
+                    setCustomConfirm({ isOpen: false, message: "", onConfirm: () => {} });
+                  }}
+                  className="flex-1 py-3 bg-[#F25D6B] hover:bg-[#F25D6B]/90 text-white font-bold rounded-[16px] text-sm shadow-md shadow-[#F25D6B]/20 transition-all"
+                >
+                  確認執行
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 底部功能導覽列 */}
+        <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-2 py-3 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] pb-safe rounded-t-[32px] sm:rounded-t-[32px] sm:w-[420px] sm:mx-auto">
+          <button 
+            onClick={() => setActiveTab('timeline')}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'timeline' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
+          >
+            <ListTodo className="w-5 h-5" strokeWidth={activeTab === 'timeline' ? 2.5 : 2} />
+            <span className="text-[10px] font-black tracking-widest">今日流程</span>
+          </button>
+          
+          <button 
+            onClick={() => setActiveTab('review')}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'review' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
+          >
+            <BarChart2 className="w-5 h-5" strokeWidth={activeTab === 'review' ? 2.5 : 2} />
+            <span className="text-[10px] font-black tracking-widest">服事動態</span>
+          </button>
+
+          <button 
             onClick={() => {
-              setIsExploded(false);
-              setExplosionDistance(50);
-              setMode('all');
-              setViewMode('hybrid');
-              setSelectedHotspot(null);
+              if (isAdminUnlocked) {
+                setActiveTab('admin');
+              } else {
+                setShowPasswordModal(true);
+                setPasswordInput("");
+                setPasswordError("");
+              }
             }}
-            className="rounded-full p-2.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-all border border-transparent hover:border-slate-700/60"
-            title="重設全息投影"
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'admin' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
-            <RotateCcw className="h-4 w-4" />
+            {isAdminUnlocked ? (
+              <Unlock className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
+            ) : (
+              <Settings className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
+            )}
+            <span className="text-[10px] font-black tracking-widest">任務管理</span>
           </button>
-        </div>
-
+        </nav>
       </div>
     </div>
   );
