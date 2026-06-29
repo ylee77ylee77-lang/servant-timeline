@@ -10,7 +10,7 @@ import {
   ListTodo,
   AlertCircle,
   Settings, 
-  Plus,      
+  Plus,       
   Trash2,
   X,        
   Info,
@@ -21,7 +21,12 @@ import {
   Unlock,
   GripVertical,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Volume2,
+  VolumeX,
+  Mic,    
+  MicOff,
+  Loader2 
 } from 'lucide-react';
 
 // 1. 您的專屬雲端鑰匙 (維持原樣)
@@ -57,6 +62,12 @@ const supabaseFetch = async (endpoint: string, method = 'GET', body: any = null)
   } catch (err: any) {
     throw new Error(err.message || "網路連線失敗，或遭到瀏覽器阻擋");
   }
+};
+
+// 系統外部輔助計算完成率 (防範 esbuild 等編譯器將除法斜線誤判為正規表示法開頭)
+const calculateRate = (completedCount: number, totalCount: number): number => {
+  if (!totalCount || totalCount === 0) return 0;
+  return Math.round((completedCount * 100) / totalCount);
 };
 
 export default function App() {
@@ -115,15 +126,403 @@ export default function App() {
   const [newChecklistItem, setNewChecklistItem] = useState({ text: "", details: "" });
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
 
+  // --- 【語音與自動報時相關狀態】 ---
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // 預設關閉自動報時
+  const [isListening, setIsListening] = useState(false); // 麥克風聆聽狀態
+  const [isThinking, setIsThinking] = useState(false); // AI 思考狀態
+  const [voiceResultText, setVoiceResultText] = useState(""); // 語音指令解析文字回饋
+  const [recognition, setRecognition] = useState<any>(null); // SpeechRecognition 實例
+  const announcedNodesRef = useRef<Set<string>>(new Set()); // 紀錄已報時的任務，避免重複廣播
+
+  // --- 【Gemini API 服事智慧生成狀態】 ---
+  const [aiSuggestions, setAiSuggestions] = useState<{ [nodeId: string]: any[] }>({}); // AI 推薦 Checklist
+  const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState<string | null>(null); // 正在生成建議的 nodeId
+
+  // 為語音問答與時間軸綁定最新的狀態 Ref，防範閉包快照問題
+  const filteredNodesRef = useRef<any[]>([]);
+  const currentTimeRef = useRef<string>("");
+
+  useEffect(() => {
+    filteredNodesRef.current = nodes.filter(n => n.service_type === currentService);
+  }, [nodes, currentService]);
+
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
+
+  // 預先載入瀏覽器語音包
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+    }
+  }, []);
+
+  // 溫柔女聲報時函數
+  const speak = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    
+    // 如果有正在播放的聲音，先暫停避免重疊
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-TW';
+    utterance.rate = 0.85; 
+    utterance.pitch = 1.2; 
+    utterance.volume = 0.85;
+
+    const voices = window.speechSynthesis.getVoices();
+    
+    // 優先尋找台灣繁體女聲
+    const femaleVoice = voices.find(v => 
+      v.lang.includes('zh-TW') && 
+      (v.name.includes('Hanhan') || v.name.includes('Yating') || v.name.includes('Mei-Jia') || v.name.includes('Google'))
+    );
+
+    if (femaleVoice) {
+      utterance.voice = femaleVoice;
+    } else {
+      const anyZh = voices.find(v => v.lang.includes('zh'));
+      if (anyZh) utterance.voice = anyZh;
+    }
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // --- Gemini API 指令產生器 (內嵌夏凱納招待處專業知識庫) ---
+  const generateSystemInstruction = (currentService: string, currentTime: string, nodes: any[]) => {
+    const serializedNodes = JSON.stringify(nodes.map(n => ({
+      time: n.time,
+      title: n.title,
+      assignee: n.assignee,
+      location: n.location,
+      details: n.details,
+      checklist: (n.checklist || []).map((c: any) => ({ text: c.text, details: c.details, completed: c.is_completed }))
+    })));
+
+    return `你現在是「夏凱納靈糧堂」主日崇拜招待處的 AI 智慧語音助理。
+你的名字叫「招待助理」，說話語氣溫柔、熱情、有禮貌、充滿神的愛（常在合適時機說「歡迎回家」或「平安」）。
+請根據目前提供的即時數據與夏凱納招待處的專業領域知識，回答使用者的口語問題。
+
+【當前即時系統數據】：
+- 目前堂次：${currentService}
+- 目前時間：${currentTime}
+- 當前所有排定任務與細項資料 (JSON)：${serializedNodes}
+
+【夏凱納招待處專業知識庫（若使用者問到，請以此回答）】：
+1. 奉獻袋準備數量：
+   - 六晚崇（週六晚堂崇拜）：需要預備 4 個奉獻袋。
+   - 主一堂（週日上午第一堂）：需要預備 6 個奉獻袋。
+   - 主二堂（週日上午第二堂）：需要預備 8 個奉獻袋。
+2. 聖餐用品預備：
+   - 聖餐主日時，各堂次聖餐杯與無酵餅數量比照奉獻袋規格或依組長指示。
+   - 聖餐同工需在聚會開始前 30 分鐘，將聖餐桌布置完畢並擺放就位。
+3. 崗位分工與主要職責：
+   - 門口迎賓：熱情微笑、揮手說「平安、歡迎回家」，注意協助行動不便者引導至電梯。
+   - 發放週報：雙手遞交週報，指引大堂入口。
+   - 大堂指引：引導會友從後排或兩側走道依序向前就座，保持走道通暢。
+   - 奉獻服事：負責收取奉獻，收取完後交由出納同工至財務室清點。
+4. 新朋友引導：
+   - 指引他們填寫新友留名卡，並引導至 1F 的「新友歡迎交誼區」，由關懷同工陪伴。
+5. 安全與緊急狀況：
+   - 如遇緊急身體不適，請立即通知 1F 保全服務台。
+
+【回答規則】：
+1. 請用繁體中文回答。
+2. 回答必須非常簡短、精煉、生活化（1至2句話內，不要冗長），因為回答會被語音朗讀。
+3. 絕對不要使用任何 Markdown 標記（如 **、*、###、- 等），請輸出乾淨的純文字。`;
+  };
+
+  // --- Gemini API 指令重試呼召 (含指數退避機制) ---
+  const callGeminiWithRetry = async (
+    prompt: string, 
+    systemInstruction: string, 
+    retries = 5, 
+    delay = 1000,
+    responseSchema: any = null
+  ): Promise<string> => {
+    const apiKey = ""; // 執行環境會在運行時自動注入此 Key，請保持為空字串
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    
+    const payload: any = {
+      contents: [{ parts: [{ text: prompt }] }],
+      systemInstruction: { parts: [{ text: systemInstruction }] }
+    };
+
+    if (responseSchema) {
+      payload.generationConfig = {
+        responseMimeType: "application/json",
+        responseSchema: responseSchema
+      };
+    }
+
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) return text.trim();
+        }
+      } catch (e) {
+        // 安靜重試
+      }
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+      }
+    }
+    throw new Error("Gemini API 呼召失敗");
+  };
+
+  // --- Gemini API 生成建議 Checklist ---
+  const handleGenerateAIChecklist = async (node: any) => {
+    setIsGeneratingSuggestions(node.id);
+    try {
+      const systemPrompt = "你是一位極其專業、貼心的教會主日招待長執，擅長為各項服事任務規劃具體可行的實行細節項目。";
+      const prompt = `請針對以下招待任務：
+      - 堂次：${node.service_type}
+      - 任務名稱：${node.title}
+      - 負責角色：${node.assignee}
+      - 地點：${node.location}
+      - 任務備註：${node.details || "無"}
+
+      請自動推薦 3 個最具體、最重要的現場確認細項（Checklist items）。
+      每項都需要有簡短的名字（text，限 15 字以內）以及詳細的提醒引導（details，限 40 字以內，語氣溫和親切，例如「帶有微笑迎接每位會友」）。`;
+
+      const schema = {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            text: { type: "STRING" },
+            details: { type: "STRING" }
+          },
+          required: ["text", "details"]
+        }
+      };
+
+      const jsonResponse = await callGeminiWithRetry(prompt, systemPrompt, 5, 1000, schema);
+      const parsed = JSON.parse(jsonResponse);
+      if (Array.isArray(parsed)) {
+        setAiSuggestions(prev => ({ ...prev, [node.id]: parsed }));
+        speak("已經為您生成了三項貼心的服事建議細項，請您過目！");
+      }
+    } catch (error: any) {
+      setCustomAlert({ isOpen: true, message: "AI 建議生成失敗：" + error.message });
+    } finally {
+      setIsGeneratingSuggestions(null);
+    }
+  };
+
+  // 將 AI 建議項目寫入 Supabase
+  const handleAddSuggestedItem = async (nodeId: string, suggestion: { text: string, details: string }) => {
+    const node = nodes.find(n => n.id === nodeId);
+    const maxOrder = node?.checklist && node.checklist.length > 0 
+      ? Math.max(...node.checklist.map((c: any) => c.sort_order || 0)) 
+      : -1;
+
+    const newItemId = 'c_' + Math.random().toString(36).substr(2, 9);
+    try {
+      await supabaseFetch('checklist_items', 'POST', {
+        id: newItemId,
+        node_id: nodeId,
+        text: suggestion.text,
+        details: suggestion.details,
+        is_completed: false,
+        sort_order: maxOrder + 1
+      });
+      // 移除已新增的本地建議
+      setAiSuggestions(prev => {
+        const current = prev[nodeId] || [];
+        const filtered = current.filter(item => item.text !== suggestion.text);
+        return { ...prev, [nodeId]: filtered };
+      });
+      fetchData(true);
+    } catch (err: any) {
+      setCustomAlert({ isOpen: true, message: "新增確認項目失敗：" + err.message });
+    }
+  };
+
+  // 一鍵匯入所有建議
+  const handleAddAllSuggestions = async (nodeId: string) => {
+    const suggestions = aiSuggestions[nodeId] || [];
+    if (suggestions.length === 0) return;
+
+    const node = nodes.find(n => n.id === nodeId);
+    let currentMaxOrder = node?.checklist && node.checklist.length > 0 
+      ? Math.max(...node.checklist.map((c: any) => c.sort_order || 0)) 
+      : -1;
+
+    try {
+      for (const item of suggestions) {
+        currentMaxOrder += 1;
+        const newItemId = 'c_' + Math.random().toString(36).substr(2, 9);
+        await supabaseFetch('checklist_items', 'POST', {
+          id: newItemId,
+          node_id: nodeId,
+          text: item.text,
+          details: item.details,
+          is_completed: false,
+          sort_order: currentMaxOrder
+        });
+      }
+      setAiSuggestions(prev => {
+        const updated = { ...prev };
+        delete updated[nodeId];
+        return updated;
+      });
+      fetchData(true);
+      setCustomAlert({ isOpen: true, message: "已成功將所有 AI 推薦項目匯入至任務清單！" });
+    } catch (err: any) {
+      setCustomAlert({ isOpen: true, message: "匯入建議失敗：" + err.message });
+    }
+  };
+
+  // --- 本地語義意圖 Fallback 機制 (在斷網、API 出錯時自動接管) ---
+  const handleLocalVoiceCommandFallback = (commandText: string) => {
+    const text = commandText.toLowerCase().trim();
+    const currentNodes = filteredNodesRef.current;
+
+    if (currentNodes.length === 0) {
+      speak("目前這個場次，沒有安排任何服事任務喔。");
+      return;
+    }
+
+    if (text.includes("現在") || text.includes("目前") || text.includes("當前") || text.includes("現在的任務")) {
+      const activeId = getActiveNodeIdByTime();
+      const activeNode = currentNodes.find(n => n.id === activeId);
+      
+      if (activeNode) {
+        speak(`現在時間是 ${currentTimeRef.current}。目前正在進行的服事任務是：「${activeNode.title}」。負責人是：「${activeNode.assignee}」，地點在：「${activeNode.location}」。`);
+      } else {
+        speak(`現在時間是 ${currentTimeRef.current}，目前時間點沒有安排特定服事任務喔。`);
+      }
+    } 
+    else if (text.includes("接下來") || text.includes("下一個") || text.includes("等一下") || text.includes("稍後")) {
+      const activeId = getActiveNodeIdByTime();
+      const sorted = [...currentNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+      const activeIdx = sorted.findIndex(n => n.id === activeId);
+
+      if (activeIdx !== -1 && activeIdx < sorted.length - 1) {
+        const nextNode = sorted[activeIdx + 1];
+        speak(`下一個服事任務將在 ${nextNode.time} 開始。任務是：「${nextNode.title}」。由「${nextNode.assignee}」負責，在「${nextNode.location}」進行。`);
+      } else {
+        speak("接下來已經沒有其他服事任務囉。大家今天辛苦了，歡迎回家！");
+      }
+    } 
+    else if (text.includes("今天") || text.includes("全部") || text.includes("所有") || text.includes("流程")) {
+      speak(`今天這堂服事一共安排了 ${currentNodes.length} 個任務流程，您可以透過今日流程查看完整的時間軸。`);
+    } 
+    else if (text.includes("進度") || text.includes("完成") || text.includes("狀況")) {
+      const allTasks = currentNodes.flatMap(n => n.checklist || []);
+      const completedTasks = allTasks.filter(t => t.is_completed);
+      const rate = calculateRate(completedTasks.length, allTasks.length);
+      speak(`目前服事進度：總共 ${allTasks.length} 個確認細項，已完成 ${completedTasks.length} 項，整體完成率為百分之 ${rate}。`);
+    }
+    else if (text.includes("奉獻") && text.includes("袋")) {
+      if (currentService === "六晚崇") {
+        speak("週六晚崇拜需要準備 4 個奉獻袋。");
+      } else if (currentService === "主一堂") {
+        speak("主日第一堂崇拜需要準備 6 個奉獻袋。");
+      } else {
+        speak("主日第二堂崇拜需要準備 8 個奉獻袋。");
+      }
+    }
+    else {
+      speak(`我聽到了「${commandText}」，但我不太明白意思。您可以試著問我：「現在要做什麼？」或者「接下來要做什麼？」`);
+    }
+  };
+
+  // --- AI 智慧語音指令核心入口 ---
+  const handleVoiceCommand = async (commandText: string) => {
+    setIsThinking(true);
+    try {
+      const instruction = generateSystemInstruction(currentService, currentTimeRef.current, filteredNodesRef.current);
+      // 呼叫 Gemini 智慧解析大模型，並獲取最靈活的擬真擬人回覆
+      const response = await callGeminiWithRetry(commandText, instruction);
+      speak(response);
+    } catch (err) {
+      console.error("Gemini AI 語音理解失敗，改用本地關鍵字比對 fallback", err);
+      handleLocalVoiceCommandFallback(commandText);
+    } finally {
+      setIsThinking(false);
+    }
+  };
+
+  // --- 語音辨識初始化與控制邏輯 ---
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognitionClass) {
+        const rec = new SpeechRecognitionClass();
+        rec.continuous = false;
+        rec.interimResults = false;
+        rec.lang = 'zh-TW';
+
+        rec.onstart = () => {
+          setIsListening(true);
+        };
+
+        rec.onend = () => {
+          setIsListening(false);
+        };
+
+        rec.onerror = (event: any) => {
+          console.error("語音辨識出錯", event.error);
+          setIsListening(false);
+          if (event.error === 'not-allowed') {
+            setCustomAlert({ isOpen: true, message: "語音助理需要麥克風使用權限，請於瀏覽器中允許麥克風權限後重試！" });
+          }
+        };
+
+        rec.onresult = async (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          setVoiceResultText(transcript);
+          setIsListening(false); // 停止聆聽並進入思考狀態
+          await handleVoiceCommand(transcript);
+          
+          // 4秒後自動淡出語音辨識浮示
+          setTimeout(() => {
+            setVoiceResultText("");
+          }, 4000);
+        };
+
+        setRecognition(rec);
+      }
+    }
+  }, []);
+
+  // 點擊麥克風按鈕觸發語音監聽
+  const toggleListening = () => {
+    if (!recognition) {
+      setCustomAlert({ isOpen: true, message: "您的裝置或瀏覽器不支援語音助理功能。建議使用 Google Chrome 或 Edge 瀏覽器！" });
+      return;
+    }
+    if (isListening) {
+      recognition.stop();
+    } else {
+      try {
+        recognition.start();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
   // 確保時鐘即時更新，並加入自動切換邏輯 (維持原樣)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setCurrentTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+      const newTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      setCurrentTime(newTimeStr);
 
       if (!hasManuallySwitchedRef.current) {
         const day = now.getDay(); 
-        const timeValue = now.getHours() + now.getMinutes() / 60; 
+        // 加上括號隔離運算
+        const timeValue = now.getHours() + (now.getMinutes() / 60); 
 
         if (day === 6) {
           setCurrentService('六晚崇');
@@ -138,11 +537,44 @@ export default function App() {
     };
     
     updateTime(); 
-    const timer = setInterval(updateTime, 60000); 
+    const timer = setInterval(updateTime, 1000); // 1秒更新，確保報時無延遲不漏接
     return () => clearInterval(timer);
   }, []);
 
-  // 背景自動同步雲端資料，改由 sort_order 升序排序
+  // --- 【整合自動化】自動語音報時核心觸發邏輯 ---
+  useEffect(() => {
+    if (!isVoiceEnabled || !currentTime || nodes.length === 0) return;
+
+    const currentServiceNodes = nodes.filter(n => n.service_type === currentService);
+    const nodesToAnnounce = currentServiceNodes.filter(node => node.time === currentTime);
+
+    nodesToAnnounce.forEach(async (node) => {
+      if (!announcedNodesRef.current.has(node.id)) {
+        announcedNodesRef.current.add(node.id);
+        
+        // 進入 AI 後端處理與報時生成狀態
+        setIsThinking(true);
+        try {
+          const instruction = generateSystemInstruction(currentService, currentTime, [node]);
+          const aiPrompt = `目前時間 ${currentTime}。請以「招待助理」溫和親切、充滿愛的口吻為今日主日崇拜現場生成一段簡短（限2句話）且精煉的「語音播報提醒詞」，告訴同工要進行這項服事。任務內容是：「${node.title}」，負責崗位：「${node.assignee}」，服事地點：「${node.location}」。請不要輸出 any Markdown 標籤。`;
+          const response = await callGeminiWithRetry(aiPrompt, instruction);
+          speak(response);
+        } catch (err) {
+          console.error("AI 自動報時廣播詞生成失敗，自動 Fallback 為本地標準朗讀", err);
+          // 本地 Fallback 朗讀
+          speak(`時間到，現在時間 ${currentTime}。提醒服事任務：${node.title}。負責崗位：${node.assignee}。`);
+        } finally {
+          setIsThinking(false);
+        }
+      }
+    });
+
+    if (currentTime === "00:00") {
+      announcedNodesRef.current.clear();
+    }
+  }, [currentTime, isVoiceEnabled, nodes, currentService]);
+
+  // 背景自動同步雲端資料，改由 sort_order 升序排序 (維持原樣)
   const fetchData = async (isBackgroundSync = false) => {
     try {
       if (!isBackgroundSync) setFetchError("");
@@ -179,7 +611,7 @@ export default function App() {
   const filteredNodes = nodes.filter(n => n.service_type === currentService);
   const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
 
-  // --- 智慧跟隨當下時鐘判定 activeNodeId ---
+  // --- 智慧跟隨當下時鐘判定 activeNodeId (維持原樣) ---
   const timeToMinutes = (tStr: string) => {
     if (!tStr) return 0;
     const [h, m] = tStr.split(':').map(Number);
@@ -214,7 +646,7 @@ export default function App() {
 
   const activeNodeId = getActiveNodeIdByTime();
 
-  // 當 activeNodeId 隨著時間改變或切換場次時，全自動平滑捲動到該節點
+  // 當 activeNodeId 隨著時間改變或切換場次時，全自動平滑捲動到該節點 (維持原樣)
   useEffect(() => {
     if (!isLoading && !fetchError && filteredNodes.length > 0 && activeTab === 'timeline' && activeNodeRef.current) {
       setTimeout(() => {
@@ -589,197 +1021,187 @@ export default function App() {
     );
   };
 
-  // 全新品牌風格 - 載入畫面
-  if (isLoading) {
+  // 全新品牌風格 - 時間軸畫面 (採用明確的 return 區塊確保編譯無虞)
+  const renderTimelineView = () => {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-[#F3EEFF]">
-        <div className="flex flex-col items-center gap-6 p-8 bg-white/80 backdrop-blur-xl rounded-[32px] shadow-2xl shadow-[#6D55A3]/10">
-          <div className="relative flex items-center justify-center w-16 h-16 bg-gradient-to-br from-[#F25D6B] to-[#6D55A3] rounded-2xl shadow-lg animate-pulse">
-            <Sparkles className="w-8 h-8 text-white" />
+      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        {/* 語音解析與思考提示泡條 */}
+        {(voiceResultText || isThinking) && (
+          <div className="mb-4 p-3 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-[#6D55A3] animate-bounce shadow-md">
+            {isThinking ? (
+              <Loader2 className="w-4.5 h-4.5 text-[#6D55A3] animate-spin shrink-0" />
+            ) : (
+              <Sparkles className="w-4.5 h-4.5 text-[#F25D6B] shrink-0" />
+            )}
+            <span>
+              {isThinking ? "智慧助理正在思考您的問題..." : `語音指令辨識為：「${voiceResultText}」`}
+            </span>
           </div>
-          <p className="text-[#6D55A3] font-bold tracking-widest text-sm uppercase">正在連線至夏凱納雲端...</p>
-        </div>
-      </div>
-    );
-  }
+        )}
 
-  if (!hasValidKeys) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-[#FFF9F3] p-6">
-        <div className="bg-white p-8 rounded-[24px] max-w-md w-full shadow-xl shadow-[#F25D6B]/5 border border-[#FFE8A3]">
-          <h2 className="text-xl font-bold text-[#F25D6B] mb-4 flex items-center gap-2">
-            <AlertCircle /> 系統警告：雲端鑰匙錯誤
-          </h2>
-          <p className="text-[#7B7B74] text-sm leading-relaxed">請確認程式碼中的網址與鑰匙設定正確。</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 全新品牌風格 - 時間軸畫面
-  const renderTimelineView = () => (
-    <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
-      {filteredNodes.length === 0 ? (
-        <div className="text-center text-[#7B7B74] mt-16 text-sm bg-white p-6 rounded-[24px] shadow-sm border border-[#E6EAF0]">
-          <Sparkles className="w-8 h-8 text-[#E6EAF0] mx-auto mb-3" />
-          此堂次目前尚未安排服事任務
-        </div>
-      ) : (
-        <div className="relative mt-2">
-          {/* 溫慢主時間軸 */}
-          <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
-          
-          {filteredNodes.map((node) => {
-            const completed = isNodeCompleted(node);
-            const active = node.id === activeNodeId;
-            return (
-              <div key={node.id} className="relative mb-8 transition-all duration-500" ref={active ? activeNodeRef : null}>
-                
-                {/* 節點圓點 */}
-                <div className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10">
-                  {completed ? (
-                    <div className="w-7 h-7 rounded-full bg-[#00B8B8] flex items-center justify-center shadow-sm shadow-[#00B8B8]/30">
-                       <Check className="w-4 h-4 text-white" strokeWidth={3} />
-                    </div>
-                  ) : active ? (
-                    <div className="relative flex items-center justify-center w-8 h-8">
-                      <span className="absolute inline-flex w-full h-full rounded-full opacity-30 bg-[#F25D6B] animate-ping" />
-                      <span className="relative inline-flex w-4 h-4 rounded-full bg-[#F25D6B] shadow-sm shadow-[#F25D6B]/50" />
-                    </div>
-                  ) : (
-                    <div className="w-4 h-4 rounded-full border-[3px] border-[#E6EAF0] bg-white" />
-                  )}
-                </div>
-
-                {/* 任務卡片 */}
-                <div className={`ml-12 rounded-[24px] p-5 transition-all duration-300 ${
-                  completed ? 'bg-white/60 border border-[#E6EAF0] opacity-70' : 
-                  active ? 'bg-[#FFF2F4] ring-2 ring-[#F25D6B] shadow-lg shadow-[#F25D6B]/15' : 
-                  'bg-white border border-[#E6EAF0] shadow-sm'
-                }`}>
+        {filteredNodes.length === 0 ? (
+          <div className="text-center text-[#7B7B74] mt-16 text-sm bg-white p-6 rounded-[24px] shadow-sm border border-[#E6EAF0]">
+            <Sparkles className="w-8 h-8 text-[#E6EAF0] mx-auto mb-3" />
+            此堂次目前尚未安排服事任務
+          </div>
+        ) : (
+          <div className="relative mt-2">
+            {/* 溫慢主時間軸 */}
+            <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
+            
+            {filteredNodes.map((node) => {
+              const completed = isNodeCompleted(node);
+              const active = node.id === activeNodeId;
+              return (
+                <div key={node.id} className="relative mb-8 transition-all duration-500" ref={active ? activeNodeRef : null}>
                   
-                  {/* 標題與時間列 */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="w-full">
-                      <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
-                        {renderInlineEdit('node', node.id, 'title', node.title, "w-full")}
-                      </h3>
-                      <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
-                        <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
-                          <Clock className="w-3 h-3" />
-                          {renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}
-                        </span>
-                        {active && (
-                          <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
-                            進行中
+                  {/* 節點圓點 */}
+                  <div className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10">
+                    {completed ? (
+                      <div className="w-7 h-7 rounded-full bg-[#00B8B8] flex items-center justify-center shadow-sm shadow-[#00B8B8]/30">
+                         <Check className="w-4 h-4 text-white" strokeWidth={3} />
+                      </div>
+                    ) : active ? (
+                      <div className="relative flex items-center justify-center w-8 h-8">
+                        <span className="absolute inline-flex w-full h-full rounded-full opacity-30 bg-[#F25D6B] animate-ping" />
+                        <span className="relative inline-flex w-4 h-4 rounded-full bg-[#F25D6B] shadow-sm shadow-[#F25D6B]/50" />
+                      </div>
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border-[3px] border-[#E6EAF0] bg-white" />
+                    )}
+                  </div>
+
+                  {/* 任務卡片 */}
+                  <div className={`ml-12 rounded-[24px] p-5 transition-all duration-300 ${
+                    completed ? 'bg-white/60 border border-[#E6EAF0] opacity-70' : 
+                    active ? 'bg-[#FFF2F4] ring-2 ring-[#F25D6B] shadow-lg shadow-[#F25D6B]/15' : 
+                    'bg-white border border-[#E6EAF0] shadow-sm'
+                  }`}>
+                    
+                    {/* 標題與時間列 */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="w-full">
+                        <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
+                          {renderInlineEdit('node', node.id, 'title', node.title, "w-full")}
+                        </h3>
+                        <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
+                          <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
+                            <Clock className="w-3 h-3" />
+                            {renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}
                           </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 角色與地點資訊 */}
-                  <div className="flex flex-col gap-2.5 mt-2 text-[13px] text-[#7B7B74]">
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-[#F25D6B]/70 shrink-0" />
-                      <span className="font-medium text-[#1F2937]">
-                        {renderInlineEdit('node', node.id, 'location', node.location, "w-full")}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4 text-[#6D55A3]/70 shrink-0" />
-                      <span className="font-medium text-[#1F2937]">
-                        {renderInlineEdit('node', node.id, 'assignee', node.assignee, "w-full")}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  {/* Checklist 區域 */}
-                  {node.checklist && node.checklist.length > 0 && (
-                    <div className="mt-5 space-y-3">
-                      <div className="flex items-center gap-2 mb-3">
-                        <div className="h-px bg-[#E6EAF0] flex-1"></div>
-                        <div className="text-[10px] font-black text-[#6D55A3]/40 uppercase tracking-widest">任務清單</div>
-                        <div className="h-px bg-[#E6EAF0] flex-1"></div>
-                      </div>
-
-                      {node.checklist.map((item: any) => (
-                        <div key={item.id} className={`flex items-start gap-3 p-3.5 rounded-[16px] transition-all duration-200 ${
-                          item.is_completed ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20' : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'
-                        }`}>
-                          
-                          {/* 圓角自訂 Checkbox */}
-                          <label className="relative flex items-center justify-center shrink-0 mt-0.5 cursor-pointer">
-                            <input 
-                              type="checkbox" 
-                              className="peer sr-only" 
-                              checked={item.is_completed} 
-                              onChange={() => toggleChecklist(node.id, item.id)}
-                            />
-                            <div className={`w-5 h-5 rounded-[6px] border-2 transition-all flex items-center justify-center ${
-                              item.is_completed ? 'bg-[#00B8B8] border-[#00B8B8]' : 'bg-white border-[#E6EAF0] peer-focus:ring-2 ring-[#6D55A3]/30'
-                            }`}>
-                              {item.is_completed && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
-                            </div>
-                          </label>
-                          
-                          <div className="flex-1">
-                            <div 
-                              className={`flex items-start gap-1.5 ${item.details ? 'cursor-pointer group' : ''}`}
-                              onClick={() => {
-                                // 如果管理員解鎖了，就不觸發 Modal，直接讓他們點擊修改
-                                if (!isAdminUnlocked && item.details) {
-                                  setDetailModal({ isOpen: true, title: item.text, details: item.details });
-                                }
-                              }}
-                            >
-                              <span className={`text-[14px] font-semibold leading-relaxed transition-all ${
-                                item.is_completed ? 'text-[#7B7B74] line-through opacity-70' : 'text-[#1F2937]'
-                              } ${(!isAdminUnlocked && item.details) ? 'group-hover:text-[#F25D6B]' : ''}`}>
-                                {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
-                              </span>
-                              
-                              {/* Info Icon */}
-                              {!isAdminUnlocked && item.details && (
-                                <div className={`mt-0.5 shrink-0 transition-colors ${item.is_completed ? 'text-[#E6EAF0]' : 'text-[#00B8B8] group-hover:text-[#F25D6B]'}`}>
-                                  <Info className="w-4 h-4" />
-                                </div>
-                              )}
-                            </div>
-
-                            {/* 管理員解鎖時，Checklist 的備註 details 也可以直接行內修改 */}
-                            {isAdminUnlocked && (
-                              <div className="mt-1 text-xs text-slate-500 bg-slate-50 p-1.5 rounded-lg border border-dashed border-slate-200">
-                                <span className="font-bold text-[10px] text-[#6D55A3] block mb-0.5">備註細節：</span>
-                                {renderInlineEdit('checklist', item.id, 'details', item.details, "w-full text-xs text-slate-600 block", "textarea")}
-                              </div>
-                            )}
-                            
-                            {/* 完成時間戳記 */}
-                            {item.is_completed && item.completed_at && (
-                              <span className="text-[10px] text-[#00B8B8] font-bold block mt-1.5 tracking-wider">
-                                DONE AT {item.completed_at}
-                              </span>
-                            )}
-                          </div>
+                          {active && (
+                            <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
+                              進行中
+                            </span>
+                          )}
                         </div>
-                      ))}
+                      </div>
                     </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
 
-  // 全新品牌風格 - 服事動態（方案 B：依負責角色分組）
+                    {/* 角色與地點資訊 */}
+                    <div className="flex flex-col gap-2.5 mt-2 text-[13px] text-[#7B7B74]">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-[#F25D6B]/70 shrink-0" />
+                        <span className="font-medium text-[#1F2937]">
+                          {renderInlineEdit('node', node.id, 'location', node.location, "w-full")}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <User className="w-4 h-4 text-[#6D55A3]/70 shrink-0" />
+                        <span className="font-medium text-[#1F2937]">
+                          {renderInlineEdit('node', node.id, 'assignee', node.assignee, "w-full")}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Checklist 區域 */}
+                    {node.checklist && node.checklist.length > 0 && (
+                      <div className="mt-5 space-y-3">
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="h-px bg-[#E6EAF0] flex-1"></div>
+                          <div className="text-[10px] font-black text-[#6D55A3]/40 uppercase tracking-widest">任務清單</div>
+                          <div className="h-px bg-[#E6EAF0] flex-1"></div>
+                        </div>
+
+                        {node.checklist.map((item: any) => {
+                          return (
+                            <div key={item.id} className={`flex items-start gap-3 p-3.5 rounded-[16px] transition-all duration-200 ${
+                              item.is_completed ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20' : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'
+                            }`}>
+                              
+                              {/* 圓角自訂 Checkbox */}
+                              <label className="relative flex items-center justify-center shrink-0 mt-0.5 cursor-pointer">
+                                <input 
+                                  type="checkbox" 
+                                  className="peer sr-only" 
+                                  checked={item.is_completed} 
+                                  onChange={() => toggleChecklist(node.id, item.id)}
+                                />
+                                <div className={`w-5 h-5 rounded-[6px] border-2 transition-all flex items-center justify-center ${
+                                  item.is_completed ? 'bg-[#00B8B8] border-[#00B8B8]' : 'bg-white border-[#E6EAF0] peer-focus:ring-2 ring-[#6D55A3]/30'
+                                }`}>
+                                  {item.is_completed && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                                </div>
+                              </label>
+                              
+                              <div className="flex-1">
+                                <div 
+                                  className={`flex items-start gap-1.5 ${item.details ? 'cursor-pointer group' : ''}`}
+                                  onClick={() => {
+                                    if (!isAdminUnlocked && item.details) {
+                                      setDetailModal({ isOpen: true, title: item.text, details: item.details });
+                                    }
+                                  }}
+                                >
+                                  <span className={`text-[14px] font-semibold leading-relaxed transition-all ${
+                                    item.is_completed ? 'text-[#7B7B74] line-through opacity-70' : 'text-[#1F2937]'
+                                  } ${(!isAdminUnlocked && item.details) ? 'group-hover:text-[#F25D6B]' : ''}`}>
+                                    {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
+                                  </span>
+                                  
+                                  {/* Info Icon */}
+                                  {!isAdminUnlocked && item.details && (
+                                    <div className={`mt-0.5 shrink-0 transition-colors ${item.is_completed ? 'text-[#E6EAF0]' : 'text-[#00B8B8] group-hover:text-[#F25D6B]'}`}>
+                                      <Info className="w-4 h-4" />
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* 管理員解鎖時，Checklist 的備註 details 也可以直接行內修改 */}
+                                {isAdminUnlocked && (
+                                  <div className="mt-1 text-xs text-slate-500 bg-slate-50 p-1.5 rounded-lg border border-dashed border-slate-200">
+                                    <span className="font-bold text-[10px] text-[#6D55A3] block mb-0.5">備註細節：</span>
+                                    {renderInlineEdit('checklist', item.id, 'details', item.details, "w-full text-xs text-slate-600 block", "textarea")}
+                                  </div>
+                                )}
+                                
+                                {/* 完成時間戳記 */}
+                                {item.is_completed && item.completed_at && (
+                                  <span className="text-[10px] text-[#00B8B8] font-bold block mt-1.5 tracking-wider">
+                                    DONE AT {item.completed_at}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // 全新品牌風格 - 服事動態
   const renderReviewView = () => {
     const allTasks = filteredNodes.flatMap(n => n.checklist || []);
     const completedTasks = allTasks.filter(t => t.is_completed);
-    const completionRate = Math.round((completedTasks.length / (allTasks.length || 1)) * 100);
+    const completionRate = calculateRate(completedTasks.length, allTasks.length);
     const missedTasks = allTasks.filter(t => !t.is_completed);
 
     // 依負責角色（assignee）進行任務分組
@@ -836,48 +1258,52 @@ export default function App() {
             </div>
           ) : (
             <div className="space-y-6">
-              {Object.entries(groupedMissed).map(([role, tasks]) => (
-                <div key={role} className="bg-white p-5 rounded-[24px] border border-[#E6EAF0] shadow-sm">
-                  {/* 分組標題 */}
-                  <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#F3EEFF]">
-                    <span className="font-extrabold text-[15px] text-[#6D55A3] flex items-center gap-1.5">
-                      <User className="w-4 h-4 text-[#F25D6B]" /> {role}
-                    </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 bg-[#FFF2F4] text-[#F25D6B] rounded-full">
-                      待辦 {tasks.length} 項
-                    </span>
-                  </div>
-                  
-                  {/* 任務卡片內列表 */}
-                  <div className="space-y-2.5">
-                    {tasks.map((task: any) => (
-                      <div 
-                        key={task.id}
-                        onClick={() => {
-                          setDetailModal({
-                            isOpen: true,
-                            title: task.text,
-                            details: task.details || '本項目目前沒有額外的詳細提醒說明。'
-                          });
-                        }}
-                        className="p-3 bg-[#FFF2F4]/40 hover:bg-[#FFF2F4]/80 border border-[#F25D6B]/10 rounded-[16px] cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-start justify-between gap-1.5">
-                          <span className="text-[14px] font-bold text-[#1F2937] leading-relaxed">
-                            {task.text}
-                          </span>
-                          <div className="mt-0.5 shrink-0 text-[#00B8B8]">
-                            <Info className="w-3.5 h-3.5" />
+              {Object.entries(groupedMissed).map(([role, tasks]) => {
+                return (
+                  <div key={role} className="bg-white p-5 rounded-[24px] border border-[#E6EAF0] shadow-sm">
+                    {/* 分組標題 */}
+                    <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#F3EEFF]">
+                      <span className="font-extrabold text-[15px] text-[#6D55A3] flex items-center gap-1.5">
+                        <User className="w-4 h-4 text-[#F25D6B]" /> {role}
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-[#FFF2F4] text-[#F25D6B] rounded-full">
+                        待辦 {tasks.length} 項
+                      </span>
+                    </div>
+                    
+                    {/* 任務卡片內列表 */}
+                    <div className="space-y-2.5">
+                      {tasks.map((task: any) => {
+                        return (
+                          <div 
+                            key={task.id}
+                            onClick={() => {
+                              setDetailModal({
+                                isOpen: true,
+                                title: task.text,
+                                details: task.details || '本項目目前沒有額外的詳細提醒說明。'
+                              });
+                            }}
+                            className="p-3 bg-[#FFF2F4]/40 hover:bg-[#FFF2F4]/80 border border-[#F25D6B]/10 rounded-[16px] cursor-pointer transition-colors"
+                          >
+                            <div className="flex items-start justify-between gap-1.5">
+                              <span className="text-[14px] font-bold text-[#1F2937] leading-relaxed">
+                                {task.text}
+                              </span>
+                              <div className="mt-0.5 shrink-0 text-[#00B8B8]">
+                                <Info className="w-3.5 h-3.5" />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 mt-1 text-[11px] text-[#7B7B74] font-medium">
+                              <Clock className="w-3 h-3" /> {task.nodeTime} - {task.nodeTitle}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-1 mt-1 text-[11px] text-[#7B7B74] font-medium">
-                          <Clock className="w-3 h-3" /> {task.nodeTime} - {task.nodeTitle}
-                        </div>
-                      </div>
-                    ))}
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -885,320 +1311,400 @@ export default function App() {
     );
   };
 
-  // 全新品牌風格 - 管理畫面 (擴充即時編輯更新、子任務拖曳排序與手動上下移位)
-  const renderAdminView = () => (
-    <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
-      <div className="mb-6 px-1 flex items-center justify-between">
+  // 全新品牌風格 - 管理畫面 (採用明確 return 與防錯 JSX 閉合)
+  const renderAdminView = () => {
+    return (
+      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        <div className="mb-6 px-1 flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">管理服事任務</h2>
+            <p className="text-sm font-medium text-[#7B7B74] mt-1.5">目前管理區塊：<span className="text-[#6D55A3] font-bold">{currentService}</span></p>
+          </div>
+          
+          {/* 【方案 B】自動報時按鈕與鎖定登出按鈕並列 */}
+          <div className="flex items-center gap-2">
+            {/* 自動報時（移至任務管理頁面） */}
+            <button
+              type="button"
+              onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
+                isVoiceEnabled 
+                  ? 'bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm' 
+                  : 'bg-white text-[#7B7B74] border-[#E6EAF0] hover:bg-white'
+              }`}
+              title="開啟/關閉自動任務語音廣播"
+            >
+              {isVoiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              <span>{isVoiceEnabled ? '自動報時' : '自動報時'}</span>
+            </button>
+
+            {/* 一鍵重新鎖定按鈕 */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsAdminUnlocked(false);
+                setActiveTab('timeline');
+              }}
+              className="px-3 py-1.5 bg-[#F25D6B]/10 hover:bg-[#F25D6B]/25 text-[#F25D6B] border border-[#F25D6B]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              鎖定登出
+            </button>
+          </div>
+        </div>
+
+        {/* 新增任務節點表單 */}
+        <form onSubmit={handleAddNode} className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-8">
+          <h3 className="text-[13px] font-black text-[#6D55A3] uppercase tracking-widest mb-5 flex items-center gap-2">
+            <Plus className="w-4 h-4 text-[#F25D6B]" /> 新增任務節點
+          </h3>
+          <div className="space-y-4">
+            <div className="flex gap-4">
+              <div className="w-1/3">
+                <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">所屬場次</label>
+                <select 
+                  value={newNode.service_type} 
+                  onChange={e => setNewNode({...newNode, service_type: e.target.value})}
+                  className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow"
+                >
+                  {serviceOptions.map(srv => <option key={srv} value={srv}>{srv}</option>)}
+                </select>
+              </div>
+              <div className="w-2/3">
+                <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">時間</label>
+                <input type="time" required value={newNode.time} onChange={e => setNewNode({...newNode, time: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">任務標題</label>
+              <input type="text" required placeholder="例如：招待同工就位" value={newNode.title} onChange={e => setNewNode({...newNode, title: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none" />
+            </div>
+            <div className="flex gap-4">
+              <div className="w-1/2">
+                <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">負責角色</label>
+                <input type="text" placeholder="例如：大堂專招" value={newNode.assignee} onChange={e => setNewNode({...newNode, assignee: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none" />
+              </div>
+              <div className="w-1/2">
+                <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">服事地點</label>
+                <input type="text" placeholder="例如：大會堂" value={newNode.location} onChange={e => setNewNode({...newNode, location: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">備註細節 (選填)</label>
+              <textarea rows={2} value={newNode.details} onChange={e => setNewNode({...newNode, details: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none resize-none" />
+            </div>
+            <button disabled={isAdding} type="submit" className="w-full mt-4 py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[14px] text-sm hover:opacity-90 disabled:opacity-50 transition-all shadow-md shadow-[#F25D6B]/20">
+              {isAdding ? '新增至雲端中...' : '確認建立任務'}
+            </button>
+          </div>
+        </form>
+
+        {/* 任務總覽區 */}
         <div>
-          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">管理服事任務</h2>
-          <p className="text-sm font-medium text-[#7B7B74] mt-1.5">目前管理區塊：<span className="text-[#6D55A3] font-bold">{currentService}</span></p>
-        </div>
-        
-        {/* 一鍵重新鎖定按鈕 */}
-        <button
-          onClick={() => {
-            setIsAdminUnlocked(false);
-            setActiveTab('timeline');
-          }}
-          className="px-3 py-1.5 bg-[#F25D6B]/10 hover:bg-[#F25D6B]/25 text-[#F25D6B] border border-[#F25D6B]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
-        >
-          <Lock className="w-3.5 h-3.5" />
-          鎖定登出
-        </button>
-      </div>
-
-      {/* 新增任務節點表單 */}
-      <form onSubmit={handleAddNode} className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-8">
-        <h3 className="text-[13px] font-black text-[#6D55A3] uppercase tracking-widest mb-5 flex items-center gap-2">
-          <Plus className="w-4 h-4 text-[#F25D6B]" /> 新增任務節點
-        </h3>
-        <div className="space-y-4">
-          <div className="flex gap-4">
-            <div className="w-1/3">
-              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">所屬場次</label>
-              <select 
-                value={newNode.service_type} 
-                onChange={e => setNewNode({...newNode, service_type: e.target.value})}
-                className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow"
-              >
-                {serviceOptions.map(srv => <option key={srv} value={srv}>{srv}</option>)}
-              </select>
-            </div>
-            <div className="w-2/3">
-              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">時間</label>
-              <input type="time" required value={newNode.time} onChange={e => setNewNode({...newNode, time: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">任務標題</label>
-            <input type="text" required placeholder="例如：招待同工就位" value={newNode.title} onChange={e => setNewNode({...newNode, title: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
-          </div>
-          <div className="flex gap-4">
-            <div className="w-1/2">
-              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">負責角色</label>
-              <input type="text" placeholder="例如：大堂專招" value={newNode.assignee} onChange={e => setNewNode({...newNode, assignee: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
-            </div>
-            <div className="w-1/2">
-              <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">服事地點</label>
-              <input type="text" placeholder="例如：大會堂" value={newNode.location} onChange={e => setNewNode({...newNode, location: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-[#7B7B74] mb-1.5">備註細節 (選填)</label>
-            <textarea rows={2} value={newNode.details} onChange={e => setNewNode({...newNode, details: e.target.value})} className="w-full px-3 py-2.5 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[12px] text-sm font-medium text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 transition-shadow resize-none" />
-          </div>
-          <button disabled={isAdding} type="submit" className="w-full mt-4 py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[14px] text-sm hover:opacity-90 disabled:opacity-50 transition-all shadow-md shadow-[#F25D6B]/20">
-            {isAdding ? '新增至雲端中...' : '確認建立任務'}
-          </button>
-        </div>
-      </form>
-
-      {/* 任務總覽區 (新增即時編輯、展開子清單拖曳排序) */}
-      <div>
-        <h3 className="text-[11px] font-black text-[#7B7B74] mb-3 tracking-widest uppercase px-1">任務總覽與編輯 ({currentService})</h3>
-        <div className="space-y-4">
-          {filteredNodes.length === 0 && <p className="text-sm font-medium text-[#7B7B74] text-center py-6 bg-white rounded-[20px] border border-[#E6EAF0]">尚無任務資料</p>}
-          {filteredNodes.map(node => {
-            const isEditing = editingNodeId === node.id;
-            const isChecklistExpanded = expandedChecklistNodeId === node.id;
-            return (
-              <div key={node.id} className="p-4 bg-white border border-[#E6EAF0] rounded-[24px] shadow-sm transition-all duration-300">
-                {isEditing ? (
-                  /* 編輯模式表單 */
-                  <div className="space-y-3.5">
-                    <div className="flex items-center justify-between pb-2 border-b border-[#F3EEFF] mb-1">
-                      <span className="text-xs font-black text-[#6D55A3]">編輯任務節點</span>
-                      <span className="text-[10px] font-mono text-[#7B7B74]">ID: {node.id}</span>
-                    </div>
-                    
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">時間</label>
-                        <input 
-                          type="time" 
-                          value={editForm.time} 
-                          onChange={e => setEditForm({...editForm, time: e.target.value})} 
-                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">標題</label>
-                        <input 
-                          type="text" 
-                          value={editForm.title} 
-                          onChange={e => setEditForm({...editForm, title: e.target.value})} 
-                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">角色</label>
-                        <input 
-                          type="text" 
-                          value={editForm.assignee} 
-                          onChange={e => setEditForm({...editForm, assignee: e.target.value})} 
-                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">地點</label>
-                        <input 
-                          type="text" 
-                          value={editForm.location} 
-                          onChange={e => setEditForm({...editForm, location: e.target.value})} 
-                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">詳細備註</label>
-                      <textarea 
-                        rows={2} 
-                        value={editForm.details} 
-                        onChange={e => setEditForm({...editForm, details: e.target.value})} 
-                        className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none resize-none" 
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-2">
-                      <button 
-                        type="button" 
-                        onClick={() => setEditingNodeId(null)}
-                        className="px-3 py-1.5 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] text-xs font-bold rounded-lg transition-all"
-                      >
-                        取消
-                      </button>
-                      <button 
-                        type="button" 
-                        onClick={() => handleUpdateNode(node.id)}
-                        className="px-4 py-1.5 bg-gradient-to-r from-[#00B8B8] to-[#6D55A3] text-white text-xs font-bold rounded-lg shadow-sm hover:opacity-90 transition-all"
-                      >
-                        儲存更新
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* 唯讀與行內編輯模式展示 */
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="text-[14px] font-bold text-[#1F2937] mb-1 flex items-center gap-2">
-                           <span className="text-[#6D55A3] font-mono">{renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}</span> 
-                           {renderInlineEdit('node', node.id, 'title', node.title, "flex-1")}
-                        </div>
-                        <div className="text-xs font-medium text-[#7B7B74] flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span className="flex items-center gap-1">
-                            <User className="w-3 h-3 text-[#6D55A3]/70" /> 
-                            {renderInlineEdit('node', node.id, 'assignee', node.assignee, "")}
-                          </span>
-                          <span className="text-[#E6EAF0]">|</span> 
-                          <span className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-[#F25D6B]/70" /> 
-                            {renderInlineEdit('node', node.id, 'location', node.location, "")}
-                          </span>
-                        </div>
+          <h3 className="text-[11px] font-black text-[#7B7B74] mb-3 tracking-widest uppercase px-1">任務總覽與編輯 ({currentService})</h3>
+          <div className="space-y-4">
+            {filteredNodes.length === 0 && <p className="text-sm font-medium text-[#7B7B74] text-center py-6 bg-white rounded-[20px] border border-[#E6EAF0]">尚無任務資料</p>}
+            {filteredNodes.map(node => {
+              const isEditing = editingNodeId === node.id;
+              const isChecklistExpanded = expandedChecklistNodeId === node.id;
+              return (
+                <div key={node.id} className="p-4 bg-white border border-[#E6EAF0] rounded-[24px] shadow-sm transition-all duration-300">
+                  {isEditing ? (
+                    /* 編輯模式表單 */
+                    <div className="space-y-3.5">
+                      <div className="flex items-center justify-between pb-2 border-b border-[#F3EEFF] mb-1">
+                        <span className="text-xs font-black text-[#6D55A3]">編輯任務節點</span>
+                        <span className="text-[10px] font-mono text-[#7B7B74]">ID: {node.id}</span>
                       </div>
                       
-                      <div className="flex items-center gap-1 shrink-0 ml-2">
-                        {/* 即時編輯按鈕 */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">時間</label>
+                          <input 
+                            type="time" 
+                            value={editForm.time} 
+                            onChange={e => setEditForm({...editForm, time: e.target.value})} 
+                            className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">標題</label>
+                          <input 
+                            type="text" 
+                            value={editForm.title} 
+                            onChange={e => setEditForm({...editForm, title: e.target.value})} 
+                            className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">角色</label>
+                          <input 
+                            type="text" 
+                            value={editForm.assignee} 
+                            onChange={e => setEditForm({...editForm, assignee: e.target.value})} 
+                            className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">地點</label>
+                          <input 
+                            type="text" 
+                            value={editForm.location} 
+                            onChange={e => setEditForm({...editForm, location: e.target.value})} 
+                            className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none" 
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-[#7B7B74] mb-1">詳細備註</label>
+                        <textarea 
+                          rows={2} 
+                          value={editForm.details} 
+                          onChange={e => setEditForm({...editForm, details: e.target.value})} 
+                          className="w-full px-2 py-1.5 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold text-[#1F2937] focus:outline-none resize-none" 
+                        />
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
                         <button 
-                          onClick={() => startEditing(node)}
-                          className="p-2 text-[#6D55A3]/60 hover:text-[#6D55A3] hover:bg-[#F3EEFF] rounded-[12px] transition-colors"
-                          title="開啟詳細編輯"
+                          type="button" 
+                          onClick={() => setEditingNodeId(null)}
+                          className="px-3 py-1.5 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] text-xs font-bold rounded-lg transition-all"
                         >
-                          <Edit className="w-4 h-4" />
+                          取消
                         </button>
                         <button 
-                          onClick={() => handleDeleteNode(node.id, node.title)}
-                          className="p-2 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-[12px] transition-colors"
-                          title="刪除任務"
+                          type="button" 
+                          onClick={() => handleUpdateNode(node.id)}
+                          className="px-4 py-1.5 bg-gradient-to-r from-[#00B8B8] to-[#6D55A3] text-white text-xs font-bold rounded-lg shadow-sm hover:opacity-90 transition-all"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          儲存更新
                         </button>
                       </div>
                     </div>
-
-                    {/* Accordion 折疊控制：Checklist 拖曳排序管理區 */}
-                    <div className="mt-3 border-t border-slate-100 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedChecklistNodeId(isChecklistExpanded ? null : node.id)}
-                        className="text-xs font-bold text-[#6D55A3] hover:text-[#F25D6B] flex items-center gap-1 transition-colors"
-                      >
-                        {isChecklistExpanded ? "▲ 收起確認清單項目" : `▼ 管理確認項目 (${node.checklist?.length || 0})`}
-                      </button>
-
-                      {isChecklistExpanded && (
-                        <div className="mt-3 pl-2 border-l-2 border-[#6D55A3]/30 space-y-3">
-                          {/* 新增 Checklist 項目的迷你表單 */}
-                          <div className="bg-[#F3EEFF]/30 p-3 rounded-2xl border border-[#E6EAF0]">
-                            <p className="text-[10px] font-black text-[#6D55A3] mb-1.5">＋新增確認項目細項</p>
-                            <div className="space-y-2">
-                              <input 
-                                type="text"
-                                placeholder="項目名稱 (例如：準備對講機)"
-                                value={newChecklistItem.text}
-                                onChange={e => setNewChecklistItem({ ...newChecklistItem, text: e.target.value })}
-                                className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
-                              />
-                              <input 
-                                type="text"
-                                placeholder="細節備註 (可選)"
-                                value={newChecklistItem.details}
-                                onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
-                                className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleAddChecklistItem(node.id)}
-                                className="w-full py-1.5 bg-[#6D55A3] hover:bg-[#6D55A3]/90 text-white font-bold rounded-xl text-[11px] shadow-sm transition-colors"
-                              >
-                                新增此確認細項
-                              </button>
-                            </div>
+                  ) : (
+                    /* 唯讀與行內編輯模式展示 */
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="text-[14px] font-bold text-[#1F2937] mb-1 flex items-center gap-2">
+                             <span className="text-[#6D55A3] font-mono">{renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}</span> 
+                             {renderInlineEdit('node', node.id, 'title', node.title, "flex-1")}
                           </div>
-
-                          {/* 拖曳與排序清單 */}
-                          <div className="space-y-2">
-                            {node.checklist && node.checklist.length > 0 ? (
-                              node.checklist.map((item: any, idx: number) => (
-                                <div 
-                                  key={item.id}
-                                  draggable={true}
-                                  onDragStart={(e) => handleDragStart(e, item.id)}
-                                  onDragOver={handleDragOver}
-                                  onDrop={(e) => handleDrop(e, node.id, item.id)}
-                                  className="flex items-center justify-between p-2 bg-[#FFF9F3]/60 hover:bg-[#FFF2F4]/60 border border-[#E6EAF0] rounded-xl transition-all shadow-sm"
-                                >
-                                  <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
-                                    {/* 拖曳握把 */}
-                                    <div 
-                                      className="cursor-grab text-slate-400 hover:text-[#6D55A3] shrink-0" 
-                                      title="拖曳上下移動排序"
-                                    >
-                                      <GripVertical className="w-4 h-4" />
-                                    </div>
-
-                                    {/* 手動向上、向下移動按鈕（完美適應手機端） */}
-                                    <div className="flex flex-col shrink-0">
-                                      <button 
-                                        type="button"
-                                        disabled={idx === 0}
-                                        onClick={() => moveChecklistItem(node.id, idx, 'up')}
-                                        className="text-[10px] text-slate-400 hover:text-[#6D55A3] disabled:opacity-30 disabled:hover:text-slate-400"
-                                      >
-                                        <ArrowUp className="w-3 h-3" />
-                                      </button>
-                                      <button 
-                                        type="button"
-                                        disabled={idx === node.checklist.length - 1}
-                                        onClick={() => moveChecklistItem(node.id, idx, 'down')}
-                                        className="text-[10px] text-slate-400 hover:text-[#6D55A3] disabled:opacity-30 disabled:hover:text-slate-400"
-                                      >
-                                        <ArrowDown className="w-3 h-3" />
-                                      </button>
-                                    </div>
-
-                                    {/* 項目文字即時行內編輯 */}
-                                    <div className="flex-1 min-w-0">
-                                      <div className="text-xs font-bold text-slate-800">
-                                        {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
-                                      </div>
-                                      <div className="text-[10px] text-slate-500 font-medium">
-                                        {renderInlineEdit('checklist', item.id, 'details', item.details || "點選填寫詳細細節說明", "w-full block", "textarea")}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <button 
-                                    type="button"
-                                    onClick={() => handleDeleteChecklistItem(item.id)}
-                                    className="p-1.5 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-lg transition-colors shrink-0"
-                                    title="刪除此確認細項"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              ))
-                            ) : (
-                              <p className="text-[11px] text-slate-400 text-center py-2">目前沒有確認事項，可在上方新增</p>
-                            )}
+                          <div className="text-xs font-medium text-[#7B7B74] flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="flex items-center gap-1">
+                              <User className="w-3 h-3 text-[#6D55A3]/70" /> 
+                              {renderInlineEdit('node', node.id, 'assignee', node.assignee, "")}
+                            </span>
+                            <span className="text-[#E6EAF0]">|</span> 
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3 h-3 text-[#F25D6B]/70" /> 
+                              {renderInlineEdit('node', node.id, 'location', node.location, "")}
+                            </span>
                           </div>
                         </div>
-                      )}
+                        
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          <button 
+                            type="button"
+                            onClick={() => startEditing(node)}
+                            className="p-2 text-[#6D55A3]/60 hover:text-[#6D55A3] hover:bg-[#F3EEFF] rounded-[12px] transition-colors"
+                            title="開啟詳細編輯"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => handleDeleteNode(node.id, node.title)}
+                            className="p-2 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-[12px] transition-colors"
+                            title="刪除任務"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Accordion 折疊控制：Checklist 拖曳排序管理區 */}
+                      <div className="mt-3 border-t border-slate-100 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedChecklistNodeId(isChecklistExpanded ? null : node.id)}
+                          className="text-xs font-bold text-[#6D55A3] hover:text-[#F25D6B] flex items-center gap-1 transition-colors"
+                        >
+                          {isChecklistExpanded ? "▲ 收起確認清單項目" : `▼ 管理確認項目 (${node.checklist?.length || 0})`}
+                        </button>
+
+                        {isChecklistExpanded && (
+                          <div className="mt-3 pl-2 border-l-2 border-[#6D55A3]/30 space-y-3">
+                            {/* 新增 Checklist 項目的迷你表單 */}
+                            <div className="bg-[#F3EEFF]/30 p-3 rounded-2xl border border-[#E6EAF0]">
+                              <p className="text-[10px] font-black text-[#6D55A3] mb-1.5">＋新增確認項目細項</p>
+                              <div className="space-y-2">
+                                <input 
+                                  type="text"
+                                  placeholder="項目名稱 (例如：準備對講機)"
+                                  value={newChecklistItem.text}
+                                  onChange={e => setNewChecklistItem({ ...newChecklistItem, text: e.target.value })}
+                                  className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
+                                />
+                                <input 
+                                  type="text"
+                                  placeholder="細節備註 (可選)"
+                                  value={newChecklistItem.details}
+                                  onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
+                                  className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddChecklistItem(node.id)}
+                                  className="w-full py-1.5 bg-[#6D55A3] hover:bg-[#6D55A3]/90 text-white font-bold rounded-xl text-[11px] shadow-sm transition-colors"
+                                >
+                                  新增此確認細項
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* ✨ AI 智慧推薦服事細項按鈕與展示 */}
+                            <div className="space-y-2.5">
+                              <button
+                                type="button"
+                                disabled={isGeneratingSuggestions === node.id}
+                                onClick={() => handleGenerateAIChecklist(node)}
+                                className="w-full py-2 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-xl text-[10px] shadow-sm transition-all flex items-center justify-center gap-1 hover:opacity-90 disabled:opacity-50"
+                              >
+                                {isGeneratingSuggestions === node.id ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    正在生成服事建議...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                                    ✨ AI 智慧推薦服事細項
+                                  </>
+                                )}
+                              </button>
+
+                              {aiSuggestions[node.id] && aiSuggestions[node.id].length > 0 && (
+                                <div className="bg-[#FFF9F3] p-3 rounded-2xl border border-dashed border-[#6D55A3]/30 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-black text-[#6D55A3] flex items-center gap-1">
+                                      <Sparkles className="w-3 h-3 text-[#F25D6B]" /> AI 建議清單
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAddAllSuggestions(node.id)}
+                                      className="text-[9px] font-bold text-[#00B8B8] hover:underline"
+                                    >
+                                      一鍵全加
+                                    </button>
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {aiSuggestions[node.id].map((sug, sIdx) => (
+                                      <div key={sIdx} className="p-2 bg-white rounded-xl border border-[#E6EAF0] flex items-start justify-between gap-1 shadow-sm">
+                                        <div className="min-w-0 flex-1">
+                                          <p className="text-[11px] font-bold text-slate-800 leading-tight">{sug.text}</p>
+                                          <p className="text-[9px] text-slate-500 leading-normal mt-0.5">{sug.details}</p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAddSuggestedItem(node.id, sug)}
+                                          className="p-1 text-[#00B8B8] hover:bg-[#00B8B8]/10 rounded-lg text-[10px] font-bold shrink-0 ml-1.5"
+                                        >
+                                          新增
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 拖曳與排序清單 */}
+                            <div className="space-y-2">
+                              {node.checklist && node.checklist.length > 0 ? (
+                                node.checklist.map((item: any, idx: number) => {
+                                  return (
+                                    <div 
+                                      key={item.id}
+                                      draggable={true}
+                                      onDragStart={(e) => handleDragStart(e, item.id)}
+                                      onDragOver={handleDragOver}
+                                      onDrop={(e) => handleDrop(e, node.id, item.id)}
+                                      className="flex items-center justify-between p-2 bg-[#FFF9F3]/60 hover:bg-[#FFF2F4]/60 border border-[#E6EAF0] rounded-xl transition-all shadow-sm"
+                                    >
+                                      <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                                        {/* 拖曳握把 */}
+                                        <div 
+                                          className="cursor-grab text-slate-400 hover:text-[#6D55A3] shrink-0" 
+                                          title="拖曳上下移動排序"
+                                        >
+                                          <GripVertical className="w-4 h-4" />
+                                        </div>
+
+                                        {/* 手動向上、向下移動按鈕（完美適應手機端） */}
+                                        <div className="flex flex-col shrink-0">
+                                          <button 
+                                            type="button"
+                                            disabled={idx === 0}
+                                            onClick={() => moveChecklistItem(node.id, idx, 'up')}
+                                            className="text-[10px] text-slate-400 hover:text-[#6D55A3] disabled:opacity-30 disabled:hover:text-slate-400"
+                                          >
+                                            <ArrowUp className="w-3 h-3" />
+                                          </button>
+                                          <button 
+                                            type="button"
+                                            disabled={idx === node.checklist.length - 1}
+                                            onClick={() => moveChecklistItem(node.id, idx, 'down')}
+                                            className="text-[10px] text-slate-400 hover:text-[#6D55A3] disabled:opacity-30 disabled:hover:text-slate-400"
+                                          >
+                                            <ArrowDown className="w-3 h-3" />
+                                          </button>
+                                        </div>
+
+                                        {/* 項目文字即時行內編輯 */}
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-xs font-bold text-slate-800">
+                                            {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
+                                          </div>
+                                          <div className="text-[10px] text-slate-500 font-medium">
+                                            {renderInlineEdit('checklist', item.id, 'details', item.details || "點選填寫詳細細節說明", "w-full block", "textarea")}
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleDeleteChecklistItem(item.id)}
+                                        className="p-1.5 text-[#F25D6B]/50 hover:text-[#F25D6B] hover:bg-[#FFF2F4] rounded-lg transition-colors shrink-0"
+                                        title="刪除此確認細項"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <p className="text-[11px] text-slate-400 text-center py-2">目前沒有確認事項，可在上方新增</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="flex justify-center w-full min-h-screen bg-[#F3EEFF] sm:p-6 md:p-10 font-sans">
@@ -1216,7 +1722,7 @@ export default function App() {
                 {/* 新版品牌 Logo */}
                 <div className="w-9 h-9 rounded-[10px] bg-white flex items-center justify-center shadow-md shadow-[#6D55A3]/10">
                   <img 
-                    src="/Logo.png" 
+                    src="https://lirp.cdn-website.com/df26cde4/dms3rep/multi/opt/1105+SHK_Logo+new+01-224w.png" 
                     alt="Logo" 
                     className="w-7 h-7 object-contain" 
                   />
@@ -1225,12 +1731,43 @@ export default function App() {
               </h1>
               <p className="text-[13px] font-bold text-[#6D55A3] mt-2.5 flex items-center gap-1.5 opacity-90">
                 <HeartHandshake className="w-4 h-4" />
-                今天，我們一起歡迎人回家
+                今天，我們一起歡迎家人回家
               </p>
             </div>
 
-            {/* 時間與雲端狀態 */}
+            {/* 時間、雲端狀態、自動報時開關與智慧語音問答按鈕 */}
             <div className="flex flex-col items-end pt-1">
+              
+              {/* 【方案 B 優化】自動報時按鈕已移至任務管理中，頂部 Header 右側只保留乾淨的主動語音問答按鈕 */}
+              <div className="flex flex-col gap-1.5 mb-2 items-end">
+                <div className="flex items-center gap-1">
+                  {/* 【升級】語音問答麥克風按鈕 - 支援 AI 思考載入狀態 */}
+                  <button
+                    onClick={toggleListening}
+                    disabled={isThinking}
+                    className={`px-2.5 py-1 rounded-full flex items-center gap-1 border transition-all ${
+                      isListening 
+                        ? 'bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25' 
+                        : isThinking
+                          ? 'bg-amber-100 text-amber-700 border-amber-300'
+                          : 'bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]'
+                    }`}
+                    title="點擊開始對話問答（例如：現在要做什麼？晚崇需要幾個奉獻袋？）"
+                  >
+                    {isListening ? (
+                      <Mic className="w-3 h-3 text-white animate-bounce" />
+                    ) : isThinking ? (
+                      <Loader2 className="w-3 h-3 animate-spin text-amber-700" />
+                    ) : (
+                      <MicOff className="w-3 h-3" />
+                    )}
+                    <span className="text-[10px] font-black tracking-wider">
+                      {isListening ? '聆聽中...' : isThinking ? '思考中...' : '問助理'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               <span className="text-[10px] font-black tracking-widest text-[#7B7B74] uppercase mb-0.5 opacity-70">
                 目前時間
               </span>
@@ -1330,7 +1867,7 @@ export default function App() {
                 <Lock className="w-6 h-6 text-[#6D55A3]" />
               </div>
               <h3 className="text-lg font-bold text-[#1F2937] mb-1">管理員身分驗證</h3>
-              <p className="text-xs text-[#7B7B74] mb-4">請輸入任務管理驗證密碼</p>
+              <p className="text-xs text-[#7B7B74] mb-4">請輸入任務 management 驗證密碼</p>
               
               <input 
                 type="password" 
