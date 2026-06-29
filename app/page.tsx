@@ -10,7 +10,7 @@ import {
   ListTodo,
   AlertCircle,
   Settings, 
-  Plus,       
+  Plus,        
   Trash2,
   X,        
   Info,
@@ -1321,23 +1321,7 @@ export default function App() {
             <p className="text-sm font-medium text-[#7B7B74] mt-1.5">目前管理區塊：<span className="text-[#6D55A3] font-bold">{currentService}</span></p>
           </div>
           
-          {/* 【方案 B】自動報時按鈕與鎖定登出按鈕並列 */}
           <div className="flex items-center gap-2">
-            {/* 自動報時（移至任務管理頁面） */}
-            <button
-              type="button"
-              onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
-                isVoiceEnabled 
-                  ? 'bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm' 
-                  : 'bg-white text-[#7B7B74] border-[#E6EAF0] hover:bg-white'
-              }`}
-              title="開啟/關閉自動任務語音廣播"
-            >
-              {isVoiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-              <span>{isVoiceEnabled ? '自動報時' : '自動報時'}</span>
-            </button>
-
             {/* 一鍵重新鎖定按鈕 */}
             <button
               type="button"
@@ -1738,34 +1722,50 @@ export default function App() {
             {/* 時間、雲端狀態、自動報時開關與智慧語音問答按鈕 */}
             <div className="flex flex-col items-end pt-1">
               
-              {/* 【方案 B 優化】自動報時按鈕已移至任務管理中，頂部 Header 右側只保留乾淨的主動語音問答按鈕 */}
+              {/* 語音功能微縮膠囊控制中心 (上下整齊呼應) */}
               <div className="flex flex-col gap-1.5 mb-2 items-end">
-                <div className="flex items-center gap-1">
-                  {/* 【升級】語音問答麥克風按鈕 - 支援 AI 思考載入狀態 */}
-                  <button
-                    onClick={toggleListening}
-                    disabled={isThinking}
-                    className={`px-2.5 py-1 rounded-full flex items-center gap-1 border transition-all ${
-                      isListening 
-                        ? 'bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25' 
-                        : isThinking
-                          ? 'bg-amber-100 text-amber-700 border-amber-300'
-                          : 'bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]'
-                    }`}
-                    title="點擊開始對話問答（例如：現在要做什麼？晚崇需要幾個奉獻袋？）"
-                  >
-                    {isListening ? (
-                      <Mic className="w-3 h-3 text-white animate-bounce" />
-                    ) : isThinking ? (
-                      <Loader2 className="w-3 h-3 animate-spin text-amber-700" />
-                    ) : (
-                      <MicOff className="w-3 h-3" />
-                    )}
-                    <span className="text-[10px] font-black tracking-wider">
-                      {isListening ? '聆聽中...' : isThinking ? '思考中...' : '問助理'}
-                    </span>
-                  </button>
-                </div>
+                
+                {/* 自動報時微縮膠囊 */}
+                <button
+                  onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+                  className={`px-2.5 py-1 rounded-full flex items-center justify-center gap-1 border transition-all w-[86px] ${
+                    isVoiceEnabled 
+                      ? 'bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm shadow-[#F25D6B]/5' 
+                      : 'bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]'
+                  }`}
+                  title="開啟/關閉自動任務語音廣播"
+                >
+                  {isVoiceEnabled ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+                  <span className="text-[10px] font-black tracking-wider">
+                    {isVoiceEnabled ? '自動報時' : '自動報時'}
+                  </span>
+                </button>
+
+                {/* 【升級】語音問答麥克風按鈕 - 支援 AI 思考載入狀態 */}
+                <button
+                  onClick={toggleListening}
+                  disabled={isThinking}
+                  className={`px-2.5 py-1 rounded-full flex items-center justify-center gap-1 border transition-all w-[86px] ${
+                    isListening 
+                      ? 'bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25' 
+                      : isThinking
+                        ? 'bg-amber-100 text-amber-700 border-amber-300'
+                        : 'bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]'
+                  }`}
+                  title="點擊開始對話問答（例如：現在要做什麼？晚崇需要幾個奉獻袋？）"
+                >
+                  {isListening ? (
+                    <Mic className="w-3 h-3 text-white animate-bounce" />
+                  ) : isThinking ? (
+                    <Loader2 className="w-3 h-3 animate-spin text-amber-700" />
+                  ) : (
+                    <MicOff className="w-3 h-3" />
+                  )}
+                  <span className="text-[10px] font-black tracking-wider">
+                    {isListening ? '聆聽中...' : isThinking ? '思考中...' : '問助理'}
+                  </span>
+                </button>
+
               </div>
 
               <span className="text-[10px] font-black tracking-widest text-[#7B7B74] uppercase mb-0.5 opacity-70">
