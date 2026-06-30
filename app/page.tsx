@@ -92,7 +92,7 @@ export default function App() {
   const [passwordError, setPasswordError] = useState("");
   const ADMIN_PASSWORD = '1234'; // 管理員驗證密碼
 
-  // --- 自訂精美 Modal 提示框狀態 (取代冷冰冰的 alert & confirm) ---
+  // --- 自訂精美 Modal 提示框狀態 ---
   const [customAlert, setCustomAlert] = useState<{isOpen: boolean, message: string}>({ isOpen: false, message: "" });
   const [customConfirm, setCustomConfirm] = useState<{isOpen: boolean, message: string, onConfirm: () => void}>({ isOpen: false, message: "", onConfirm: () => {} });
 
@@ -232,7 +232,7 @@ export default function App() {
 3. 絕對不要使用任何 Markdown 標記（如 **、*、###、- 等），請輸出乾淨的純文字。`;
   };
 
-  // --- Gemini API 指令重試呼召 (含指數退避機制) ---
+  // --- Gemini API 指令重試呼召 (安全後端防禦與沙盒相容機制) ---
   const callGeminiWithRetry = async (
     prompt: string, 
     systemInstruction: string, 
@@ -240,20 +240,47 @@ export default function App() {
     delay = 1000,
     responseSchema: any = null
   ): Promise<string> => {
-    const apiKey = ""; // 執行環境會在運行時自動注入此 Key，請保持為空字串
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
-    const payload: any = {
-      contents: [{ parts: [{ text: prompt }] }],
-      systemInstruction: { parts: [{ text: systemInstruction }] }
-    };
+    // 智慧檢測是否處於 Canvas 預覽沙盒，如果是則維持直連以保證預覽功能不中斷
+    const isPreviewEnvironment = typeof window !== 'undefined' && window.location.hostname.includes('googleusercontent.com');
 
-    if (responseSchema) {
-      payload.generationConfig = {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema
+    if (isPreviewEnvironment) {
+      const apiKey = ""; // 執行環境會在運行時自動注入此 Key
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+      
+      const payload: any = {
+        contents: [{ parts: [{ text: prompt }] }],
+        systemInstruction: { parts: [{ text: systemInstruction }] }
       };
+
+      if (responseSchema) {
+        payload.generationConfig = {
+          responseMimeType: "application/json",
+          responseSchema: responseSchema
+        };
+      }
+
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) return text.trim();
+          }
+        } catch (e) {}
+        if (i < retries - 1) await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+      }
+      throw new Error("Gemini API 呼叫失敗 (預覽環境)");
     }
+
+    // --- 正式環境（Vercel 等）：呼叫同專案的後端 API Route，保護金鑰安全 ---
+    const url = `/api/gemini`;
+    const payload: any = { prompt, systemInstruction, responseSchema };
 
     for (let i = 0; i < retries; i++) {
       try {
@@ -264,17 +291,17 @@ export default function App() {
         });
         if (res.ok) {
           const data = await res.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) return text.trim();
+          if (data.text) return data.text;
+          if (data.error) throw new Error(data.error);
         }
       } catch (e) {
-        // 安靜重試
+        // 靜默重試
       }
       if (i < retries - 1) {
         await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
       }
     }
-    throw new Error("Gemini API 呼召失敗");
+    throw new Error("正式環境 Gemini API 呼叫失敗，請確認環境變數 GEMINI_API_KEY 是否正確設定");
   };
 
   // --- Gemini API 生成建議 Checklist ---
@@ -441,7 +468,6 @@ export default function App() {
     setIsThinking(true);
     try {
       const instruction = generateSystemInstruction(currentService, currentTimeRef.current, filteredNodesRef.current);
-      // 呼叫 Gemini 智慧解析大模型，並獲取最靈活的擬真擬人回覆
       const response = await callGeminiWithRetry(commandText, instruction);
       speak(response);
     } catch (err) {
@@ -481,10 +507,9 @@ export default function App() {
         rec.onresult = async (event: any) => {
           const transcript = event.results[0][0].transcript;
           setVoiceResultText(transcript);
-          setIsListening(false); // 停止聆聽並進入思考狀態
+          setIsListening(false); 
           await handleVoiceCommand(transcript);
           
-          // 4秒後自動淡出語音辨識浮示
           setTimeout(() => {
             setVoiceResultText("");
           }, 4000);
@@ -495,7 +520,6 @@ export default function App() {
     }
   }, []);
 
-  // 點擊麥克風按鈕觸發語音監聽
   const toggleListening = () => {
     if (!recognition) {
       setCustomAlert({ isOpen: true, message: "您的裝置或瀏覽器不支援語音助理功能。建議使用 Google Chrome 或 Edge 瀏覽器！" });
@@ -512,7 +536,7 @@ export default function App() {
     }
   };
 
-  // 確保時鐘即時更新，並加入自動切換邏輯 (維持原樣)
+  // 確保時鐘即時更新，並加入自動切換邏輯
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -521,7 +545,6 @@ export default function App() {
 
       if (!hasManuallySwitchedRef.current) {
         const day = now.getDay(); 
-        // 加上括號隔離運算
         const timeValue = now.getHours() + (now.getMinutes() / 60); 
 
         if (day === 6) {
@@ -537,7 +560,7 @@ export default function App() {
     };
     
     updateTime(); 
-    const timer = setInterval(updateTime, 1000); // 1秒更新，確保報時無延遲不漏接
+    const timer = setInterval(updateTime, 1000); 
     return () => clearInterval(timer);
   }, []);
 
@@ -552,7 +575,6 @@ export default function App() {
       if (!announcedNodesRef.current.has(node.id)) {
         announcedNodesRef.current.add(node.id);
         
-        // 進入 AI 後端處理與報時生成狀態
         setIsThinking(true);
         try {
           const instruction = generateSystemInstruction(currentService, currentTime, [node]);
@@ -561,7 +583,6 @@ export default function App() {
           speak(response);
         } catch (err) {
           console.error("AI 自動報時廣播詞生成失敗，自動 Fallback 為本地標準朗讀", err);
-          // 本地 Fallback 朗讀
           speak(`時間到，現在時間 ${currentTime}。提醒服事任務：${node.title}。負責崗位：${node.assignee}。`);
         } finally {
           setIsThinking(false);
@@ -574,7 +595,6 @@ export default function App() {
     }
   }, [currentTime, isVoiceEnabled, nodes, currentService]);
 
-  // 背景自動同步雲端資料，改由 sort_order 升序排序 (維持原樣)
   const fetchData = async (isBackgroundSync = false) => {
     try {
       if (!isBackgroundSync) setFetchError("");
@@ -611,7 +631,6 @@ export default function App() {
   const filteredNodes = nodes.filter(n => n.service_type === currentService);
   const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
 
-  // --- 智慧跟隨當下時鐘判定 activeNodeId (維持原樣) ---
   const timeToMinutes = (tStr: string) => {
     if (!tStr) return 0;
     const [h, m] = tStr.split(':').map(Number);
@@ -621,16 +640,12 @@ export default function App() {
   const getActiveNodeIdByTime = () => {
     if (filteredNodes.length === 0) return null;
     const currentMinutes = timeToMinutes(currentTime);
-
-    // 依據時間進行排序升序排列
     const sortedNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
-    // 1. 如果當前時間還沒到第一個任務的時間，預設第一個任務進行中
     if (currentMinutes < timeToMinutes(sortedNodes[0].time)) {
       return sortedNodes[0].id;
     }
 
-    // 2. 尋找當前時間介於哪個區間
     for (let i = 0; i < sortedNodes.length; i++) {
       const nodeMin = timeToMinutes(sortedNodes[i].time);
       const nextNodeMin = sortedNodes[i + 1] ? timeToMinutes(sortedNodes[i + 1].time) : Infinity;
@@ -640,13 +655,11 @@ export default function App() {
       }
     }
 
-    // 3. 超過最後一個任務時間，則最後一個進行中
     return sortedNodes[sortedNodes.length - 1].id;
   };
 
   const activeNodeId = getActiveNodeIdByTime();
 
-  // 當 activeNodeId 隨著時間改變或切換場次時，全自動平滑捲動到該節點 (維持原樣)
   useEffect(() => {
     if (!isLoading && !fetchError && filteredNodes.length > 0 && activeTab === 'timeline' && activeNodeRef.current) {
       setTimeout(() => {
@@ -718,7 +731,6 @@ export default function App() {
     }
   };
 
-  // 即時編輯儲存功能 (擴充管理功能，同步更新 Supabase)
   const handleUpdateNode = async (id: string) => {
     if (!editForm.title || !editForm.time) {
       setCustomAlert({ isOpen: true, message: "請填寫時間與標題！" });
@@ -769,9 +781,8 @@ export default function App() {
     });
   };
 
-  // --- 行內即時修改（Inline Editing）核心邏輯 ---
   const handleInlineClick = (type: 'node' | 'checklist', id: string, field: string, currentValue: string) => {
-    if (!isAdminUnlocked) return; // 沒密碼解鎖就當作防誤觸唯讀狀態
+    if (!isAdminUnlocked) return; 
     setActiveInlineEdit({ type, id, field });
     setInlineEditValue(currentValue);
   };
@@ -781,7 +792,6 @@ export default function App() {
     const { type, id, field } = activeInlineEdit;
     const updatedValue = inlineEditValue.trim();
 
-    // 先在前端 UI 即時反應
     if (type === 'node') {
       setNodes(prev => prev.map(node => {
         if (node.id !== id) return node;
@@ -798,14 +808,13 @@ export default function App() {
 
     setActiveInlineEdit(null);
 
-    // 同步到 Supabase 雲端
     try {
       if (type === 'node') {
         await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
       } else if (type === 'checklist') {
-        await supabaseFetch(`checklist_items?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
+        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', { [field]: updatedValue });
       }
-      fetchData(true); // 背景安靜同步
+      fetchData(true); 
     } catch (err: any) {
       console.error("行內修改同步失敗:", err);
       setCustomAlert({ isOpen: true, message: "行內即時同步失敗，正在復原最新雲端數據..." });
@@ -813,7 +822,6 @@ export default function App() {
     }
   };
 
-  // --- Checklist 拖曳與排序核心功能 (Drag & Drop) ---
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setDraggedItemId(id);
     e.dataTransfer.effectAllowed = 'move';
@@ -836,17 +844,14 @@ export default function App() {
 
     if (draggedIndex === -1 || targetIndex === -1) return;
 
-    // 搬移
     const [removed] = items.splice(draggedIndex, 1);
     items.splice(targetIndex, 0, removed);
 
-    // 重新編排 sort_order
     const updatedItems = items.map((item, index) => ({
       ...item,
       sort_order: index
     }));
 
-    // 本地預先渲染
     setNodes(prev => prev.map(n => {
       if (n.id !== nodeId) return n;
       return { ...n, checklist: updatedItems };
@@ -854,7 +859,6 @@ export default function App() {
 
     setDraggedItemId(null);
 
-    // 依序寫入雲端
     try {
       for (const item of updatedItems) {
         await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
@@ -867,7 +871,6 @@ export default function App() {
     }
   };
 
-  // 提供給手機端的箭頭一鍵移位功能 (完美補位 HTML5 Drag&Drop)
   const moveChecklistItem = async (nodeId: string, index: number, direction: 'up' | 'down') => {
     const node = nodes.find(n => n.id === nodeId);
     if (!node || !node.checklist) return;
@@ -877,24 +880,20 @@ export default function App() {
 
     const items = [...node.checklist].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
     
-    // 交換
     const temp = items[index];
     items[index] = items[targetIndex];
     items[targetIndex] = temp;
 
-    // 重新排序
     const updatedItems = items.map((item, idx) => ({
       ...item,
       sort_order: idx
     }));
 
-    // 本地預先渲染
     setNodes(prev => prev.map(n => {
       if (n.id !== nodeId) return n;
       return { ...n, checklist: updatedItems };
     }));
 
-    // 雲端同步
     try {
       for (const item of updatedItems) {
         await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
@@ -907,7 +906,6 @@ export default function App() {
     }
   };
 
-  // --- 新增、刪除 Checklist 子項目邏輯 ---
   const handleAddChecklistItem = async (nodeId: string) => {
     if (!newChecklistItem.text.trim()) {
       setCustomAlert({ isOpen: true, message: "請輸入確認項目的標題！" });
@@ -951,7 +949,6 @@ export default function App() {
     });
   };
 
-  // 驗證管理密碼並進入管理面板
   const handleVerifyPassword = () => {
     if (passwordInput === ADMIN_PASSWORD) {
       setIsAdminUnlocked(true);
@@ -965,7 +962,6 @@ export default function App() {
     }
   };
 
-  // 渲染行內即時編輯輸入欄位
   const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
     const isEditing = activeInlineEdit?.type === type && activeInlineEdit?.id === id && activeInlineEdit?.field === field;
 
@@ -1021,11 +1017,9 @@ export default function App() {
     );
   };
 
-  // 全新品牌風格 - 時間軸畫面 (採用明確的 return 區塊確保編譯無虞)
   const renderTimelineView = () => {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
-        {/* 語音解析與思考提示泡條 */}
         {(voiceResultText || isThinking) && (
           <div className="mb-4 p-3 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-[#6D55A3] animate-bounce shadow-md">
             {isThinking ? (
@@ -1046,7 +1040,6 @@ export default function App() {
           </div>
         ) : (
           <div className="relative mt-2">
-            {/* 溫慢主時間軸 */}
             <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
             
             {filteredNodes.map((node) => {
@@ -1055,7 +1048,6 @@ export default function App() {
               return (
                 <div key={node.id} className="relative mb-8 transition-all duration-500" ref={active ? activeNodeRef : null}>
                   
-                  {/* 節點圓點 */}
                   <div className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10">
                     {completed ? (
                       <div className="w-7 h-7 rounded-full bg-[#00B8B8] flex items-center justify-center shadow-sm shadow-[#00B8B8]/30">
@@ -1071,14 +1063,12 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* 任務卡片 */}
                   <div className={`ml-12 rounded-[24px] p-5 transition-all duration-300 ${
                     completed ? 'bg-white/60 border border-[#E6EAF0] opacity-70' : 
                     active ? 'bg-[#FFF2F4] ring-2 ring-[#F25D6B] shadow-lg shadow-[#F25D6B]/15' : 
                     'bg-white border border-[#E6EAF0] shadow-sm'
                   }`}>
                     
-                    {/* 標題與時間列 */}
                     <div className="flex items-start justify-between mb-4">
                       <div className="w-full">
                         <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
@@ -1098,7 +1088,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* 角色與地點資訊 */}
                     <div className="flex flex-col gap-2.5 mt-2 text-[13px] text-[#7B7B74]">
                       <div className="flex items-center gap-2">
                         <MapPin className="w-4 h-4 text-[#F25D6B]/70 shrink-0" />
@@ -1114,7 +1103,6 @@ export default function App() {
                       </div>
                     </div>
                     
-                    {/* Checklist 區域 */}
                     {node.checklist && node.checklist.length > 0 && (
                       <div className="mt-5 space-y-3">
                         <div className="flex items-center gap-2 mb-3">
@@ -1129,7 +1117,6 @@ export default function App() {
                               item.is_completed ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20' : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'
                             }`}>
                               
-                              {/* 圓角自訂 Checkbox */}
                               <label className="relative flex items-center justify-center shrink-0 mt-0.5 cursor-pointer">
                                 <input 
                                   type="checkbox" 
@@ -1159,7 +1146,6 @@ export default function App() {
                                     {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
                                   </span>
                                   
-                                  {/* Info Icon */}
                                   {!isAdminUnlocked && item.details && (
                                     <div className={`mt-0.5 shrink-0 transition-colors ${item.is_completed ? 'text-[#E6EAF0]' : 'text-[#00B8B8] group-hover:text-[#F25D6B]'}`}>
                                       <Info className="w-4 h-4" />
@@ -1167,7 +1153,6 @@ export default function App() {
                                   )}
                                 </div>
 
-                                {/* 管理員解鎖時，Checklist 的備註 details 也可以直接行內修改 */}
                                 {isAdminUnlocked && (
                                   <div className="mt-1 text-xs text-slate-500 bg-slate-50 p-1.5 rounded-lg border border-dashed border-slate-200">
                                     <span className="font-bold text-[10px] text-[#6D55A3] block mb-0.5">備註細節：</span>
@@ -1175,7 +1160,6 @@ export default function App() {
                                   </div>
                                 )}
                                 
-                                {/* 完成時間戳記 */}
                                 {item.is_completed && item.completed_at && (
                                   <span className="text-[10px] text-[#00B8B8] font-bold block mt-1.5 tracking-wider">
                                     DONE AT {item.completed_at}
@@ -1197,14 +1181,12 @@ export default function App() {
     );
   };
 
-  // 全新品牌風格 - 服事動態
   const renderReviewView = () => {
     const allTasks = filteredNodes.flatMap(n => n.checklist || []);
     const completedTasks = allTasks.filter(t => t.is_completed);
     const completionRate = calculateRate(completedTasks.length, allTasks.length);
     const missedTasks = allTasks.filter(t => !t.is_completed);
 
-    // 依負責角色（assignee）進行任務分組
     const groupedMissed: { [key: string]: any[] } = {};
     missedTasks.forEach((task: any) => {
       const parentNode = filteredNodes.find(n => n.checklist && n.checklist.some((c: any) => c.id === task.id));
@@ -1222,7 +1204,7 @@ export default function App() {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         <div className="mb-6 px-1">
-          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">活動復盤分析</h2>
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">活動復盤 analysis</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
             <BarChart2 className="w-4 h-4 text-[#6D55A3]" /> 即時執行數據 ({currentService})
           </p>
@@ -1246,7 +1228,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 方案 B：分組待完成清單 */}
         <div className="mb-6">
           <h3 className="flex items-center gap-2 mb-4 text-sm font-black tracking-widest text-[#F25D6B] uppercase px-1">
             <AlertCircle className="w-4 h-4" /> 待完成服事清單（依角色分組）
@@ -1261,7 +1242,6 @@ export default function App() {
               {Object.entries(groupedMissed).map(([role, tasks]) => {
                 return (
                   <div key={role} className="bg-white p-5 rounded-[24px] border border-[#E6EAF0] shadow-sm">
-                    {/* 分組標題 */}
                     <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#F3EEFF]">
                       <span className="font-extrabold text-[15px] text-[#6D55A3] flex items-center gap-1.5">
                         <User className="w-4 h-4 text-[#F25D6B]" /> {role}
@@ -1271,7 +1251,6 @@ export default function App() {
                       </span>
                     </div>
                     
-                    {/* 任務卡片內列表 */}
                     <div className="space-y-2.5">
                       {tasks.map((task: any) => {
                         return (
@@ -1311,7 +1290,6 @@ export default function App() {
     );
   };
 
-  // 全新品牌風格 - 管理畫面 (採用明確 return 與防錯 JSX 閉合)
   const renderAdminView = () => {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -1322,7 +1300,21 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2">
-            {/* 一鍵重新鎖定按鈕 */}
+            {/* 自動報時與鎖定登出並排 */}
+            <button
+              type="button"
+              onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
+                isVoiceEnabled 
+                  ? 'bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm' 
+                  : 'bg-white text-[#7B7B74] border-[#E6EAF0] hover:bg-white'
+              }`}
+              title="開啟/關閉自動任務語音廣播"
+            >
+              {isVoiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              <span>自動報時</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -1394,7 +1386,6 @@ export default function App() {
               return (
                 <div key={node.id} className="p-4 bg-white border border-[#E6EAF0] rounded-[24px] shadow-sm transition-all duration-300">
                   {isEditing ? (
-                    /* 編輯模式表單 */
                     <div className="space-y-3.5">
                       <div className="flex items-center justify-between pb-2 border-b border-[#F3EEFF] mb-1">
                         <span className="text-xs font-black text-[#6D55A3]">編輯任務節點</span>
@@ -1471,7 +1462,6 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
-                    /* 唯讀與行內編輯模式展示 */
                     <div>
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
@@ -1512,7 +1502,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Accordion 折疊控制：Checklist 拖曳排序管理區 */}
                       <div className="mt-3 border-t border-slate-100 pt-2">
                         <button
                           type="button"
@@ -1524,7 +1513,6 @@ export default function App() {
 
                         {isChecklistExpanded && (
                           <div className="mt-3 pl-2 border-l-2 border-[#6D55A3]/30 space-y-3">
-                            {/* 新增 Checklist 項目的迷你表單 */}
                             <div className="bg-[#F3EEFF]/30 p-3 rounded-2xl border border-[#E6EAF0]">
                               <p className="text-[10px] font-black text-[#6D55A3] mb-1.5">＋新增確認項目細項</p>
                               <div className="space-y-2">
@@ -1552,7 +1540,6 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* ✨ AI 智慧推薦服事細項按鈕與展示 */}
                             <div className="space-y-2.5">
                               <button
                                 type="button"
@@ -1608,7 +1595,6 @@ export default function App() {
                               )}
                             </div>
 
-                            {/* 拖曳與排序清單 */}
                             <div className="space-y-2">
                               {node.checklist && node.checklist.length > 0 ? (
                                 node.checklist.map((item: any, idx: number) => {
@@ -1622,7 +1608,6 @@ export default function App() {
                                       className="flex items-center justify-between p-2 bg-[#FFF9F3]/60 hover:bg-[#FFF2F4]/60 border border-[#E6EAF0] rounded-xl transition-all shadow-sm"
                                     >
                                       <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
-                                        {/* 拖曳握把 */}
                                         <div 
                                           className="cursor-grab text-slate-400 hover:text-[#6D55A3] shrink-0" 
                                           title="拖曳上下移動排序"
@@ -1630,7 +1615,6 @@ export default function App() {
                                           <GripVertical className="w-4 h-4" />
                                         </div>
 
-                                        {/* 手動向上、向下移動按鈕（完美適應手機端） */}
                                         <div className="flex flex-col shrink-0">
                                           <button 
                                             type="button"
@@ -1650,7 +1634,6 @@ export default function App() {
                                           </button>
                                         </div>
 
-                                        {/* 項目文字即時行內編輯 */}
                                         <div className="flex-1 min-w-0">
                                           <div className="text-xs font-bold text-slate-800">
                                             {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
@@ -1698,12 +1681,10 @@ export default function App() {
         <header className="sticky top-0 z-20 px-5 pt-8 pb-4 bg-gradient-to-br from-[#FFF9F3] via-[#F3EEFF] to-[#FFF2F4] border-b border-[#E6EAF0] rounded-b-[32px] shadow-sm mb-2">
           
           <div className="flex items-start justify-between relative">
-            {/* 品牌星芒裝飾 */}
             <Sparkles className="absolute -top-4 -right-2 w-20 h-20 text-[#6D55A3] opacity-[0.03] rotate-12 pointer-events-none" />
             
             <div>
               <h1 className="text-2xl font-black tracking-tight text-[#1F2937] flex items-center gap-2.5">
-                {/* 新版品牌 Logo */}
                 <div className="w-9 h-9 rounded-[10px] bg-white flex items-center justify-center shadow-md shadow-[#6D55A3]/10">
                   <img 
                     src="https://lirp.cdn-website.com/df26cde4/dms3rep/multi/opt/1105+SHK_Logo+new+01-224w.png" 
@@ -1722,7 +1703,7 @@ export default function App() {
             {/* 時間、雲端狀態、自動報時開關與智慧語音問答按鈕 */}
             <div className="flex flex-col items-end pt-1">
               
-              {/* 語音功能微縮膠囊控制中心 (上下整齊呼應) */}
+              {/* 語音功能微縮雙膠囊控制中心 (上下整齊呼應) */}
               <div className="flex flex-col gap-1.5 mb-2 items-end">
                 
                 {/* 自動報時微縮膠囊 */}
@@ -1737,11 +1718,11 @@ export default function App() {
                 >
                   {isVoiceEnabled ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
                   <span className="text-[10px] font-black tracking-wider">
-                    {isVoiceEnabled ? '自動報時' : '自動報時'}
+                    自動報時
                   </span>
                 </button>
 
-                {/* 【升級】語音問答麥克風按鈕 - 支援 AI 思考載入狀態 */}
+                {/* 語音問答麥克風按鈕 - 支援 AI 思考載入狀態 */}
                 <button
                   onClick={toggleListening}
                   disabled={isThinking}
@@ -1903,7 +1884,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 自訂 brand 質感通知視窗 (取代原生 alert) */}
+        {/* 自訂 brand 質感通知視窗 */}
         {customAlert.isOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
             <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0] text-center">
@@ -1923,7 +1904,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 自訂 brand 質感確認視窗 (取代原生 confirm) */}
+        {/* 自訂 brand 質感確認視窗 */}
         {customConfirm.isOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
             <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0] text-center">
