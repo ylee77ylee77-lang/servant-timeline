@@ -812,7 +812,7 @@ export default function App() {
       if (type === 'node') {
         await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
       } else if (type === 'checklist') {
-        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', { [field]: updatedValue });
+        await supabaseFetch(`checklist_items?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
       }
       fetchData(true); 
     } catch (err: any) {
@@ -1204,7 +1204,7 @@ export default function App() {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         <div className="mb-6 px-1">
-          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">活動復盤 analysis</h2>
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">活動復盤分析</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
             <BarChart2 className="w-4 h-4 text-[#6D55A3]" /> 即時執行數據 ({currentService})
           </p>
