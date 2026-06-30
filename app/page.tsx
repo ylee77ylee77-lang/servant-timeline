@@ -1678,112 +1678,111 @@ export default function App() {
       <div className="relative flex flex-col w-full max-w-[420px] bg-[#FFF9F3] sm:rounded-[40px] sm:border-[10px] border-[#6D55A3]/5 overflow-hidden shadow-2xl shadow-[#6D55A3]/20">
         
         {/* 全新品牌風格 - 頂部 Header */}
-        <header className="sticky top-0 z-20 px-5 pt-8 pb-4 bg-gradient-to-br from-[#FFF9F3] via-[#F3EEFF] to-[#FFF2F4] border-b border-[#E6EAF0] rounded-b-[32px] shadow-sm mb-2">
-          
-          <div className="flex items-start justify-between relative">
-            <Sparkles className="absolute -top-4 -right-2 w-20 h-20 text-[#6D55A3] opacity-[0.03] rotate-12 pointer-events-none" />
-            
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-[#1F2937] flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-[10px] bg-white flex items-center justify-center shadow-md shadow-[#6D55A3]/10">
-                  <img 
-                    src="https://lirp.cdn-website.com/df26cde4/dms3rep/multi/opt/1105+SHK_Logo+new+01-224w.png" 
-                    alt="Logo" 
-                    className="w-7 h-7 object-contain" 
-                  />
-                </div>
-                主日崇拜招待
-              </h1>
-              <p className="text-[13px] font-bold text-[#6D55A3] mt-2.5 flex items-center gap-1.5 opacity-90">
-                <HeartHandshake className="w-4 h-4" />
-                今天，我們一起歡迎家人回家
-              </p>
-            </div>
+        <header className="sticky top-0 z-20 px-5 pt-6 pb-5 bg-gradient-to-br from-[#FFF9F3] via-[#F7F1FF] to-[#FFF2F4] border-b border-[#E6EAF0] rounded-b-[32px] shadow-sm mb-2">
 
-            {/* 時間、雲端狀態、自動報時開關與智慧語音問答按鈕 */}
-            <div className="flex flex-col items-end pt-1">
-              
-              {/* 語音功能微縮雙膠囊控制中心 (上下整齊呼應) */}
-              <div className="flex flex-col gap-1.5 mb-2 items-end">
-                
-                {/* 自動報時微縮膠囊 */}
-                <button
-                  onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-                  className={`px-2.5 py-1 rounded-full flex items-center justify-center gap-1 border transition-all w-[86px] ${
-                    isVoiceEnabled 
-                      ? 'bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm shadow-[#F25D6B]/5' 
-                      : 'bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]'
-                  }`}
-                  title="開啟/關閉自動任務語音廣播"
-                >
-                  {isVoiceEnabled ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
-                  <span className="text-[10px] font-black tracking-wider">
-                    自動報時
-                  </span>
-                </button>
+  {/* 第一層：品牌與時間 */}
+  <div className="flex items-start justify-between gap-4">
+    <div className="flex items-start gap-3 min-w-0">
+      <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shadow-md shadow-[#6D55A3]/10 border border-[#E6EAF0] shrink-0 overflow-hidden">
+        <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain" />
+        <span className="text-[11px] font-black text-[#6D55A3] hidden">
+          SHK
+        </span>
+      </div>
 
-                {/* 語音問答麥克風按鈕 - 支援 AI 思考載入狀態 */}
-                <button
-                  onClick={toggleListening}
-                  disabled={isThinking}
-                  className={`px-2.5 py-1 rounded-full flex items-center justify-center gap-1 border transition-all w-[86px] ${
-                    isListening 
-                      ? 'bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25' 
-                      : isThinking
-                        ? 'bg-amber-100 text-amber-700 border-amber-300'
-                        : 'bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]'
-                  }`}
-                  title="點擊開始對話問答（例如：現在要做什麼？晚崇需要幾個奉獻袋？）"
-                >
-                  {isListening ? (
-                    <Mic className="w-3 h-3 text-white animate-bounce" />
-                  ) : isThinking ? (
-                    <Loader2 className="w-3 h-3 animate-spin text-amber-700" />
-                  ) : (
-                    <MicOff className="w-3 h-3" />
-                  )}
-                  <span className="text-[10px] font-black tracking-wider">
-                    {isListening ? '聆聽中...' : isThinking ? '思考中...' : '問助理'}
-                  </span>
-                </button>
+      <div className="min-w-0 pt-0.5">
+        <h1 className="text-[24px] leading-tight font-black tracking-tight text-[#1F2937]">
+          主日崇拜招待
+        </h1>
+        <p className="text-[13px] font-bold text-[#6D55A3] mt-2 flex items-center gap-1.5 opacity-90">
+          <HeartHandshake className="w-4 h-4 shrink-0" />
+          <span className="truncate">今天，我們一起歡迎家人回家</span>
+        </p>
+      </div>
+    </div>
 
-              </div>
+    <div className="bg-white/80 border border-[#E6EAF0] rounded-2xl px-3 py-2 text-right shadow-sm shrink-0 min-w-[86px]">
+      <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-0.5">
+        目前時間
+      </div>
+      <div className="text-[24px] leading-none font-black font-mono text-[#1F2937] tracking-tighter">
+        {currentTime || "載入中"}
+      </div>
+    </div>
+  </div>
 
-              <span className="text-[10px] font-black tracking-widest text-[#7B7B74] uppercase mb-0.5 opacity-70">
-                目前時間
-              </span>
-              <span className="text-2xl font-black font-mono text-[#1F2937] tracking-tighter">
-                {currentTime || "載入中"}
-              </span>
-              <div className="flex items-center gap-1.5 mt-2 bg-white/70 backdrop-blur-md px-2.5 py-1 rounded-full border border-[#00B8B8]/20 shadow-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#00B8B8] animate-pulse"></span>
-                <span className="text-[9px] font-black text-[#00B8B8] tracking-wider">已連線至雲端</span>
-              </div>
-            </div>
-          </div>
-          
-          {/* 堂次切換膠囊按鈕 */}
-          <div className="flex gap-2.5 mt-6 overflow-x-auto pb-2 scrollbar-hide px-1">
-            {serviceOptions.map(srv => (
-              <button
-                key={srv}
-                onClick={() => {
-                  setCurrentService(srv);
-                  hasManuallySwitchedRef.current = true;
-                  setNewNode(prev => ({...prev, service_type: srv}));
-                }}
-                className={`whitespace-nowrap px-5 py-2.5 rounded-full text-[14px] font-bold transition-all duration-300 ${
-                  currentService === srv 
-                    ? 'bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-md shadow-[#F25D6B]/20 transform scale-105' 
-                    : 'bg-white text-[#7B7B74] border border-[#E6EAF0] hover:bg-[#F3EEFF] hover:text-[#6D55A3]'
-                }`}
-              >
-                {srv}
-              </button>
-            ))}
-          </div>
-        </header>
+  {/* 第二層：狀態與語音控制 */}
+  <div className="grid grid-cols-3 gap-2 mt-5">
+    <div className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-full bg-white/80 border border-[#00B8B8]/20 shadow-sm">
+      <span className="w-1.5 h-1.5 rounded-full bg-[#00B8B8] animate-pulse"></span>
+      <span className="text-[10px] font-black text-[#00B8B8] tracking-wider">
+        已連線
+      </span>
+    </div>
 
+    <button
+      type="button"
+      onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+      className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
+        isVoiceEnabled
+          ? "bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm"
+          : "bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]"
+      }`}
+      title="開啟或關閉自動任務語音廣播"
+    >
+      {isVoiceEnabled ? (
+        <Volume2 className="w-3.5 h-3.5" />
+      ) : (
+        <VolumeX className="w-3.5 h-3.5" />
+      )}
+      自動報時
+    </button>
+
+    <button
+      type="button"
+      onClick={toggleListening}
+      disabled={isThinking}
+      className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
+        isListening
+          ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25"
+          : isThinking
+            ? "bg-amber-100 text-amber-700 border-amber-300"
+            : "bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]"
+      }`}
+      title="點擊開始對話問答"
+    >
+      {isListening ? (
+        <Mic className="w-3.5 h-3.5 text-white animate-bounce" />
+      ) : isThinking ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+      ) : (
+        <MicOff className="w-3.5 h-3.5" />
+      )}
+      {isListening ? "聆聽中" : isThinking ? "思考中" : "問助理"}
+    </button>
+  </div>
+
+  {/* 第三層：堂次切換 */}
+  <div className="grid grid-cols-3 gap-2.5 mt-5">
+    {serviceOptions.map((srv) => (
+      <button
+        key={srv}
+        onClick={() => {
+          setCurrentService(srv);
+          hasManuallySwitchedRef.current = true;
+          setNewNode((prev) => ({ ...prev, service_type: srv }));
+        }}
+        className={`px-4 py-3 rounded-full text-[15px] font-black transition-all duration-300 ${
+          currentService === srv
+            ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 scale-[1.03]"
+            : "bg-white text-[#7B7B74] border border-[#E6EAF0] hover:bg-[#F3EEFF] hover:text-[#6D55A3]"
+        }`}
+      >
+        {srv}
+      </button>
+    ))}
+  </div>
+</header>
         {/* 主內容區 */}
         {fetchError ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#FFF9F3] text-center overflow-y-auto pb-28">
