@@ -1300,20 +1300,6 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2">
-            {/* 自動報時與鎖定登出並排 */}
-            <button
-              type="button"
-              onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
-                isVoiceEnabled 
-                  ? 'bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm' 
-                  : 'bg-white text-[#7B7B74] border-[#E6EAF0] hover:bg-white'
-              }`}
-              title="開啟/關閉自動任務語音廣播"
-            >
-              {isVoiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-              <span>自動報時</span>
-            </button>
 
             <button
               type="button"
