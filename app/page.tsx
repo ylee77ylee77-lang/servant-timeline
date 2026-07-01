@@ -672,6 +672,93 @@ export default function App() {
 
   const activeNodeId = getActiveNodeIdByTime();
 
+  const formatMinutesText = (minutes: number) => {
+    if (minutes <= 0) return "現在";
+    if (minutes < 60) return `${minutes} 分鐘後`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (mins === 0) return `${hours} 小時後`;
+    return `${hours} 小時 ${mins} 分鐘後`;
+  };
+
+  const getNextReminderInfo = () => {
+    const currentMinutes = timeToMinutes(currentTime);
+    const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+
+    const reminderCandidates = currentServiceNodes.flatMap((node) => {
+      const nodeMinutes = timeToMinutes(node.time);
+      return [
+        {
+          node,
+          reminderType: "pre5" as const,
+          reminderMinutes: nodeMinutes - 5,
+          label: "預備提醒"
+        },
+        {
+          node,
+          reminderType: "now" as const,
+          reminderMinutes: nodeMinutes,
+          label: "準點提醒"
+        }
+      ];
+    });
+
+    const nextReminder = reminderCandidates
+      .filter(item => item.reminderMinutes > currentMinutes)
+      .sort((a, b) => a.reminderMinutes - b.reminderMinutes)[0];
+
+    if (!nextReminder) return null;
+
+    return {
+      ...nextReminder,
+      minutesUntil: nextReminder.reminderMinutes - currentMinutes
+    };
+  };
+
+  const announceVoiceReminderStatus = () => {
+    const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+
+    if (currentServiceNodes.length === 0) {
+      speak(`自動報時已開啟。目前 ${currentService} 尚未安排服事任務。`);
+      return;
+    }
+
+    const currentMinutes = timeToMinutes(currentTime);
+    const activeNode = currentServiceNodes.find(node => node.id === activeNodeId) || currentServiceNodes[0];
+    const activeNodeMinutes = timeToMinutes(activeNode.time);
+    const nextReminder = getNextReminderInfo();
+
+    let currentMessage = "";
+
+    if (currentMinutes < activeNodeMinutes) {
+      currentMessage = `自動報時已開啟。下一個任務是：${activeNode.title}，時間是 ${activeNode.time}。`;
+    } else {
+      currentMessage = `自動報時已開啟。目前任務是：${activeNode.title}。負責：${activeNode.assignee || "未指定"}。地點：${activeNode.location || "未指定"}。`;
+    }
+
+    if (nextReminder) {
+      const nextMessage = nextReminder.reminderType === "pre5"
+        ? `${formatMinutesText(nextReminder.minutesUntil)}，提醒：${nextReminder.node.title}。`
+        : `${formatMinutesText(nextReminder.minutesUntil)}，提醒進行：${nextReminder.node.title}。`;
+
+      speak(`自動報時已開啟。${nextMessage}`);
+    } else {
+      speak(currentMessage);
+    }
+  };
+
+  const handleToggleVoiceReminder = () => {
+    const nextEnabled = !isVoiceEnabled;
+    setIsVoiceEnabled(nextEnabled);
+
+    if (nextEnabled) {
+      setTimeout(() => {
+        announceVoiceReminderStatus();
+      }, 150);
+    }
+  };
+
+
   useEffect(() => {
     if (!isLoading && !fetchError && filteredNodes.length > 0 && activeTab === 'timeline' && activeNodeRef.current) {
       setTimeout(() => {
@@ -1720,7 +1807,7 @@ export default function App() {
 
     <button
       type="button"
-      onClick={() => setIsVoiceEnabled(!isVoiceEnabled)}
+      onClick={handleToggleVoiceReminder}
       className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
         isVoiceEnabled
           ? "bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm"
