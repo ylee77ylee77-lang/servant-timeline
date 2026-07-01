@@ -80,7 +80,10 @@ export default function App() {
   const activeNodeRef = useRef<HTMLDivElement>(null);
   const timelineContainerRef = useRef<HTMLDivElement>(null);
   const nodeMarkerRefs = useRef<{ [nodeId: string]: HTMLDivElement | null }>({});
+  const lastTaskBlockIdRef = useRef<string | null>(null);
+  const taskBlockNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentTimeCursorTop, setCurrentTimeCursorTop] = useState<number | null>(null);
+  const [taskBlockNotice, setTaskBlockNotice] = useState("");
 
   const [detailModal, setDetailModal] = useState<{isOpen: boolean, title: string, details: string}>({isOpen: false, title: '', details: ''});
 
@@ -164,6 +167,7 @@ export default function App() {
     name: "",
     role: "總召",
     voiceReminderEnabled: true,
+    vibrationReminderEnabled: true,
     reminderPre5Enabled: true,
     reminderNowEnabled: true,
     voiceDetailLevel: "standard" as "simple" | "standard" | "detailed"
@@ -180,6 +184,7 @@ export default function App() {
           ...prev,
           ...parsed,
           role: parsed.role || "總召",
+          vibrationReminderEnabled: parsed.vibrationReminderEnabled !== false,
           voiceDetailLevel: parsed.voiceDetailLevel || "standard"
         }));
       }
@@ -806,6 +811,74 @@ export default function App() {
 
   const activeNodeId = getActiveNodeIdByTime();
 
+  const triggerVibration = (pattern: number | number[]) => {
+    if (!personalSettings.vibrationReminderEnabled) return;
+    if (typeof navigator === "undefined" || !("vibrate" in navigator)) return;
+
+    try {
+      navigator.vibrate(pattern);
+    } catch (err) {
+      console.warn("震動提醒未能啟動:", err);
+    }
+  };
+
+  const getTaskBlockVibrationPattern = (node: any) => {
+    const text = `${node?.title || ""} ${node?.location || ""} ${node?.details || ""}`;
+
+    if (
+      text.includes("就位") ||
+      text.includes("聖餐") ||
+      text.includes("散場") ||
+      text.includes("漏排") ||
+      text.includes("多排") ||
+      text.includes("支援")
+    ) {
+      return [200, 100, 200];
+    }
+
+    return 200;
+  };
+
+  useEffect(() => {
+    if (!currentTime || !activeNodeId || filteredNodes.length === 0) return;
+
+    if (lastTaskBlockIdRef.current === null) {
+      lastTaskBlockIdRef.current = activeNodeId;
+      return;
+    }
+
+    if (lastTaskBlockIdRef.current === activeNodeId) return;
+
+    const currentNode = filteredNodes.find((node: any) => node.id === activeNodeId);
+    lastTaskBlockIdRef.current = activeNodeId;
+
+    if (!currentNode) return;
+
+    triggerVibration(getTaskBlockVibrationPattern(currentNode));
+
+    setTaskBlockNotice(`已進入下一個任務區塊：${currentNode.title || "服事任務"}`);
+
+    if (taskBlockNoticeTimerRef.current) {
+      clearTimeout(taskBlockNoticeTimerRef.current);
+    }
+
+    taskBlockNoticeTimerRef.current = setTimeout(() => {
+      setTaskBlockNotice("");
+    }, 6000);
+
+    return () => {
+      if (taskBlockNoticeTimerRef.current) {
+        clearTimeout(taskBlockNoticeTimerRef.current);
+      }
+    };
+  }, [
+    activeNodeId,
+    currentTime,
+    filteredNodes.length,
+    personalSettings.vibrationReminderEnabled
+  ]);
+
+
   const getCurrentMinuteValue = () => {
     const now = currentDate || new Date();
     return now.getHours() * 60 + now.getMinutes() + (now.getSeconds() / 60);
@@ -1418,6 +1491,13 @@ export default function App() {
           </div>
         )}
 
+        {taskBlockNotice && (
+          <div className="mb-4 p-3 bg-[#FFF2F4] border border-[#F25D6B]/20 rounded-2xl flex items-center gap-2.5 text-xs font-black text-[#F25D6B] shadow-md shadow-[#F25D6B]/10">
+            <AlertCircle className="w-4.5 h-4.5 shrink-0" />
+            <span>{taskBlockNotice}</span>
+          </div>
+        )}
+
         {filteredNodes.length === 0 ? (
           <div className="text-center text-[#7B7B74] mt-16 text-sm bg-white p-7 rounded-[24px] shadow-sm border border-[#E6EAF0]">
             <Sparkles className="w-9 h-9 text-[#E6EAF0] mx-auto mb-3" />
@@ -1430,7 +1510,7 @@ export default function App() {
               ) : personalSettings.role === "副總召" ? (
                 <span>你目前的角色是：副總召。此堂次暫無三樓相關任務。</span>
               ) : (
-                <span>你目前的角色是：{personalSettings.role}。若角色選擇錯誤，請至「我的提醒」調整。</span>
+                <span>你目前的角色是：{personalSettings.role}。若角色選擇錯誤，請至「個人設定」調整。</span>
               )}
             </div>
           </div>
@@ -1719,7 +1799,7 @@ export default function App() {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         <div className="mb-6 px-1">
-          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">我的提醒</h2>
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">個人設定</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
             <User className="w-4 h-4 text-[#6D55A3]" />
             個人服事提醒設定會自動記憶在這台裝置
@@ -1766,6 +1846,7 @@ export default function App() {
             <div className="space-y-2.5">
               {[
                 { key: "voiceReminderEnabled", label: "語音提醒", description: "開啟後，自動報時才會出聲提醒。" },
+                { key: "vibrationReminderEnabled", label: "震動提醒", description: "進入下一個任務區塊時震動提醒。" },
                 { key: "reminderPre5Enabled", label: "5分鐘前", description: "任務前五分鐘先提醒一次。" },
                 { key: "reminderNowEnabled", label: "準點", description: "任務時間到時提醒一次。" }
               ].map(item => {
@@ -1824,13 +1905,22 @@ export default function App() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => speak(buildReminderSpeechText(previewNode, "pre5"))}
-            className="w-full py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[16px] hover:opacity-90 transition-opacity shadow-md shadow-[#F25D6B]/20"
-          >
-            測試語音提醒
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => speak(buildReminderSpeechText(previewNode, "pre5"))}
+              className="w-full py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[16px] hover:opacity-90 transition-opacity shadow-md shadow-[#F25D6B]/20"
+            >
+              測試語音
+            </button>
+            <button
+              type="button"
+              onClick={() => triggerVibration([200, 100, 200])}
+              className="w-full py-3.5 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-bold rounded-[16px] hover:bg-[#EDE6FF] transition-colors"
+            >
+              測試震動
+            </button>
+          </div>
 
           <p className="text-center text-[11px] font-bold text-[#00B8B8]">
             設定已自動儲存在這台裝置
@@ -2523,7 +2613,7 @@ export default function App() {
             className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'settings' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
             <User className="w-5 h-5" strokeWidth={activeTab === 'settings' ? 2.5 : 2} />
-            <span className="text-[10px] font-black tracking-widest">我的提醒</span>
+            <span className="text-[10px] font-black tracking-widest">個人設定</span>
           </button>
 
           <button 
