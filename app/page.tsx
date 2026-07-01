@@ -565,28 +565,40 @@ export default function App() {
   }, []);
 
   // --- 【整合自動化】自動語音報時核心觸發邏輯 ---
+  // 自動報時開啟時：
+  // 1. 任務前 5 分鐘提醒一次
+  // 2. 任務準點提醒一次
+  // 3. 不提醒未完成，避免造成現場壓力
   useEffect(() => {
     if (!isVoiceEnabled || !currentTime || nodes.length === 0) return;
 
+    const currentMinutes = timeToMinutes(currentTime);
     const currentServiceNodes = nodes.filter(n => n.service_type === currentService);
-    const nodesToAnnounce = currentServiceNodes.filter(node => node.time === currentTime);
 
-    nodesToAnnounce.forEach(async (node) => {
-      if (!announcedNodesRef.current.has(node.id)) {
-        announcedNodesRef.current.add(node.id);
-        
-        setIsThinking(true);
-        try {
-          const instruction = generateSystemInstruction(currentService, currentTime, [node]);
-          const aiPrompt = `目前時間 ${currentTime}。請以「招待助理」溫和親切、充滿愛的口吻為今日主日崇拜現場生成一段簡短（限2句話）且精煉的「語音播報提醒詞」，告訴同工要進行這項服事。任務內容是：「${node.title}」，負責崗位：「${node.assignee}」，服事地點：「${node.location}」。請不要輸出 any Markdown 標籤。`;
-          const response = await callGeminiWithRetry(aiPrompt, instruction);
-          speak(response);
-        } catch (err) {
-          console.error("AI 自動報時廣播詞生成失敗，自動 Fallback 為本地標準朗讀", err);
-          speak(`時間到，現在時間 ${currentTime}。提醒服事任務：${node.title}。負責崗位：${node.assignee}。`);
-        } finally {
-          setIsThinking(false);
-        }
+    currentServiceNodes.forEach((node) => {
+      const nodeMinutes = timeToMinutes(node.time);
+      const minutesBeforeTask = nodeMinutes - currentMinutes;
+
+      let reminderType: "pre5" | "now" | null = null;
+
+      if (minutesBeforeTask === 5) {
+        reminderType = "pre5";
+      } else if (minutesBeforeTask === 0) {
+        reminderType = "now";
+      }
+
+      if (!reminderType) return;
+
+      const announceId = `${node.id}-${reminderType}`;
+
+      if (announcedNodesRef.current.has(announceId)) return;
+
+      announcedNodesRef.current.add(announceId);
+
+      if (reminderType === "pre5") {
+        speak(`提醒，五分鐘後請預備：${node.title}。`);
+      } else {
+        speak(`時間到，請進行：${node.title}。負責：${node.assignee || "未指定"}。地點：${node.location || "未指定"}。`);
       }
     });
 
@@ -1300,6 +1312,7 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2">
+
             <button
               type="button"
               onClick={() => {
@@ -1720,7 +1733,7 @@ export default function App() {
       ) : (
         <VolumeX className="w-3.5 h-3.5" />
       )}
-      自動報時
+      {isVoiceEnabled ? "報時開" : "報時關"}
     </button>
 
     <button
