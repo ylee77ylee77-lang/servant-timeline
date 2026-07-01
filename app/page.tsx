@@ -76,7 +76,11 @@ export default function App() {
   const [fetchError, setFetchError] = useState("");
   const [activeTab, setActiveTab] = useState('timeline');
   const [currentTime, setCurrentTime] = useState("");
+  const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const activeNodeRef = useRef<HTMLDivElement>(null);
+  const timelineContainerRef = useRef<HTMLDivElement>(null);
+  const nodeMarkerRefs = useRef<{ [nodeId: string]: HTMLDivElement | null }>({});
+  const [currentTimeCursorTop, setCurrentTimeCursorTop] = useState<number | null>(null);
 
   const [detailModal, setDetailModal] = useState<{isOpen: boolean, title: string, details: string}>({isOpen: false, title: '', details: ''});
 
@@ -654,6 +658,7 @@ export default function App() {
     const updateTime = () => {
       const now = new Date();
       const newTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      setCurrentDate(now);
       setCurrentTime(newTimeStr);
 
       if (!hasManuallySwitchedRef.current) {
@@ -800,6 +805,76 @@ export default function App() {
   };
 
   const activeNodeId = getActiveNodeIdByTime();
+
+  const getCurrentMinuteValue = () => {
+    const now = currentDate || new Date();
+    return now.getHours() * 60 + now.getMinutes() + (now.getSeconds() / 60);
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'timeline' || filteredNodes.length === 0 || !timelineContainerRef.current) {
+      setCurrentTimeCursorTop(null);
+      return;
+    }
+
+    const sortedNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+    const currentMinutes = getCurrentMinuteValue();
+
+    let previousNode = sortedNodes[0];
+    let nextNode = sortedNodes[0];
+    let progressRatio = 0;
+
+    if (currentMinutes <= timeToMinutes(sortedNodes[0].time)) {
+      previousNode = sortedNodes[0];
+      nextNode = sortedNodes[0];
+      progressRatio = 0;
+    } else if (currentMinutes >= timeToMinutes(sortedNodes[sortedNodes.length - 1].time)) {
+      previousNode = sortedNodes[sortedNodes.length - 1];
+      nextNode = sortedNodes[sortedNodes.length - 1];
+      progressRatio = 0;
+    } else {
+      for (let i = 0; i < sortedNodes.length - 1; i++) {
+        const startMin = timeToMinutes(sortedNodes[i].time);
+        const endMin = timeToMinutes(sortedNodes[i + 1].time);
+
+        if (currentMinutes >= startMin && currentMinutes <= endMin) {
+          previousNode = sortedNodes[i];
+          nextNode = sortedNodes[i + 1];
+          progressRatio = endMin === startMin ? 0 : (currentMinutes - startMin) / (endMin - startMin);
+          break;
+        }
+      }
+    }
+
+    const containerRect = timelineContainerRef.current.getBoundingClientRect();
+    const previousMarker = nodeMarkerRefs.current[previousNode.id];
+    const nextMarker = nodeMarkerRefs.current[nextNode.id];
+
+    if (!previousMarker || !nextMarker) {
+      setCurrentTimeCursorTop(null);
+      return;
+    }
+
+    const getMarkerCenterY = (el: HTMLDivElement) => {
+      const rect = el.getBoundingClientRect();
+      return rect.top - containerRect.top + (rect.height / 2);
+    };
+
+    const previousY = getMarkerCenterY(previousMarker);
+    const nextY = getMarkerCenterY(nextMarker);
+    const cursorY = previousY + ((nextY - previousY) * progressRatio);
+
+    setCurrentTimeCursorTop(cursorY);
+  }, [
+    activeTab,
+    currentDate,
+    currentService,
+    nodes,
+    filteredNodes.length,
+    personalSettings.role,
+    personalSettings.name
+  ]);
+
 
   const formatMinutesText = (minutes: number) => {
     if (minutes <= 0) return "現在";
@@ -1344,13 +1419,39 @@ export default function App() {
         )}
 
         {filteredNodes.length === 0 ? (
-          <div className="text-center text-[#7B7B74] mt-16 text-sm bg-white p-6 rounded-[24px] shadow-sm border border-[#E6EAF0]">
-            <Sparkles className="w-8 h-8 text-[#E6EAF0] mx-auto mb-3" />
-            此堂次目前尚未安排服事任務
+          <div className="text-center text-[#7B7B74] mt-16 text-sm bg-white p-7 rounded-[24px] shadow-sm border border-[#E6EAF0]">
+            <Sparkles className="w-9 h-9 text-[#E6EAF0] mx-auto mb-3" />
+            <div className="text-[16px] font-black text-[#1F2937] mb-2">
+              {serviceNodes.length === 0 ? "此堂次目前尚未安排服事任務" : "目前角色沒有相關任務"}
+            </div>
+            <div className="text-[13px] font-medium leading-relaxed">
+              {serviceNodes.length === 0 ? (
+                <span>請至「任務管理」新增此堂次的服事流程。</span>
+              ) : personalSettings.role === "副總召" ? (
+                <span>你目前的角色是：副總召。此堂次暫無三樓相關任務。</span>
+              ) : (
+                <span>你目前的角色是：{personalSettings.role}。若角色選擇錯誤，請至「我的提醒」調整。</span>
+              )}
+            </div>
           </div>
         ) : (
-          <div className="relative mt-2">
+          <div ref={timelineContainerRef} className="relative mt-2">
             <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
+
+            {currentTimeCursorTop !== null && (
+              <div
+                className="absolute left-[20px] z-30 pointer-events-none transition-all duration-700 ease-linear"
+                style={{ top: `${currentTimeCursorTop}px`, transform: "translate(-50%, -50%)" }}
+              >
+                <div className="relative flex items-center justify-center">
+                  <span className="absolute inline-flex w-6 h-6 rounded-full opacity-30 bg-[#F25D6B] animate-ping" />
+                  <span className="relative inline-flex w-4 h-4 rounded-full bg-[#F25D6B] shadow-sm shadow-[#F25D6B]/50" />
+                  <span className="absolute left-1/2 -translate-x-1/2 -top-7 px-2 py-0.5 rounded-full bg-white border border-[#F25D6B]/20 shadow-sm text-[10px] font-black font-mono text-[#F25D6B] whitespace-nowrap">
+                    {currentTime || "--:--"}
+                  </span>
+                </div>
+              </div>
+            )}
             
             {filteredNodes.map((node) => {
               const completed = isNodeCompleted(node);
@@ -1358,16 +1459,18 @@ export default function App() {
               return (
                 <div key={node.id} className="relative mb-8 transition-all duration-500" ref={active ? activeNodeRef : null}>
                   
-                  <div className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10">
+                  <div
+                    ref={(el) => {
+                      nodeMarkerRefs.current[node.id] = el;
+                    }}
+                    className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10"
+                  >
                     {completed ? (
                       <div className="w-7 h-7 rounded-full bg-[#00B8B8] flex items-center justify-center shadow-sm shadow-[#00B8B8]/30">
                          <Check className="w-4 h-4 text-white" strokeWidth={3} />
                       </div>
                     ) : active ? (
-                      <div className="relative flex items-center justify-center w-8 h-8">
-                        <span className="absolute inline-flex w-full h-full rounded-full opacity-30 bg-[#F25D6B] animate-ping" />
-                        <span className="relative inline-flex w-4 h-4 rounded-full bg-[#F25D6B] shadow-sm shadow-[#F25D6B]/50" />
-                      </div>
+                      <div className="w-5 h-5 rounded-full border-[3px] border-[#F25D6B]/60 bg-white shadow-sm shadow-[#F25D6B]/20" />
                     ) : (
                       <div className="w-4 h-4 rounded-full border-[3px] border-[#E6EAF0] bg-white" />
                     )}
