@@ -715,12 +715,11 @@ export default function App() {
     };
   };
 
-  const announceVoiceReminderStatus = () => {
+  const buildVoiceReminderStatusText = () => {
     const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
     if (currentServiceNodes.length === 0) {
-      speak(`自動報時已開啟。目前 ${currentService} 尚未安排服事任務。`);
-      return;
+      return `自動報時已開啟。目前 ${currentService} 尚未安排服事任務。`;
     }
 
     const currentMinutes = timeToMinutes(currentTime);
@@ -728,23 +727,23 @@ export default function App() {
     const activeNodeMinutes = timeToMinutes(activeNode.time);
     const nextReminder = getNextReminderInfo();
 
-    let currentMessage = "";
+    const currentMessage = currentMinutes < activeNodeMinutes
+      ? `自動報時已開啟。下一個任務是：${activeNode.title}，時間是 ${activeNode.time}。`
+      : `自動報時已開啟。目前任務是：${activeNode.title}。`;
 
-    if (currentMinutes < activeNodeMinutes) {
-      currentMessage = `自動報時已開啟。下一個任務是：${activeNode.title}，時間是 ${activeNode.time}。`;
-    } else {
-      currentMessage = `自動報時已開啟。目前任務是：${activeNode.title}。負責：${activeNode.assignee || "未指定"}。地點：${activeNode.location || "未指定"}。`;
+    if (!nextReminder) {
+      return currentMessage;
     }
 
-    if (nextReminder) {
-      const nextMessage = nextReminder.reminderType === "pre5"
-        ? `${formatMinutesText(nextReminder.minutesUntil)}，提醒：${nextReminder.node.title}。`
-        : `${formatMinutesText(nextReminder.minutesUntil)}，提醒進行：${nextReminder.node.title}。`;
+    const nextMessage = nextReminder.reminderType === "pre5"
+      ? `${formatMinutesText(nextReminder.minutesUntil)}，提醒：${nextReminder.node.title}。`
+      : `${formatMinutesText(nextReminder.minutesUntil)}，提醒進行：${nextReminder.node.title}。`;
 
-      speak(`自動報時已開啟。${nextMessage}`);
-    } else {
-      speak(currentMessage);
-    }
+    return `自動報時已開啟。${nextMessage}`;
+  };
+
+  const announceVoiceReminderStatus = () => {
+    speak(buildVoiceReminderStatusText());
   };
 
   const handleToggleVoiceReminder = () => {
@@ -752,9 +751,11 @@ export default function App() {
     setIsVoiceEnabled(nextEnabled);
 
     if (nextEnabled) {
-      setTimeout(() => {
-        announceVoiceReminderStatus();
-      }, 150);
+      // 一定要在使用者點擊事件當下直接呼叫 speak。
+      // 手機瀏覽器常會阻擋 setTimeout 裡的語音播放，導致按了沒有馬上播報。
+      speak(buildVoiceReminderStatusText());
+    } else if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
     }
   };
 
@@ -1820,7 +1821,7 @@ export default function App() {
       ) : (
         <VolumeX className="w-3.5 h-3.5" />
       )}
-      {isVoiceEnabled ? "報時開" : "報時關"}
+      自動報時
     </button>
 
     <button
