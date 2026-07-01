@@ -149,23 +149,41 @@ export default function App() {
   // 設定會記憶在同一台裝置、同一個瀏覽器中，不需要登入。
   const PERSONAL_REMINDER_STORAGE_KEY = "shekinah_personal_reminder_settings_v1";
 
-  const roleOptions = [
-    "總召",
-    "副總召",
-    "大堂招待",
-    "二樓招待",
-    "三樓招待",
-    "電梯招待",
-    "手扶梯招待",
-    "新朋友接待",
-    "奉獻同工",
-    "招待同工",
-    "其他"
+  const isCommunionWeek = (date = new Date()) => {
+    const serviceDate = new Date(date);
+
+    // 週六晚崇若隔天是該月份第一個週日，也算隔月第一週聖餐週。
+    if (serviceDate.getDay() === 6) {
+      const nextDay = new Date(serviceDate);
+      nextDay.setDate(serviceDate.getDate() + 1);
+      const firstSunday = new Date(nextDay.getFullYear(), nextDay.getMonth(), 1);
+      while (firstSunday.getDay() !== 0) firstSunday.setDate(firstSunday.getDate() + 1);
+      return nextDay.toDateString() === firstSunday.toDateString();
+    }
+
+    if (serviceDate.getDay() === 0) {
+      const firstSunday = new Date(serviceDate.getFullYear(), serviceDate.getMonth(), 1);
+      while (firstSunday.getDay() !== 0) firstSunday.setDate(firstSunday.getDate() + 1);
+      return serviceDate.toDateString() === firstSunday.toDateString();
+    }
+
+    return false;
+  };
+
+  const baseRoleOptions = [
+    "總招",
+    "副總招",
+    "專招",
+    "牧招"
   ];
+
+  const roleOptions = isCommunionWeek(currentDate || new Date())
+    ? [...baseRoleOptions, "聖餐助手"]
+    : baseRoleOptions;
 
   const [personalSettings, setPersonalSettings] = useState({
     name: "",
-    role: "總召",
+    role: "總招",
     voiceReminderEnabled: true,
     vibrationReminderEnabled: true,
     reminderPre5Enabled: true,
@@ -183,7 +201,11 @@ export default function App() {
         setPersonalSettings(prev => ({
           ...prev,
           ...parsed,
-          role: parsed.role || "總召",
+          role: parsed.role === "總召"
+            ? "總招"
+            : parsed.role === "副總召"
+              ? "副總招"
+              : (parsed.role || "總招"),
           vibrationReminderEnabled: parsed.vibrationReminderEnabled !== false,
           voiceDetailLevel: parsed.voiceDetailLevel || "standard"
         }));
@@ -222,14 +244,11 @@ export default function App() {
 
   const getRoleKeywords = (role: string) => {
     const map: { [key: string]: string[] } = {
-      "大堂招待": ["大堂招待", "大堂專招", "大堂"],
-      "二樓招待": ["二樓招待", "二樓專招", "二樓", "2樓", "2f"],
-      "三樓招待": ["三樓招待", "三樓專招", "三樓", "3樓", "3f"],
-      "電梯招待": ["電梯招待", "電梯專招", "電梯"],
-      "手扶梯招待": ["手扶梯招待", "手扶梯專招", "手扶梯", "扶梯"],
-      "新朋友接待": ["新朋友接待", "新友", "新人", "留名卡", "新朋友"],
-      "奉獻同工": ["奉獻同工", "奉獻"],
-      "招待同工": ["招待同工", "招待", "專招"]
+      "總招": ["總招", "總召", "總招待", "總招工作"],
+      "副總招": ["副總招", "副總召", "三樓", "3樓", "3f", "三層"],
+      "專招": ["專招", "總招", "副總招", "電梯專招", "手扶梯專招", "外場專招", "大堂專招"],
+      "牧招": ["牧招", "區塊牧招", "區塊", "1A", "1B", "2A", "2B", "2C", "3A", "3B", "3C", "4A", "4B", "4C", "5", "6", "7A", "7B", "8", "9A", "10"],
+      "聖餐助手": ["聖餐助手", "聖餐", "餅杯", "發餅", "發杯", "領杯", "領餅"]
     };
 
     return map[role] || [role];
@@ -240,18 +259,12 @@ export default function App() {
   };
 
   const isNodeForCurrentPerson = (node: any) => {
-    const role = personalSettings.role || "總召";
+    const role = personalSettings.role || "總招";
 
-    if (role === "總召") return true;
+    if (role === "總招") return true;
 
-    if (role === "副總召") {
-      return isThirdFloorTask(node);
-    }
-
-    if (role === "其他") {
-      const name = personalSettings.name.trim();
-      if (!name) return false;
-      return taskSearchText(node).includes(normalizeText(name));
+    if (role === "副總招") {
+      return isThirdFloorTask(node) || textContainsAny(taskSearchText(node), ["副總招", "副總召"]);
     }
 
     return textContainsAny(taskSearchText(node), getRoleKeywords(role));
@@ -689,9 +702,8 @@ export default function App() {
 
   // --- 【整合自動化】自動語音報時核心觸發邏輯 ---
   // 自動報時開啟時，會同時尊重：
-  // 1. 我的提醒設定：角色篩選、語音提醒、5分鐘前、準點、語音內容
-  // 2. 任務自己的提醒設定：語音提醒、5分鐘前、準點
-  // 3. 不提醒未完成，避免造成現場壓力
+  // 1. 個人設定：角色篩選、語音提醒、5分鐘前、準點、語音內容
+  // 2. 不提醒未完成，避免造成現場壓力
   useEffect(() => {
     if (!isVoiceEnabled || !currentTime || nodes.length === 0 || !personalSettings.voiceReminderEnabled) return;
 
@@ -1373,39 +1385,12 @@ export default function App() {
     });
   };
 
-  const getReminderSettings = (node: any) => ({
-    voiceReminderEnabled: node.voice_reminder_enabled !== false,
-    reminderPre5Enabled: node.reminder_pre5_enabled !== false,
-    reminderNowEnabled: node.reminder_now_enabled !== false
+  const getReminderSettings = (_node: any) => ({
+    voiceReminderEnabled: true,
+    reminderPre5Enabled: true,
+    reminderNowEnabled: true
   });
 
-  const handleToggleReminderSetting = async (
-    nodeId: string,
-    field: "voice_reminder_enabled" | "reminder_pre5_enabled" | "reminder_now_enabled"
-  ) => {
-    const node = nodes.find(n => n.id === nodeId);
-    if (!node) return;
-
-    const nextValue = !(node[field] !== false);
-
-    setNodes(prev => prev.map(n => 
-      n.id === nodeId ? { ...n, [field]: nextValue } : n
-    ));
-
-    try {
-      await supabaseFetch(`timeline_nodes?id=eq.${nodeId}`, "PATCH", {
-        [field]: nextValue
-      });
-      fetchData(true);
-    } catch (err: any) {
-      console.error("提醒設定同步失敗:", err);
-      setCustomAlert({
-        isOpen: true,
-        message: "提醒設定同步失敗。請確認 Supabase 的 timeline_nodes 已新增提醒設定欄位。"
-      });
-      fetchData(true);
-    }
-  };
 
   const handleVerifyPassword = () => {
     if (passwordInput === ADMIN_PASSWORD) {
@@ -1507,10 +1492,10 @@ export default function App() {
             <div className="text-[13px] font-medium leading-relaxed">
               {serviceNodes.length === 0 ? (
                 <span>請至「任務管理」新增此堂次的服事流程。</span>
-              ) : personalSettings.role === "副總召" ? (
-                <span>你目前的角色是：副總召。此堂次暫無三樓相關任務。</span>
+              ) : personalSettings.role === "副總招" ? (
+                <span>你目前的角色是：副總招。此堂次暫無三樓相關任務。</span>
               ) : (
-                <span>你目前的角色是：{personalSettings.role}。若角色選擇錯誤，請至「個人設定」調整。</span>
+                <span>你目前的角色是：{personalSettings.role}。若服事角色選擇錯誤，請至「個人設定」調整。</span>
               )}
             </div>
           </div>
@@ -1831,10 +1816,12 @@ export default function App() {
             </select>
 
             <div className="mt-3 p-3 rounded-2xl bg-[#FFF9F3] border border-[#E6EAF0] text-[12px] leading-relaxed text-[#7B7B74] font-medium">
-              {personalSettings.role === "總召" ? (
-                <span>總召會看到並接收全部任務提醒。</span>
-              ) : personalSettings.role === "副總召" ? (
-                <span>副總召會看到並接收三樓相關任務提醒。</span>
+              {personalSettings.role === "總招" ? (
+                <span>總招會看到並接收全場任務提醒。</span>
+              ) : personalSettings.role === "副總招" ? (
+                <span>副總招會看到並接收三樓相關任務提醒。</span>
+              ) : personalSettings.role === "聖餐助手" ? (
+                <span>聖餐助手只會在每月第一週聖餐週出現，系統會顯示聖餐相關任務。</span>
               ) : (
                 <span>系統會自動只顯示並提醒與「{personalSettings.role}」相關的任務。</span>
               )}
@@ -2127,33 +2114,6 @@ export default function App() {
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                        <span className="text-[10px] font-black text-[#7B7B74] mr-1">提醒設定</span>
-                        {[
-                          { field: "voice_reminder_enabled", label: "語音提醒", active: getReminderSettings(node).voiceReminderEnabled },
-                          { field: "reminder_pre5_enabled", label: "5分鐘前", active: getReminderSettings(node).reminderPre5Enabled },
-                          { field: "reminder_now_enabled", label: "準點", active: getReminderSettings(node).reminderNowEnabled }
-                        ].map((setting) => (
-                          <button
-                            key={setting.field}
-                            type="button"
-                            onClick={() => handleToggleReminderSetting(
-                              node.id,
-                              setting.field as "voice_reminder_enabled" | "reminder_pre5_enabled" | "reminder_now_enabled"
-                            )}
-                            className={`px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${
-                              setting.active
-                                ? "bg-[#F3EEFF] text-[#6D55A3] border-[#6D55A3]/20"
-                                : "bg-white text-[#7B7B74] border-[#E6EAF0] opacity-60"
-                            }`}
-                            title={`點擊切換${setting.label}`}
-                          >
-                            {setting.active ? "✓ " : ""}
-                            {setting.label}
-                          </button>
-                        ))}
                       </div>
 
                       <div className="mt-3 border-t border-slate-100 pt-2">
