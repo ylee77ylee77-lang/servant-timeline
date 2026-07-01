@@ -565,10 +565,11 @@ export default function App() {
   }, []);
 
   // --- 【整合自動化】自動語音報時核心觸發邏輯 ---
-  // 自動報時開啟時：
-  // 1. 任務前 5 分鐘提醒一次
-  // 2. 任務準點提醒一次
-  // 3. 不提醒未完成，避免造成現場壓力
+  // 自動報時開啟時，依照每一個任務自己的提醒設定執行：
+  // 1. 可自選是否啟用語音提醒
+  // 2. 可自選是否任務前 5 分鐘提醒
+  // 3. 可自選是否準點提醒
+  // 4. 不提醒未完成，避免造成現場壓力
   useEffect(() => {
     if (!isVoiceEnabled || !currentTime || nodes.length === 0) return;
 
@@ -576,14 +577,17 @@ export default function App() {
     const currentServiceNodes = nodes.filter(n => n.service_type === currentService);
 
     currentServiceNodes.forEach((node) => {
+      const settings = getReminderSettings(node);
+      if (!settings.voiceReminderEnabled) return;
+
       const nodeMinutes = timeToMinutes(node.time);
       const minutesBeforeTask = nodeMinutes - currentMinutes;
 
       let reminderType: "pre5" | "now" | null = null;
 
-      if (minutesBeforeTask === 5) {
+      if (minutesBeforeTask === 5 && settings.reminderPre5Enabled) {
         reminderType = "pre5";
-      } else if (minutesBeforeTask === 0) {
+      } else if (minutesBeforeTask === 0 && settings.reminderNowEnabled) {
         reminderType = "now";
       }
 
@@ -596,7 +600,7 @@ export default function App() {
       announcedNodesRef.current.add(announceId);
 
       if (reminderType === "pre5") {
-        speak(`提醒，五分鐘後請預備：${node.title}。`);
+        speak(`提醒，五分鐘後：${node.title}。`);
       } else {
         speak(`時間到，請進行：${node.title}。負責：${node.assignee || "未指定"}。地點：${node.location || "未指定"}。`);
       }
@@ -616,6 +620,9 @@ export default function App() {
       if (nodesData && checklistData) {
         const formattedNodes = nodesData.map((node: any) => ({
           ...node,
+          voice_reminder_enabled: node.voice_reminder_enabled !== false,
+          reminder_pre5_enabled: node.reminder_pre5_enabled !== false,
+          reminder_now_enabled: node.reminder_now_enabled !== false,
           checklist: checklistData.filter((c: any) => c.node_id === node.id)
         }));
         setNodes(formattedNodes);
@@ -686,21 +693,31 @@ export default function App() {
     const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
     const reminderCandidates = currentServiceNodes.flatMap((node) => {
+      const settings = getReminderSettings(node);
+      if (!settings.voiceReminderEnabled) return [];
+
       const nodeMinutes = timeToMinutes(node.time);
-      return [
-        {
+      const candidates: any[] = [];
+
+      if (settings.reminderPre5Enabled) {
+        candidates.push({
           node,
           reminderType: "pre5" as const,
           reminderMinutes: nodeMinutes - 5,
-          label: "預備提醒"
-        },
-        {
+          label: "提醒"
+        });
+      }
+
+      if (settings.reminderNowEnabled) {
+        candidates.push({
           node,
           reminderType: "now" as const,
           reminderMinutes: nodeMinutes,
           label: "準點提醒"
-        }
-      ];
+        });
+      }
+
+      return candidates;
     });
 
     const nextReminder = reminderCandidates
@@ -1047,6 +1064,40 @@ export default function App() {
         }
       }
     });
+  };
+
+  const getReminderSettings = (node: any) => ({
+    voiceReminderEnabled: node.voice_reminder_enabled !== false,
+    reminderPre5Enabled: node.reminder_pre5_enabled !== false,
+    reminderNowEnabled: node.reminder_now_enabled !== false
+  });
+
+  const handleToggleReminderSetting = async (
+    nodeId: string,
+    field: "voice_reminder_enabled" | "reminder_pre5_enabled" | "reminder_now_enabled"
+  ) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    const nextValue = !(node[field] !== false);
+
+    setNodes(prev => prev.map(n => 
+      n.id === nodeId ? { ...n, [field]: nextValue } : n
+    ));
+
+    try {
+      await supabaseFetch(`timeline_nodes?id=eq.${nodeId}`, "PATCH", {
+        [field]: nextValue
+      });
+      fetchData(true);
+    } catch (err: any) {
+      console.error("提醒設定同步失敗:", err);
+      setCustomAlert({
+        isOpen: true,
+        message: "提醒設定同步失敗。請確認 Supabase 的 timeline_nodes 已新增提醒設定欄位。"
+      });
+      fetchData(true);
+    }
   };
 
   const handleVerifyPassword = () => {
@@ -1586,6 +1637,33 @@ export default function App() {
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-black text-[#7B7B74] mr-1">提醒設定</span>
+                        {[
+                          { field: "voice_reminder_enabled", label: "語音提醒", active: getReminderSettings(node).voiceReminderEnabled },
+                          { field: "reminder_pre5_enabled", label: "5分鐘前", active: getReminderSettings(node).reminderPre5Enabled },
+                          { field: "reminder_now_enabled", label: "準點", active: getReminderSettings(node).reminderNowEnabled }
+                        ].map((setting) => (
+                          <button
+                            key={setting.field}
+                            type="button"
+                            onClick={() => handleToggleReminderSetting(
+                              node.id,
+                              setting.field as "voice_reminder_enabled" | "reminder_pre5_enabled" | "reminder_now_enabled"
+                            )}
+                            className={`px-2.5 py-1 rounded-full border text-[10px] font-black transition-all ${
+                              setting.active
+                                ? "bg-[#F3EEFF] text-[#6D55A3] border-[#6D55A3]/20"
+                                : "bg-white text-[#7B7B74] border-[#E6EAF0] opacity-60"
+                            }`}
+                            title={`點擊切換${setting.label}`}
+                          >
+                            {setting.active ? "✓ " : ""}
+                            {setting.label}
+                          </button>
+                        ))}
                       </div>
 
                       <div className="mt-3 border-t border-slate-100 pt-2">
