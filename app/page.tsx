@@ -138,13 +138,126 @@ export default function App() {
   const [aiSuggestions, setAiSuggestions] = useState<{ [nodeId: string]: any[] }>({}); // AI 推薦 Checklist
   const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState<string | null>(null); // 正在生成建議的 nodeId
 
+  // --- 【我的提醒｜個人設定】 ---
+  // 設定會記憶在同一台裝置、同一個瀏覽器中，不需要登入。
+  const PERSONAL_REMINDER_STORAGE_KEY = "shekinah_personal_reminder_settings_v1";
+
+  const roleOptions = [
+    "總召",
+    "副總召",
+    "大堂招待",
+    "二樓招待",
+    "三樓招待",
+    "電梯招待",
+    "手扶梯招待",
+    "新朋友接待",
+    "奉獻同工",
+    "招待同工",
+    "其他"
+  ];
+
+  const [personalSettings, setPersonalSettings] = useState({
+    name: "",
+    role: "總召",
+    voiceReminderEnabled: true,
+    reminderPre5Enabled: true,
+    reminderNowEnabled: true,
+    voiceDetailLevel: "standard" as "simple" | "standard" | "detailed"
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const saved = window.localStorage.getItem(PERSONAL_REMINDER_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setPersonalSettings(prev => ({
+          ...prev,
+          ...parsed,
+          role: parsed.role || "總召",
+          voiceDetailLevel: parsed.voiceDetailLevel || "standard"
+        }));
+      }
+    } catch (err) {
+      console.error("讀取個人提醒設定失敗:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      window.localStorage.setItem(PERSONAL_REMINDER_STORAGE_KEY, JSON.stringify(personalSettings));
+    } catch (err) {
+      console.error("儲存個人提醒設定失敗:", err);
+    }
+  }, [personalSettings]);
+
+  const updatePersonalSettings = (patch: Partial<typeof personalSettings>) => {
+    setPersonalSettings(prev => ({ ...prev, ...patch }));
+  };
+
+  const normalizeText = (value: any) => String(value || "").toLowerCase();
+
+  const taskSearchText = (node: any) => normalizeText([
+    node.title,
+    node.assignee,
+    node.location,
+    node.details
+  ].join(" "));
+
+  const textContainsAny = (text: string, keywords: string[]) => {
+    return keywords.some(keyword => text.includes(normalizeText(keyword)));
+  };
+
+  const getRoleKeywords = (role: string) => {
+    const map: { [key: string]: string[] } = {
+      "大堂招待": ["大堂招待", "大堂專招", "大堂"],
+      "二樓招待": ["二樓招待", "二樓專招", "二樓", "2樓", "2f"],
+      "三樓招待": ["三樓招待", "三樓專招", "三樓", "3樓", "3f"],
+      "電梯招待": ["電梯招待", "電梯專招", "電梯"],
+      "手扶梯招待": ["手扶梯招待", "手扶梯專招", "手扶梯", "扶梯"],
+      "新朋友接待": ["新朋友接待", "新友", "新人", "留名卡", "新朋友"],
+      "奉獻同工": ["奉獻同工", "奉獻"],
+      "招待同工": ["招待同工", "招待", "專招"]
+    };
+
+    return map[role] || [role];
+  };
+
+  const isThirdFloorTask = (node: any) => {
+    return textContainsAny(taskSearchText(node), ["三樓", "3樓", "3f", "三層"]);
+  };
+
+  const isNodeForCurrentPerson = (node: any) => {
+    const role = personalSettings.role || "總召";
+
+    if (role === "總召") return true;
+
+    if (role === "副總召") {
+      return isThirdFloorTask(node);
+    }
+
+    if (role === "其他") {
+      const name = personalSettings.name.trim();
+      if (!name) return false;
+      return taskSearchText(node).includes(normalizeText(name));
+    }
+
+    return textContainsAny(taskSearchText(node), getRoleKeywords(role));
+  };
+
+
   // 為語音問答與時間軸綁定最新的狀態 Ref，防範閉包快照問題
   const filteredNodesRef = useRef<any[]>([]);
   const currentTimeRef = useRef<string>("");
 
   useEffect(() => {
-    filteredNodesRef.current = nodes.filter(n => n.service_type === currentService);
-  }, [nodes, currentService]);
+    filteredNodesRef.current = nodes
+      .filter(n => n.service_type === currentService)
+      .filter(isNodeForCurrentPerson);
+  }, [nodes, currentService, personalSettings.role, personalSettings.name]);
 
   useEffect(() => {
     currentTimeRef.current = currentTime;
@@ -565,16 +678,17 @@ export default function App() {
   }, []);
 
   // --- 【整合自動化】自動語音報時核心觸發邏輯 ---
-  // 自動報時開啟時，依照每一個任務自己的提醒設定執行：
-  // 1. 可自選是否啟用語音提醒
-  // 2. 可自選是否任務前 5 分鐘提醒
-  // 3. 可自選是否準點提醒
-  // 4. 不提醒未完成，避免造成現場壓力
+  // 自動報時開啟時，會同時尊重：
+  // 1. 我的提醒設定：角色篩選、語音提醒、5分鐘前、準點、語音內容
+  // 2. 任務自己的提醒設定：語音提醒、5分鐘前、準點
+  // 3. 不提醒未完成，避免造成現場壓力
   useEffect(() => {
-    if (!isVoiceEnabled || !currentTime || nodes.length === 0) return;
+    if (!isVoiceEnabled || !currentTime || nodes.length === 0 || !personalSettings.voiceReminderEnabled) return;
 
     const currentMinutes = timeToMinutes(currentTime);
-    const currentServiceNodes = nodes.filter(n => n.service_type === currentService);
+    const currentServiceNodes = nodes
+      .filter(n => n.service_type === currentService)
+      .filter(isNodeForCurrentPerson);
 
     currentServiceNodes.forEach((node) => {
       const settings = getReminderSettings(node);
@@ -585,31 +699,37 @@ export default function App() {
 
       let reminderType: "pre5" | "now" | null = null;
 
-      if (minutesBeforeTask === 5 && settings.reminderPre5Enabled) {
+      if (minutesBeforeTask === 5 && settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled) {
         reminderType = "pre5";
-      } else if (minutesBeforeTask === 0 && settings.reminderNowEnabled) {
+      } else if (minutesBeforeTask === 0 && settings.reminderNowEnabled && personalSettings.reminderNowEnabled) {
         reminderType = "now";
       }
 
       if (!reminderType) return;
 
-      const announceId = `${node.id}-${reminderType}`;
+      const announceId = `${node.id}-${reminderType}-${personalSettings.role}`;
 
       if (announcedNodesRef.current.has(announceId)) return;
 
       announcedNodesRef.current.add(announceId);
-
-      if (reminderType === "pre5") {
-        speak(`提醒，五分鐘後：${node.title}。`);
-      } else {
-        speak(`時間到，請進行：${node.title}。負責：${node.assignee || "未指定"}。地點：${node.location || "未指定"}。`);
-      }
+      speak(buildReminderSpeechText(node, reminderType));
     });
 
     if (currentTime === "00:00") {
       announcedNodesRef.current.clear();
     }
-  }, [currentTime, isVoiceEnabled, nodes, currentService]);
+  }, [
+    currentTime,
+    isVoiceEnabled,
+    nodes,
+    currentService,
+    personalSettings.role,
+    personalSettings.name,
+    personalSettings.voiceReminderEnabled,
+    personalSettings.reminderPre5Enabled,
+    personalSettings.reminderNowEnabled,
+    personalSettings.voiceDetailLevel
+  ]);
 
   const fetchData = async (isBackgroundSync = false) => {
     try {
@@ -647,7 +767,9 @@ export default function App() {
     }
   }, []);
 
-  const filteredNodes = nodes.filter(n => n.service_type === currentService);
+  const serviceNodes = nodes.filter(n => n.service_type === currentService);
+  const filteredNodes = serviceNodes.filter(isNodeForCurrentPerson);
+  const adminNodes = serviceNodes;
   const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
 
   const timeToMinutes = (tStr: string) => {
@@ -688,7 +810,44 @@ export default function App() {
     return `${hours} 小時 ${mins} 分鐘後`;
   };
 
+  const buildChecklistSummary = (node: any) => {
+    const checklist = (node.checklist || [])
+      .map((item: any) => item.text)
+      .filter(Boolean)
+      .slice(0, 3);
+
+    if (checklist.length === 0) return "";
+
+    return `確認事項：${checklist.join("、")}。`;
+  };
+
+  const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now") => {
+    const title = node.title || "服事任務";
+    const assignee = node.assignee || "未指定";
+    const location = node.location || "未指定";
+    const detailText = node.details ? `任務提示：${node.details}。` : "";
+    const checklistText = buildChecklistSummary(node);
+
+    if (personalSettings.voiceDetailLevel === "simple") {
+      return reminderType === "pre5"
+        ? `提醒：${title}。`
+        : `時間到：${title}。`;
+    }
+
+    if (personalSettings.voiceDetailLevel === "detailed") {
+      return reminderType === "pre5"
+        ? `提醒，五分鐘後：${title}。負責：${assignee}。地點：${location}。${detailText}${checklistText}`
+        : `時間到，請進行：${title}。負責：${assignee}。地點：${location}。${detailText}${checklistText}`;
+    }
+
+    return reminderType === "pre5"
+      ? `提醒，五分鐘後：${title}。`
+      : `時間到，請進行：${title}。負責：${assignee}。地點：${location}。`;
+  };
+
   const getNextReminderInfo = () => {
+    if (!personalSettings.voiceReminderEnabled) return null;
+
     const currentMinutes = timeToMinutes(currentTime);
     const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
@@ -699,7 +858,7 @@ export default function App() {
       const nodeMinutes = timeToMinutes(node.time);
       const candidates: any[] = [];
 
-      if (settings.reminderPre5Enabled) {
+      if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled) {
         candidates.push({
           node,
           reminderType: "pre5" as const,
@@ -708,7 +867,7 @@ export default function App() {
         });
       }
 
-      if (settings.reminderNowEnabled) {
+      if (settings.reminderNowEnabled && personalSettings.reminderNowEnabled) {
         candidates.push({
           node,
           reminderType: "now" as const,
@@ -1441,6 +1600,144 @@ export default function App() {
     );
   };
 
+  const renderPersonalSettingsView = () => {
+    const previewNode = filteredNodes[0] || {
+      title: "服事任務提醒",
+      assignee: personalSettings.role || "未指定",
+      location: "服事現場",
+      details: "請依照現場流程與主責指示進行。",
+      checklist: [
+        { text: "確認服事位置" },
+        { text: "確認需要物品" },
+        { text: "留意會友需要" }
+      ]
+    };
+
+    return (
+      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        <div className="mb-6 px-1">
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">我的提醒</h2>
+          <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
+            <User className="w-4 h-4 text-[#6D55A3]" />
+            個人服事提醒設定會自動記憶在這台裝置
+          </p>
+        </div>
+
+        <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 space-y-6">
+          <div>
+            <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">我的名稱</label>
+            <input
+              type="text"
+              value={personalSettings.name}
+              onChange={e => updatePersonalSettings({ name: e.target.value })}
+              placeholder="例如：陳姊妹"
+              className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">我的服事角色</label>
+            <select
+              value={personalSettings.role}
+              onChange={e => updatePersonalSettings({ role: e.target.value })}
+              className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+            >
+              {roleOptions.map(role => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
+
+            <div className="mt-3 p-3 rounded-2xl bg-[#FFF9F3] border border-[#E6EAF0] text-[12px] leading-relaxed text-[#7B7B74] font-medium">
+              {personalSettings.role === "總召" ? (
+                <span>總召會看到並接收全部任務提醒。</span>
+              ) : personalSettings.role === "副總召" ? (
+                <span>副總召會看到並接收三樓相關任務提醒。</span>
+              ) : (
+                <span>系統會自動只顯示並提醒與「{personalSettings.role}」相關的任務。</span>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒方式</label>
+            <div className="space-y-2.5">
+              {[
+                { key: "voiceReminderEnabled", label: "語音提醒", description: "開啟後，自動報時才會出聲提醒。" },
+                { key: "reminderPre5Enabled", label: "5分鐘前", description: "任務前五分鐘先提醒一次。" },
+                { key: "reminderNowEnabled", label: "準點", description: "任務時間到時提醒一次。" }
+              ].map(item => {
+                const active = personalSettings[item.key as keyof typeof personalSettings] as boolean;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => updatePersonalSettings({ [item.key]: !active } as any)}
+                    className={`w-full flex items-center justify-between gap-3 p-3.5 rounded-2xl border transition-all ${
+                      active
+                        ? "bg-[#F3EEFF] border-[#6D55A3]/20 text-[#6D55A3]"
+                        : "bg-white border-[#E6EAF0] text-[#7B7B74]"
+                    }`}
+                  >
+                    <div className="text-left">
+                      <div className="text-sm font-black">{active ? "✓ " : ""}{item.label}</div>
+                      <div className="text-[11px] font-medium opacity-75 mt-0.5">{item.description}</div>
+                    </div>
+                    <div className={`w-10 h-6 rounded-full p-1 transition-all ${active ? "bg-[#6D55A3]" : "bg-[#E6EAF0]"}`}>
+                      <div className={`w-4 h-4 rounded-full bg-white transition-transform ${active ? "translate-x-4" : "translate-x-0"}`} />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">語音內容</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: "simple", label: "極簡" },
+                { value: "standard", label: "標準" },
+                { value: "detailed", label: "詳細" }
+              ].map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => updatePersonalSettings({ voiceDetailLevel: option.value as any })}
+                  className={`py-2.5 rounded-2xl border text-xs font-black transition-all ${
+                    personalSettings.voiceDetailLevel === option.value
+                      ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent shadow-md shadow-[#F25D6B]/15"
+                      : "bg-white text-[#7B7B74] border-[#E6EAF0]"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3 p-3 rounded-2xl bg-[#FFF9F3] border border-[#E6EAF0] text-[12px] leading-relaxed text-[#7B7B74] font-medium">
+              {personalSettings.voiceDetailLevel === "simple" && "極簡：只播報任務名稱，適合現場忙碌時使用。"}
+              {personalSettings.voiceDetailLevel === "standard" && "標準：播報任務、負責人與地點，適合一般使用。"}
+              {personalSettings.voiceDetailLevel === "detailed" && "詳細：會加上任務提示與前三項確認清單，適合任務不多的崗位。"}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => speak(buildReminderSpeechText(previewNode, "pre5"))}
+            className="w-full py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[16px] hover:opacity-90 transition-opacity shadow-md shadow-[#F25D6B]/20"
+          >
+            測試語音提醒
+          </button>
+
+          <p className="text-center text-[11px] font-bold text-[#00B8B8]">
+            設定已自動儲存在這台裝置
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+
   const renderAdminView = () => {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -1516,8 +1813,8 @@ export default function App() {
         <div>
           <h3 className="text-[11px] font-black text-[#7B7B74] mb-3 tracking-widest uppercase px-1">任務總覽與編輯 ({currentService})</h3>
           <div className="space-y-4">
-            {filteredNodes.length === 0 && <p className="text-sm font-medium text-[#7B7B74] text-center py-6 bg-white rounded-[20px] border border-[#E6EAF0]">尚無任務資料</p>}
-            {filteredNodes.map(node => {
+            {adminNodes.length === 0 && <p className="text-sm font-medium text-[#7B7B74] text-center py-6 bg-white rounded-[20px] border border-[#E6EAF0]">尚無任務資料</p>}
+            {adminNodes.map(node => {
               const isEditing = editingNodeId === node.id;
               const isChecklistExpanded = expandedChecklistNodeId === node.id;
               return (
@@ -1963,6 +2260,8 @@ export default function App() {
           renderTimelineView()
         ) : activeTab === 'review' ? (
           renderReviewView()
+        ) : activeTab === 'settings' ? (
+          renderPersonalSettingsView()
         ) : (
           renderAdminView()
         )}
@@ -2102,18 +2401,26 @@ export default function App() {
         <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-2 py-3 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] pb-safe rounded-t-[32px] sm:rounded-t-[32px] sm:w-[420px] sm:mx-auto">
           <button 
             onClick={() => setActiveTab('timeline')}
-            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'timeline' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'timeline' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
             <ListTodo className="w-5 h-5" strokeWidth={activeTab === 'timeline' ? 2.5 : 2} />
             <span className="text-[10px] font-black tracking-widest">今日流程</span>
           </button>
-          
+
           <button 
             onClick={() => setActiveTab('review')}
-            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'review' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'review' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
             <BarChart2 className="w-5 h-5" strokeWidth={activeTab === 'review' ? 2.5 : 2} />
             <span className="text-[10px] font-black tracking-widest">服事動態</span>
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('settings')}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'settings' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
+          >
+            <User className="w-5 h-5" strokeWidth={activeTab === 'settings' ? 2.5 : 2} />
+            <span className="text-[10px] font-black tracking-widest">我的提醒</span>
           </button>
 
           <button 
@@ -2126,7 +2433,7 @@ export default function App() {
                 setPasswordError("");
               }
             }}
-            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/3 py-2 rounded-2xl ${activeTab === 'admin' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
+            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'admin' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
           >
             {isAdminUnlocked ? (
               <Unlock className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
