@@ -1974,48 +1974,51 @@ export default function App() {
                   <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
                   <h3 className="text-xl font-black text-[#1F2937]">{displayCheckinName || "服事同工"}</h3>
                   <p className="text-sm font-bold text-[#6D55A3] mt-1">今日堂次：{todayService}｜{personalSettings.role || "未設定角色"}</p>
-                  <p className="text-[11px] font-bold text-[#7B7B74] mt-1">
-                    手機後四碼：{checkinProfile.phoneLast4}
-                  </p>
                   <p className="text-[11px] font-bold text-[#00B8B8] mt-1">
                     今日堂次：{todayService} {checkedInService ? "已鎖定" : "待確認"}
                   </p>
                 </div>
-                <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
-                  isCheckedIn
-                    ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
-                    : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
-                }`}>
-                  {isCheckedIn ? "已報到" : "尚未報到"}
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
+                    isCheckedIn
+                      ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
+                      : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
+                  }`}>
+                    {isCheckedIn ? "已報到" : "尚未報到"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearCheckinIdentity}
+                    className="text-[11px] font-black text-[#7B7B74] hover:text-[#F25D6B] transition-colors whitespace-nowrap"
+                  >
+                    不是我？重新輸入
+                  </button>
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <div className="p-4 rounded-[20px] bg-[#F3EEFF]/60 border border-[#6D55A3]/10">
-                  <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現在時間</div>
-                  <div className="text-2xl font-black font-mono text-[#1F2937]">{currentTime || "--:--"}</div>
-                </div>
-                <div className={`p-4 rounded-[20px] border ${
-                  wifiVerified
-                    ? "bg-[#00B8B8]/10 border-[#00B8B8]/20"
-                    : "bg-[#FFF2F4]/60 border-[#F25D6B]/10"
-                }`}>
-                  <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現場 Wi-Fi</div>
-                  <div className={`text-sm font-black ${wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"}`}>
-                    {wifiVerified ? "已連結" : wifiChecking ? "檢查中" : "尚未連結"}
-                  </div>
-                </div>
+              <div className="mt-5 p-4 rounded-[20px] bg-[#F3EEFF]/60 border border-[#6D55A3]/10">
+                <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現在時間</div>
+                <div className="text-2xl font-black font-mono text-[#1F2937]">{currentTime || "--:--"}</div>
               </div>
             </div>
 
-            {!wifiVerified && !isCheckedIn && (
-              <div className="mb-5 p-4 rounded-[20px] bg-[#FFF2F4] border border-[#F25D6B]/20">
-                <h3 className="text-sm font-black text-[#F25D6B] mb-1">
-                  {wifiChecking ? "正在檢查現場 Wi-Fi..." : "尚未連結現場 Wi-Fi 連線"}
-                </h3>
-                <p className="text-xs font-bold leading-relaxed text-[#7B7B74] mb-3">
-                  {wifiCheckMessage}
-                </p>
+            {!isCheckedIn && (
+              <div className={`mb-5 p-5 rounded-[24px] border shadow-lg shadow-[#6D55A3]/5 ${
+                wifiVerified
+                  ? "bg-[#00B8B8]/10 border-[#00B8B8]/20"
+                  : "bg-[#FFF2F4] border-[#F25D6B]/20"
+              }`}>
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className={`text-sm font-black mb-1 ${wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"}`}>
+                      {wifiVerified ? "現場 Wi-Fi：已連結" : wifiChecking ? "正在檢查現場 Wi-Fi..." : "現場 Wi-Fi：尚未連結"}
+                    </h3>
+                    <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
+                      {wifiVerified ? "已確認來自教會現場網路，可以進行報到。" : wifiCheckMessage}
+                    </p>
+                  </div>
+                  <div className={`w-3 h-3 rounded-full mt-1.5 shrink-0 ${wifiVerified ? "bg-[#00B8B8]" : "bg-[#F25D6B] animate-pulse"}`} />
+                </div>
                 <button
                   type="button"
                   onClick={handleWifiCheck}
@@ -2023,10 +2026,12 @@ export default function App() {
                   className={`w-full py-3 border font-black rounded-[16px] transition-colors ${
                     wifiChecking
                       ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed"
-                      : "bg-white text-[#F25D6B] border-[#F25D6B]/20 hover:bg-[#FFF2F4]"
+                      : wifiVerified
+                        ? "bg-white text-[#00B8B8] border-[#00B8B8]/20 hover:bg-[#00B8B8]/10"
+                        : "bg-white text-[#F25D6B] border-[#F25D6B]/20 hover:bg-[#FFF2F4]"
                   }`}
                 >
-                  {wifiChecking ? "檢查中..." : "手動重新檢查"}
+                  {wifiChecking ? "檢查中..." : wifiVerified ? "重新檢查 Wi-Fi" : "手動重新檢查"}
                 </button>
               </div>
             )}
@@ -2166,13 +2171,6 @@ export default function App() {
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={clearCheckinIdentity}
-              className="w-full text-center text-[12px] font-black text-[#7B7B74] hover:text-[#F25D6B] transition-colors"
-            >
-              不是我？請重新輸入
-            </button>
           </>
         )}
       </div>
@@ -2772,11 +2770,19 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => setActiveTab('checkin')}
+              onClick={() => setCustomAlert({ isOpen: true, message: "可直接點選任務文字、時間、地點或確認清單進行修正。" })}
               className="px-3 py-1.5 bg-[#F3EEFF] hover:bg-[#EDE6FF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
             >
-              <X className="w-3.5 h-3.5" />
-              返回報到
+              <Edit className="w-3.5 h-3.5" />
+              修正內容
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('checkin')}
+              className="px-3 py-1.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-md shadow-[#F25D6B]/20 transition-all hover:opacity-90"
+            >
+              <Check className="w-3.5 h-3.5" />
+              完成修正
             </button>
           </div>
         </div>
@@ -3153,12 +3159,9 @@ export default function App() {
       </div>
     </div>
 
-    <div className="bg-white/80 border border-[#E6EAF0] rounded-2xl px-3 py-2 text-right shadow-sm shrink-0 min-w-[86px]">
-      <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-0.5">
-        目前時間
-      </div>
+    <div className="bg-white/80 border border-[#E6EAF0] rounded-2xl px-3 py-2 text-right shadow-sm shrink-0 min-w-[74px]">
       <div className="text-[24px] leading-none font-black font-mono text-[#1F2937] tracking-tighter">
-        {currentTime || "載入中"}
+        {currentTime || "--:--"}
       </div>
     </div>
   </div>
@@ -3355,7 +3358,7 @@ export default function App() {
         )}
 
         {/* 底部功能導覽列：保留原品牌配色與圓角風格，改為新現場流程架構 */}
-        <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center gap-1 px-2 py-1.5 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-8px_28px_rgba(0,0,0,0.025)] pb-safe rounded-t-[22px] sm:rounded-t-[22px] sm:w-[420px] sm:mx-auto overflow-x-auto">
+        <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around gap-1 px-2 py-1.5 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-8px_28px_rgba(0,0,0,0.025)] pb-safe rounded-t-[22px] sm:rounded-t-[22px] sm:w-[420px] sm:mx-auto">
           {[
             { key: "checkin", label: "報到", icon: Check, color: "rose" },
             { key: "timeline", label: "流程", icon: ListTodo, color: "rose" },
@@ -3377,7 +3380,7 @@ export default function App() {
                 onClick={() => {
                   setActiveTab(item.key);
                 }}
-                className={`flex flex-col items-center justify-center gap-0.5 transition-all duration-300 min-w-[54px] px-1.5 py-1 rounded-xl ${
+                className={`flex flex-1 min-w-0 flex-col items-center justify-center gap-0.5 transition-all duration-300 px-1.5 py-1 rounded-xl ${
                   active ? activeClass : "text-[#7B7B74] hover:bg-[#F3EEFF]"
                 }`}
               >
