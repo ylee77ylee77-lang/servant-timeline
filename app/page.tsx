@@ -1996,45 +1996,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="mt-5 p-4 rounded-[20px] bg-[#F3EEFF]/60 border border-[#6D55A3]/10">
-                <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現在時間</div>
-                <div className="text-2xl font-black font-mono text-[#1F2937]">{currentTime || "--:--"}</div>
-              </div>
             </div>
-
-            {!isCheckedIn && (
-              <div className={`mb-5 p-5 rounded-[24px] border shadow-lg shadow-[#6D55A3]/5 ${
-                wifiVerified
-                  ? "bg-[#00B8B8]/10 border-[#00B8B8]/20"
-                  : "bg-[#FFF2F4] border-[#F25D6B]/20"
-              }`}>
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
-                    <h3 className={`text-sm font-black mb-1 ${wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"}`}>
-                      {wifiVerified ? "現場 Wi-Fi：已連結" : wifiChecking ? "正在檢查現場 Wi-Fi..." : "現場 Wi-Fi：尚未連結"}
-                    </h3>
-                    <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
-                      {wifiVerified ? "已確認來自教會現場網路，可以進行報到。" : wifiCheckMessage}
-                    </p>
-                  </div>
-                  <div className={`w-3 h-3 rounded-full mt-1.5 shrink-0 ${wifiVerified ? "bg-[#00B8B8]" : "bg-[#F25D6B] animate-pulse"}`} />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleWifiCheck}
-                  disabled={wifiChecking}
-                  className={`w-full py-3 border font-black rounded-[16px] transition-colors ${
-                    wifiChecking
-                      ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed"
-                      : wifiVerified
-                        ? "bg-white text-[#00B8B8] border-[#00B8B8]/20 hover:bg-[#00B8B8]/10"
-                        : "bg-white text-[#F25D6B] border-[#F25D6B]/20 hover:bg-[#FFF2F4]"
-                  }`}
-                >
-                  {wifiChecking ? "檢查中..." : wifiVerified ? "重新檢查 Wi-Fi" : "手動重新檢查"}
-                </button>
-              </div>
-            )}
 
             {!isCheckedIn && (
               <div className="mb-5 p-5 rounded-[24px] bg-white border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5">
@@ -2081,9 +2043,43 @@ export default function App() {
               {!isCheckedIn ? (
                 <>
                   <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成今日報到</h3>
-                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-4">
                     報到會同時確認現場 Wi-Fi 與本次服事堂次。AprilTag / 視覺碼會留到崗位確認使用。
                   </p>
+
+                  <div className={`mb-4 p-4 rounded-[20px] border ${
+                    wifiVerified
+                      ? "bg-[#00B8B8]/10 border-[#00B8B8]/20"
+                      : "bg-[#FFF2F4] border-[#F25D6B]/20"
+                  }`}>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <h4 className={`text-sm font-black mb-1 ${wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"}`}>
+                          {wifiVerified ? "現場 Wi-Fi：已連結" : wifiChecking ? "正在檢查現場 Wi-Fi..." : "現場 Wi-Fi：尚未連結"}
+                        </h4>
+                        <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
+                          {wifiVerified ? "已確認來自教會現場網路，可以進行報到。" : wifiCheckMessage}
+                        </p>
+                      </div>
+                      <div className={`w-3 h-3 rounded-full mt-1.5 shrink-0 ${wifiVerified ? "bg-[#00B8B8]" : "bg-[#F25D6B] animate-pulse"}`} />
+                    </div>
+
+                    {!wifiVerified && (
+                      <button
+                        type="button"
+                        onClick={handleWifiCheck}
+                        disabled={wifiChecking}
+                        className={`w-full py-3 border font-black rounded-[16px] transition-colors ${
+                          wifiChecking
+                            ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed"
+                            : "bg-white text-[#F25D6B] border-[#F25D6B]/20 hover:bg-[#FFF2F4]"
+                        }`}
+                      >
+                        {wifiChecking ? "檢查中..." : "手動重新檢查"}
+                      </button>
+                    )}
+                  </div>
+
                   <button
                     type="button"
                     onClick={handleLocalCheckin}
@@ -2093,7 +2089,7 @@ export default function App() {
                         : "bg-[#E6EAF0] text-[#7B7B74] cursor-not-allowed"
                     }`}
                   >
-                    {currentService ? "立即報到" : "請先確認堂次"}
+                    {!wifiVerified ? "請先連上現場 Wi-Fi" : currentService ? "立即報到" : "請先確認堂次"}
                   </button>
                 </>
               ) : stationReady ? (
