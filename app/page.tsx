@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Check, 
   Clock, 
@@ -113,6 +113,8 @@ export default function App() {
   });
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [wifiVerified, setWifiVerified] = useState(false);
+  const [wifiChecking, setWifiChecking] = useState(false);
+  const [wifiCheckMessage, setWifiCheckMessage] = useState("系統會自動檢查現場 Wi-Fi 連線；您也可以手動重新檢查。");
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
   const [checkedInService, setCheckedInService] = useState("");
@@ -1180,6 +1182,8 @@ export default function App() {
     });
     setShowResetPassword(false);
     setWifiVerified(false);
+    setWifiChecking(false);
+    setWifiCheckMessage("系統會自動檢查現場 Wi-Fi 連線；您也可以手動重新檢查。");
     setCheckinStatus("not_checked_in");
     setCheckedInAt("");
     setCheckedInService("");
@@ -1287,11 +1291,87 @@ export default function App() {
     setCustomAlert({ isOpen: true, message: "已重新設定新密碼。請使用新密碼進入系統。" });
   };
 
+  const checkWifiConnection = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    setWifiChecking(true);
+
+    try {
+      const response = await fetch("/api/check-wifi", {
+        method: "GET",
+        cache: "no-store"
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.connected) {
+        setWifiVerified(true);
+        setWifiCheckMessage("現場 Wi-Fi：已連結，可以進行報到。");
+
+        if (!silent) {
+          setCustomAlert({ isOpen: true, message: "現場 Wi-Fi：已連結，可以進行報到。" });
+        }
+      } else {
+        setWifiVerified(false);
+        setWifiCheckMessage("尚未連上教會現場 Wi-Fi。請確認手機已連上教會 Wi-Fi，系統會自動重新檢查。");
+
+        if (!silent) {
+          setCustomAlert({
+            isOpen: true,
+            message: "尚未連上教會現場 Wi-Fi。請確認手機已連上教會 Wi-Fi 後再試一次。"
+          });
+        }
+      }
+    } catch (err) {
+      console.error("檢查 Wi-Fi 連線失敗:", err);
+      setWifiVerified(false);
+      setWifiCheckMessage("目前無法檢查 Wi-Fi 連線，請確認網路正常後再試一次。");
+
+      if (!silent) {
+        setCustomAlert({
+          isOpen: true,
+          message: "目前無法檢查 Wi-Fi 連線，請確認網路正常後再試一次。"
+        });
+      }
+    } finally {
+      setWifiChecking(false);
+    }
+  }, []);
+
   const handleWifiCheck = () => {
-    // V1 前端先提供流程按鈕；正式版會由後端檢查來源 IP 是否屬於教會現場 Wi-Fi。
-    setWifiVerified(true);
-    setCustomAlert({ isOpen: true, message: "已通過現場 Wi-Fi 驗證。正式版會改由後端自動檢查。" });
+    void checkWifiConnection({ silent: false });
   };
+
+  useEffect(() => {
+    if (activeTab !== "checkin") return;
+    if (!hasCheckinProfile) return;
+    if (checkinStatus !== "not_checked_in") return;
+    if (wifiVerified) return;
+
+    void checkWifiConnection({ silent: true });
+
+    const autoCheckTimer = window.setInterval(() => {
+      void checkWifiConnection({ silent: true });
+    }, 10000);
+
+    const handleOnline = () => {
+      void checkWifiConnection({ silent: true });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void checkWifiConnection({ silent: true });
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(autoCheckTimer);
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [activeTab, hasCheckinProfile, checkinStatus, wifiVerified, checkWifiConnection]);
+
 
   const handleLocalCheckin = () => {
     if (!hasCheckinProfile) {
@@ -1300,7 +1380,7 @@ export default function App() {
     }
 
     if (!wifiVerified) {
-      setCustomAlert({ isOpen: true, message: "尚未通過現場 Wi-Fi 驗證，請先連上教會 Wi-Fi 後按「重新檢查」。" });
+      setCustomAlert({ isOpen: true, message: "尚未連結現場 Wi-Fi 連線。系統會自動重新檢查，您也可以按「手動重新檢查」。" });
       return;
     }
 
@@ -1879,7 +1959,7 @@ export default function App() {
                 }`}>
                   <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現場 Wi-Fi</div>
                   <div className={`text-sm font-black ${wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"}`}>
-                    {wifiVerified ? "已通過" : "尚未通過"}
+                    {wifiVerified ? "已連結" : wifiChecking ? "檢查中" : "尚未連結"}
                   </div>
                 </div>
               </div>
@@ -1887,16 +1967,23 @@ export default function App() {
 
             {!wifiVerified && !isCheckedIn && (
               <div className="mb-5 p-4 rounded-[20px] bg-[#FFF2F4] border border-[#F25D6B]/20">
-                <h3 className="text-sm font-black text-[#F25D6B] mb-1">尚未通過現場 Wi-Fi 驗證</h3>
+                <h3 className="text-sm font-black text-[#F25D6B] mb-1">
+                  {wifiChecking ? "正在檢查現場 Wi-Fi..." : "尚未連結現場 Wi-Fi 連線"}
+                </h3>
                 <p className="text-xs font-bold leading-relaxed text-[#7B7B74] mb-3">
-                  請開啟手機 Wi-Fi，連上教會現場 Wi-Fi 後，再按「重新檢查」。
+                  {wifiCheckMessage}
                 </p>
                 <button
                   type="button"
                   onClick={handleWifiCheck}
-                  className="w-full py-3 bg-white text-[#F25D6B] border border-[#F25D6B]/20 font-black rounded-[16px] hover:bg-[#FFF2F4] transition-colors"
+                  disabled={wifiChecking}
+                  className={`w-full py-3 border font-black rounded-[16px] transition-colors ${
+                    wifiChecking
+                      ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed"
+                      : "bg-white text-[#F25D6B] border-[#F25D6B]/20 hover:bg-[#FFF2F4]"
+                  }`}
                 >
-                  重新檢查 Wi-Fi
+                  {wifiChecking ? "檢查中..." : "手動重新檢查"}
                 </button>
               </div>
             )}
@@ -1906,7 +1993,7 @@ export default function App() {
                 <>
                   <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成今日報到</h3>
                   <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                    報到只用現場 Wi-Fi 驗證，確認同工人在教會現場。AprilTag / 視覺碼會留到崗位確認使用。
+                    報到只用現場 Wi-Fi 連線，確認同工人在教會現場。AprilTag / 視覺碼會留到崗位確認使用。
                   </p>
                   <button
                     type="button"
