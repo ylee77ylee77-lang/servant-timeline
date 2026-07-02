@@ -115,6 +115,7 @@ export default function App() {
   const [wifiVerified, setWifiVerified] = useState(false);
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
+  const [checkedInService, setCheckedInService] = useState("");
   const [confirmedStation, setConfirmedStation] = useState("");
   
   const hasManuallySwitchedRef = useRef(false);
@@ -1181,7 +1182,9 @@ export default function App() {
     setWifiVerified(false);
     setCheckinStatus("not_checked_in");
     setCheckedInAt("");
+    setCheckedInService("");
     setConfirmedStation("");
+    hasManuallySwitchedRef.current = false;
     setPersonalSettings(prev => ({ ...prev, name: "" }));
   };
 
@@ -1303,10 +1306,16 @@ export default function App() {
 
     const now = new Date();
     const timeText = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const serviceForToday = currentService;
+
+    // V1 先用系統目前判斷的堂次鎖定；正式版會優先查今日排班/分派名單。
     setCheckedInAt(timeText);
+    setCheckedInService(serviceForToday);
+    setCurrentService(serviceForToday);
+    hasManuallySwitchedRef.current = true;
     setCheckinStatus("checked_in");
     triggerVibration([200, 100, 200]);
-    setCustomAlert({ isOpen: true, message: `已完成報到。請等候總招分派崗位名牌。` });
+    setCustomAlert({ isOpen: true, message: `已完成 ${serviceForToday} 報到。請等候總招分派崗位名牌。` });
   };
 
   const handleOpenStationScanner = () => {
@@ -1690,6 +1699,7 @@ export default function App() {
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
+    const todayService = checkedInService || currentService;
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -1709,7 +1719,7 @@ export default function App() {
               </div>
               <h3 className="text-[18px] font-black text-[#1F2937] mb-2">第一次使用</h3>
               <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                請先建立您的服事身分。正式版會將密碼交由後端雜湊儲存；這一版先建立前端報到流程。
+                請先建立您的服事身分。正式版會將密碼交由後端雜湊儲存；這一版先建立前端報到流程。堂次會在報到時依今日排班決定並鎖定。
               </p>
 
               <div className="space-y-3.5">
@@ -1840,9 +1850,12 @@ export default function App() {
                 <div>
                   <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
                   <h3 className="text-xl font-black text-[#1F2937]">{displayCheckinName || "服事同工"}</h3>
-                  <p className="text-sm font-bold text-[#6D55A3] mt-1">{currentService}｜{personalSettings.role || "未設定角色"}</p>
+                  <p className="text-sm font-bold text-[#6D55A3] mt-1">{todayService}｜{personalSettings.role || "未設定角色"}</p>
                   <p className="text-[11px] font-bold text-[#7B7B74] mt-1">
                     手機後四碼：{checkinProfile.phoneLast4}
+                  </p>
+                  <p className="text-[11px] font-bold text-[#00B8B8] mt-1">
+                    今日堂次：{todayService} {checkedInService ? "已鎖定" : "待報到確認"}
                   </p>
                 </div>
                 <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
@@ -1925,15 +1938,24 @@ export default function App() {
                 <>
                   <h3 className="text-[16px] font-black text-[#1F2937] mb-2">您已於 {checkedInAt || "--:--"} 報到</h3>
                   <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                    目前狀態：已報到，等待分派崗位。拿到總招發的崗位名牌後，請到「崗位」頁掃描確認。
+                    目前狀態：已報到，等待分派崗位。拿到總招發的崗位名牌後，可直接在本頁掃描確認。
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("station")}
-                    className="w-full py-4 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#EDE6FF] transition-colors"
-                  >
-                    前往崗位確認
-                  </button>
+                  <div className="grid grid-cols-1 gap-3">
+                    <button
+                      type="button"
+                      onClick={handleOpenStationScanner}
+                      className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+                    >
+                      掃描崗位名牌
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDemoStationConfirm}
+                      className="w-full py-3.5 bg-white text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#F3EEFF] transition-colors"
+                    >
+                      先用目前角色模擬確認
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -2940,77 +2962,83 @@ export default function App() {
     </div>
   </div>
 
-  {/* 第二層：狀態與語音控制 */}
-  <div className="grid grid-cols-3 gap-2 mt-5">
-    <div className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-full bg-white/80 border border-[#00B8B8]/20 shadow-sm">
-      <span className="w-1.5 h-1.5 rounded-full bg-[#00B8B8] animate-pulse"></span>
-      <span className="text-[10px] font-black text-[#00B8B8] tracking-wider">
-        已連線
-      </span>
-    </div>
+  {activeTab !== "checkin" && (
+    <>
+      {/* 第二層：狀態與語音控制 */}
+      <div className="grid grid-cols-3 gap-2 mt-5">
+        <div className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-full bg-white/80 border border-[#00B8B8]/20 shadow-sm">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#00B8B8] animate-pulse"></span>
+          <span className="text-[10px] font-black text-[#00B8B8] tracking-wider">
+            已連線
+          </span>
+        </div>
 
-    <button
-      type="button"
-      onClick={handleToggleVoiceReminder}
-      className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
-        isVoiceEnabled
-          ? "bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm"
-          : "bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]"
-      }`}
-      title="開啟或關閉自動任務語音廣播"
-    >
-      {isVoiceEnabled ? (
-        <Volume2 className="w-3.5 h-3.5" />
-      ) : (
-        <VolumeX className="w-3.5 h-3.5" />
+        <button
+          type="button"
+          onClick={handleToggleVoiceReminder}
+          className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
+            isVoiceEnabled
+              ? "bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm"
+              : "bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]"
+          }`}
+          title="開啟或關閉自動任務語音廣播"
+        >
+          {isVoiceEnabled ? (
+            <Volume2 className="w-3.5 h-3.5" />
+          ) : (
+            <VolumeX className="w-3.5 h-3.5" />
+          )}
+          自動報時
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleListening}
+          disabled={isThinking}
+          className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
+            isListening
+              ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25"
+              : isThinking
+                ? "bg-amber-100 text-amber-700 border-amber-300"
+                : "bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]"
+          }`}
+          title="點擊開始對話問答"
+        >
+          {isListening ? (
+            <Mic className="w-3.5 h-3.5 text-white animate-bounce" />
+          ) : isThinking ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+          ) : (
+            <MicOff className="w-3.5 h-3.5" />
+          )}
+          {isListening ? "聆聽中" : isThinking ? "思考中" : "問助理"}
+        </button>
+      </div>
+
+      {isAdminUnlocked && (
+        <div className="grid grid-cols-3 gap-2.5 mt-5">
+          {serviceOptions.map((srv) => (
+            <button
+              key={srv}
+              onClick={() => {
+                setCurrentService(srv);
+                setCheckedInService(srv);
+                hasManuallySwitchedRef.current = true;
+                setNewNode((prev) => ({ ...prev, service_type: srv }));
+              }}
+              className={`px-4 py-3 rounded-full text-[15px] font-black transition-all duration-300 ${
+                currentService === srv
+                  ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 scale-[1.03]"
+                  : "bg-white text-[#7B7B74] border border-[#E6EAF0] hover:bg-[#F3EEFF] hover:text-[#6D55A3]"
+              }`}
+            >
+              {srv}
+            </button>
+          ))}
+        </div>
       )}
-      自動報時
-    </button>
-
-    <button
-      type="button"
-      onClick={toggleListening}
-      disabled={isThinking}
-      className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
-        isListening
-          ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25"
-          : isThinking
-            ? "bg-amber-100 text-amber-700 border-amber-300"
-            : "bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]"
-      }`}
-      title="點擊開始對話問答"
-    >
-      {isListening ? (
-        <Mic className="w-3.5 h-3.5 text-white animate-bounce" />
-      ) : isThinking ? (
-        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
-      ) : (
-        <MicOff className="w-3.5 h-3.5" />
-      )}
-      {isListening ? "聆聽中" : isThinking ? "思考中" : "問助理"}
-    </button>
-  </div>
-
-  {/* 第三層：堂次切換 */}
-  <div className="grid grid-cols-3 gap-2.5 mt-5">
-    {serviceOptions.map((srv) => (
-      <button
-        key={srv}
-        onClick={() => {
-          setCurrentService(srv);
-          hasManuallySwitchedRef.current = true;
-          setNewNode((prev) => ({ ...prev, service_type: srv }));
-        }}
-        className={`px-4 py-3 rounded-full text-[15px] font-black transition-all duration-300 ${
-          currentService === srv
-            ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 scale-[1.03]"
-            : "bg-white text-[#7B7B74] border border-[#E6EAF0] hover:bg-[#F3EEFF] hover:text-[#6D55A3]"
-        }`}
-      >
-        {srv}
-      </button>
-    ))}
-  </div>
+    </>
+  )}
 </header>
         {/* 主內容區 */}
         {fetchError ? (
@@ -3026,8 +3054,6 @@ export default function App() {
           </div>
         ) : activeTab === 'checkin' ? (
           renderCheckinView()
-        ) : activeTab === 'station' ? (
-          renderStationView()
         ) : activeTab === 'timeline' ? (
           renderTimelineView()
         ) : activeTab === 'status' ? (
@@ -3175,7 +3201,6 @@ export default function App() {
         <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center gap-1.5 px-2 py-3 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] pb-safe rounded-t-[32px] sm:rounded-t-[32px] sm:w-[420px] sm:mx-auto overflow-x-auto">
           {[
             { key: "checkin", label: "報到", icon: Check, color: "rose" },
-            { key: "station", label: "崗位", icon: MapPin, color: "rose" },
             { key: "timeline", label: "流程", icon: ListTodo, color: "rose" },
             { key: "status", label: "狀態", icon: BarChart2, color: "purple" },
             { key: "control", label: "控場", icon: HeartHandshake, color: "purple" },
