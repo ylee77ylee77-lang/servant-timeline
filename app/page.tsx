@@ -74,7 +74,7 @@ export default function App() {
   const [nodes, setNodes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
-  const [activeTab, setActiveTab] = useState('timeline');
+  const [activeTab, setActiveTab] = useState('checkin');
   const [currentTime, setCurrentTime] = useState("");
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const activeNodeRef = useRef<HTMLDivElement>(null);
@@ -89,6 +89,12 @@ export default function App() {
 
   const [currentService, setCurrentService] = useState('主一堂'); 
   const serviceOptions = ['六晚崇', '主一堂', '主二堂'];
+
+  // --- 報到 / 崗位 UI 狀態 ---
+  // 這一版先建立前端流程入口；正式 Wi-Fi 驗證、Supabase 報到紀錄與相機掃描會接在下一階段。
+  const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
+  const [checkedInAt, setCheckedInAt] = useState("");
+  const [confirmedStation, setConfirmedStation] = useState("");
   
   const hasManuallySwitchedRef = useRef(false);
 
@@ -1095,6 +1101,28 @@ export default function App() {
     }
   };
 
+  const handleLocalCheckin = () => {
+    const now = new Date();
+    const timeText = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    setCheckedInAt(timeText);
+    setCheckinStatus("checked_in");
+    triggerVibration([200, 100, 200]);
+    setCustomAlert({ isOpen: true, message: `已完成報到。請等候總招分派崗位名牌。` });
+  };
+
+  const handleOpenStationScanner = () => {
+    setCustomAlert({
+      isOpen: true,
+      message: "崗位名牌掃描介面已預留。下一階段會接上後置鏡頭與 AprilTag / 視覺碼辨識。"
+    });
+  };
+
+  const handleDemoStationConfirm = () => {
+    setConfirmedStation(personalSettings.role === "牧招" ? "2C 區塊牧招" : personalSettings.role);
+    setCheckinStatus("station_confirmed");
+    triggerVibration([200, 100, 200]);
+  };
+
 
   useEffect(() => {
     if (!isLoading && !fetchError && filteredNodes.length > 0 && activeTab === 'timeline' && activeNodeRef.current) {
@@ -1460,6 +1488,233 @@ export default function App() {
     );
   };
 
+  const renderCheckinView = () => {
+    const isCheckedIn = checkinStatus !== "not_checked_in";
+    const stationReady = checkinStatus === "station_confirmed";
+
+    return (
+      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        <div className="mb-6 px-1">
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">報到</h2>
+          <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
+            <Check className="w-4 h-4 text-[#6D55A3]" />
+            首頁｜登入、報到、等待分派
+          </p>
+        </div>
+
+        <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
+              <h3 className="text-xl font-black text-[#1F2937]">{personalSettings.name || "服事同工"}</h3>
+              <p className="text-sm font-bold text-[#6D55A3] mt-1">{currentService}｜{personalSettings.role || "未設定角色"}</p>
+            </div>
+            <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
+              isCheckedIn
+                ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
+                : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
+            }`}>
+              {isCheckedIn ? "已報到" : "尚未報到"}
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="p-4 rounded-[20px] bg-[#F3EEFF]/60 border border-[#6D55A3]/10">
+              <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現在時間</div>
+              <div className="text-2xl font-black font-mono text-[#1F2937]">{currentTime || "--:--"}</div>
+            </div>
+            <div className="p-4 rounded-[20px] bg-[#FFF2F4]/60 border border-[#F25D6B]/10">
+              <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現場 Wi-Fi</div>
+              <div className="text-sm font-black text-[#F25D6B]">等待驗證</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+          {!isCheckedIn ? (
+            <>
+              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成今日報到</h3>
+              <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                到教會現場後，連上現場 Wi-Fi，再按下報到。這一版先保留畫面流程，正式 Wi-Fi 驗證會接在下一階段。
+              </p>
+              <button
+                type="button"
+                onClick={handleLocalCheckin}
+                className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+              >
+                立即報到
+              </button>
+            </>
+          ) : stationReady ? (
+            <>
+              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">崗位確認完成</h3>
+              <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                今日崗位：<span className="font-black text-[#6D55A3]">{confirmedStation || personalSettings.role}</span>
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab("timeline")}
+                className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+              >
+                進入今日流程
+              </button>
+            </>
+          ) : (
+            <>
+              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">您已於 {checkedInAt || "--:--"} 報到</h3>
+              <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                目前狀態：等待總招分派崗位。拿到崗位名牌後，請到「崗位」頁掃描確認。
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab("station")}
+                className="w-full py-4 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#EDE6FF] transition-colors"
+              >
+                前往崗位確認
+              </button>
+            </>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setPersonalSettings(prev => ({ ...prev, name: "" }));
+            setCheckinStatus("not_checked_in");
+            setCheckedInAt("");
+            setConfirmedStation("");
+          }}
+          className="w-full text-center text-[12px] font-black text-[#7B7B74] hover:text-[#F25D6B] transition-colors"
+        >
+          不是我？請重新輸入
+        </button>
+      </div>
+    );
+  };
+
+  const renderStationView = () => {
+    const isCheckedIn = checkinStatus !== "not_checked_in";
+    const stationReady = checkinStatus === "station_confirmed";
+
+    return (
+      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        <div className="mb-6 px-1">
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">崗位</h2>
+          <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
+            <MapPin className="w-4 h-4 text-[#6D55A3]" />
+            掃描 / 確認崗位名牌
+          </p>
+        </div>
+
+        <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+          <div className={`w-14 h-14 rounded-[22px] flex items-center justify-center mb-4 ${
+            stationReady ? "bg-[#00B8B8]/10" : "bg-[#F3EEFF]"
+          }`}>
+            <MapPin className={`w-7 h-7 ${stationReady ? "text-[#00B8B8]" : "text-[#6D55A3]"}`} />
+          </div>
+          <h3 className="text-[18px] font-black text-[#1F2937] mb-2">
+            {stationReady ? "已確認今日崗位" : "等待掃描崗位名牌"}
+          </h3>
+          <p className="text-sm font-medium leading-relaxed text-[#7B7B74]">
+            {stationReady
+              ? `今日崗位：${confirmedStation || personalSettings.role}。系統會依此切換個人流程。`
+              : "總招分配崗位時會發崗位名牌。拿到名牌後，掃描名牌上的 AprilTag / 視覺碼確認崗位。"}
+          </p>
+        </div>
+
+        {!isCheckedIn && (
+          <div className="mb-5 p-4 rounded-[20px] bg-[#FFF2F4] border border-[#F25D6B]/20 text-sm font-bold text-[#F25D6B]">
+            尚未完成報到。請先回到「報到」頁完成報到。
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-3">
+          <button
+            type="button"
+            disabled={!isCheckedIn}
+            onClick={handleOpenStationScanner}
+            className={`w-full py-4 font-black rounded-[18px] transition-all ${
+              isCheckedIn
+                ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 hover:opacity-90"
+                : "bg-[#E6EAF0] text-[#7B7B74] cursor-not-allowed"
+            }`}
+          >
+            掃描崗位名牌
+          </button>
+
+          <button
+            type="button"
+            disabled={!isCheckedIn}
+            onClick={handleDemoStationConfirm}
+            className={`w-full py-3.5 rounded-[18px] border text-sm font-black transition-all ${
+              isCheckedIn
+                ? "bg-white text-[#6D55A3] border-[#6D55A3]/20 hover:bg-[#F3EEFF]"
+                : "bg-white text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed opacity-60"
+            }`}
+          >
+            先用目前角色模擬確認
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderControlView = () => {
+    const controlCards = [
+      { title: "今日分派", desc: "調整同工崗位、處理臨時支援", action: "前往狀態", tab: "status" },
+      { title: "任務調整", desc: "修改今日任務節點與確認清單", action: "前往管理", tab: "admin" },
+      { title: "異常處理", desc: "查看漏排、多排、未確認崗位", action: "查看狀態", tab: "status" }
+    ];
+
+    return (
+      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        <div className="mb-6 px-1">
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">控場</h2>
+          <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
+            <HeartHandshake className="w-4 h-4 text-[#6D55A3]" />
+            總招今日現場操作
+          </p>
+        </div>
+
+        <div className="p-5 rounded-[24px] bg-gradient-to-br from-white to-[#F3EEFF]/50 border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+          <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">目前權限</div>
+          <h3 className="text-xl font-black text-[#1F2937]">{personalSettings.role || "未設定"}</h3>
+          <p className="text-sm font-medium text-[#7B7B74] mt-2">
+            控場頁負責「今天現場」的調整；系統長期資料請到「管理」處理。
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {controlCards.map(card => (
+            <div key={card.title} className="bg-white p-5 rounded-[24px] border border-[#E6EAF0] shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-[16px] font-black text-[#1F2937] mb-1">{card.title}</h3>
+                  <p className="text-sm font-medium text-[#7B7B74] leading-relaxed">{card.desc}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (card.tab === "admin" && !isAdminUnlocked) {
+                      setShowPasswordModal(true);
+                      setPasswordInput("");
+                      setPasswordError("");
+                      return;
+                    }
+                    setActiveTab(card.tab);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 text-[11px] font-black whitespace-nowrap hover:bg-[#EDE6FF] transition-colors"
+                >
+                  {card.action}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderTimelineView = () => {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -1682,15 +1937,15 @@ export default function App() {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         <div className="mb-6 px-1">
-          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">復盤分析</h2>
+          <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">狀態</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
-            <BarChart2 className="w-4 h-4 text-[#6D55A3]" /> 即時執行數據 ({currentService})
+            <BarChart2 className="w-4 h-4 text-[#6D55A3]" /> 服事動態與現場控場資訊 ({currentService})
           </p>
         </div>
         
         <div className="p-6 mb-8 bg-gradient-to-br from-white to-[#F3EEFF]/50 border shadow-lg shadow-[#6D55A3]/5 rounded-[24px] border-[#E6EAF0]">
           <div className="flex items-center justify-between mb-5">
-            <h3 className="text-sm font-black tracking-widest text-[#6D55A3] uppercase">總體完成率</h3>
+            <h3 className="text-sm font-black tracking-widest text-[#6D55A3] uppercase">目前任務完成率</h3>
             <span className="px-3 py-1 text-[10px] font-bold text-[#00B8B8] bg-[#00B8B8]/10 rounded-full border border-[#00B8B8]/20">
               雲端即時同步中
             </span>
@@ -1708,7 +1963,7 @@ export default function App() {
 
         <div className="mb-6">
           <h3 className="flex items-center gap-2 mb-4 text-sm font-black tracking-widest text-[#F25D6B] uppercase px-1">
-            <AlertCircle className="w-4 h-4" /> 待完成服事清單（依角色分組）
+            <AlertCircle className="w-4 h-4" /> 待處理服事動態（依角色分組）
           </h3>
           
           {Object.keys(groupedMissed).length === 0 ? (
@@ -1933,7 +2188,7 @@ export default function App() {
               type="button"
               onClick={() => {
                 setIsAdminUnlocked(false);
-                setActiveTab('timeline');
+                setActiveTab('checkin');
               }}
               className="px-3 py-1.5 bg-[#F25D6B]/10 hover:bg-[#F25D6B]/25 text-[#F25D6B] border border-[#F25D6B]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
             >
@@ -2409,12 +2664,18 @@ export default function App() {
               重新連線
             </button>
           </div>
+        ) : activeTab === 'checkin' ? (
+          renderCheckinView()
+        ) : activeTab === 'station' ? (
+          renderStationView()
         ) : activeTab === 'timeline' ? (
           renderTimelineView()
-        ) : activeTab === 'review' ? (
+        ) : activeTab === 'status' ? (
           renderReviewView()
         ) : activeTab === 'settings' ? (
           renderPersonalSettingsView()
+        ) : activeTab === 'control' ? (
+          renderControlView()
         ) : (
           renderAdminView()
         )}
@@ -2550,51 +2811,45 @@ export default function App() {
           </div>
         )}
 
-        {/* 底部功能導覽列 */}
-        <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-2 py-3 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] pb-safe rounded-t-[32px] sm:rounded-t-[32px] sm:w-[420px] sm:mx-auto">
-          <button 
-            onClick={() => setActiveTab('timeline')}
-            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'timeline' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
-          >
-            <ListTodo className="w-5 h-5" strokeWidth={activeTab === 'timeline' ? 2.5 : 2} />
-            <span className="text-[10px] font-black tracking-widest">今日流程</span>
-          </button>
+        {/* 底部功能導覽列：保留原品牌配色與圓角風格，改為新現場流程架構 */}
+        <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center gap-1.5 px-2 py-3 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] pb-safe rounded-t-[32px] sm:rounded-t-[32px] sm:w-[420px] sm:mx-auto overflow-x-auto">
+          {[
+            { key: "checkin", label: "報到", icon: Check, color: "rose" },
+            { key: "station", label: "崗位", icon: MapPin, color: "rose" },
+            { key: "timeline", label: "流程", icon: ListTodo, color: "rose" },
+            { key: "status", label: "狀態", icon: BarChart2, color: "purple" },
+            { key: "control", label: "控場", icon: HeartHandshake, color: "purple" },
+            { key: "settings", label: "設定", icon: User, color: "purple" },
+            { key: "admin", label: "管理", icon: isAdminUnlocked ? Unlock : Settings, color: "purple", locked: !isAdminUnlocked }
+          ].map((item) => {
+            const NavIcon = item.icon;
+            const active = activeTab === item.key;
+            const activeClass = item.color === "rose"
+              ? "text-[#F25D6B] bg-[#FFF2F4]"
+              : "text-[#6D55A3] bg-[#F3EEFF]";
 
-          <button 
-            onClick={() => setActiveTab('review')}
-            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'review' ? 'text-[#F25D6B] bg-[#FFF2F4]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
-          >
-            <BarChart2 className="w-5 h-5" strokeWidth={activeTab === 'review' ? 2.5 : 2} />
-            <span className="text-[10px] font-black tracking-widest">服事動態</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveTab('settings')}
-            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'settings' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
-          >
-            <User className="w-5 h-5" strokeWidth={activeTab === 'settings' ? 2.5 : 2} />
-            <span className="text-[10px] font-black tracking-widest">個人設定</span>
-          </button>
-
-          <button 
-            onClick={() => {
-              if (isAdminUnlocked) {
-                setActiveTab('admin');
-              } else {
-                setShowPasswordModal(true);
-                setPasswordInput("");
-                setPasswordError("");
-              }
-            }}
-            className={`flex flex-col items-center gap-1.5 transition-all duration-300 w-1/4 py-2 rounded-2xl ${activeTab === 'admin' ? 'text-[#6D55A3] bg-[#F3EEFF]' : 'text-[#7B7B74] hover:bg-[#F3EEFF]'}`}
-          >
-            {isAdminUnlocked ? (
-              <Unlock className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
-            ) : (
-              <Settings className="w-5 h-5" strokeWidth={activeTab === 'admin' ? 2.5 : 2} />
-            )}
-            <span className="text-[10px] font-black tracking-widest">任務管理</span>
-          </button>
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => {
+                  if (item.key === "admin" && !isAdminUnlocked) {
+                    setShowPasswordModal(true);
+                    setPasswordInput("");
+                    setPasswordError("");
+                    return;
+                  }
+                  setActiveTab(item.key);
+                }}
+                className={`flex flex-col items-center justify-center gap-1.5 transition-all duration-300 min-w-[58px] px-2 py-2 rounded-2xl ${
+                  active ? activeClass : "text-[#7B7B74] hover:bg-[#F3EEFF]"
+                }`}
+              >
+                <NavIcon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
+                <span className="text-[10px] font-black tracking-widest whitespace-nowrap">{item.label}</span>
+              </button>
+            );
+          })}
         </nav>
       </div>
     </div>
