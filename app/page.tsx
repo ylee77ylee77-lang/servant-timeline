@@ -87,7 +87,7 @@ export default function App() {
 
   const [detailModal, setDetailModal] = useState<{isOpen: boolean, title: string, details: string}>({isOpen: false, title: '', details: ''});
 
-  const [currentService, setCurrentService] = useState('主一堂'); 
+  const [currentService, setCurrentService] = useState(''); 
   const serviceOptions = ['六晚崇', '主一堂', '主二堂'];
 
   // --- 報到 / 崗位 UI 狀態 ---
@@ -747,6 +747,8 @@ export default function App() {
           } else { 
             setCurrentService('主二堂');
           }
+        } else {
+          setCurrentService('');
         }
       }
     };
@@ -1384,9 +1386,18 @@ export default function App() {
       return;
     }
 
+    const serviceForToday = currentService.trim();
+
+    if (!serviceForToday || !serviceOptions.includes(serviceForToday)) {
+      setCustomAlert({
+        isOpen: true,
+        message: "今日堂次尚未確認。正式版會依今日排班自動帶入；目前測試版請先由管理員切換堂次後再報到。"
+      });
+      return;
+    }
+
     const now = new Date();
     const timeText = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const serviceForToday = currentService;
 
     // V1 先用系統目前判斷的堂次鎖定；正式版會優先查今日排班/分派名單。
     setCheckedInAt(timeText);
@@ -1396,6 +1407,45 @@ export default function App() {
     setCheckinStatus("checked_in");
     triggerVibration([200, 100, 200]);
     setCustomAlert({ isOpen: true, message: `已完成 ${serviceForToday} 報到。請等候總招分派崗位名牌。` });
+  };
+
+  const handleCorrectCheckedInService = (newService: string) => {
+    if (!serviceOptions.includes(newService)) return;
+
+    if (checkinStatus === "not_checked_in") {
+      setCurrentService(newService);
+      hasManuallySwitchedRef.current = true;
+      setNewNode((prev) => ({ ...prev, service_type: newService }));
+      return;
+    }
+
+    if (checkinStatus === "station_confirmed") {
+      setCustomAlert({
+        isOpen: true,
+        message: "崗位已確認完成，堂次已和崗位綁定。若需要更正，請總招協助處理。"
+      });
+      return;
+    }
+
+    if (checkedInService === newService) {
+      setCustomAlert({ isOpen: true, message: `目前已是 ${newService}，不需要更正。` });
+      return;
+    }
+
+    const originalService = checkedInService || currentService || "待確認";
+
+    setCustomConfirm({
+      isOpen: true,
+      message: `您要將今日堂次從「${originalService}」更正為「${newService}」嗎？更正後，今日流程與提醒會切換為 ${newService}。`,
+      onConfirm: () => {
+        setCheckedInService(newService);
+        setCurrentService(newService);
+        hasManuallySwitchedRef.current = true;
+        setNewNode((prev) => ({ ...prev, service_type: newService }));
+        triggerVibration([120, 80, 120]);
+        setCustomAlert({ isOpen: true, message: `今日堂次已更正為 ${newService}。` });
+      }
+    });
   };
 
   const handleOpenStationScanner = () => {
@@ -1779,7 +1829,7 @@ export default function App() {
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
-    const todayService = checkedInService || currentService;
+    const todayService = isCheckedIn ? (checkedInService || currentService || "待確認") : "待確認";
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -1799,7 +1849,7 @@ export default function App() {
               </div>
               <h3 className="text-[18px] font-black text-[#1F2937] mb-2">第一次使用</h3>
               <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                請先建立您的服事身分。正式版會將密碼交由後端雜湊儲存；這一版先建立前端報到流程。堂次會在報到時依今日排班決定並鎖定。
+                請先建立您的服事身分。正式版會將密碼交由後端雜湊儲存；這一版先建立前端報到流程。尚未報到前會顯示「今日堂次：待確認」；正式版會在報到時依今日排班決定並鎖定。
               </p>
 
               <div className="space-y-3.5">
@@ -1930,12 +1980,12 @@ export default function App() {
                 <div>
                   <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
                   <h3 className="text-xl font-black text-[#1F2937]">{displayCheckinName || "服事同工"}</h3>
-                  <p className="text-sm font-bold text-[#6D55A3] mt-1">{todayService}｜{personalSettings.role || "未設定角色"}</p>
+                  <p className="text-sm font-bold text-[#6D55A3] mt-1">今日堂次：{todayService}｜{personalSettings.role || "未設定角色"}</p>
                   <p className="text-[11px] font-bold text-[#7B7B74] mt-1">
                     手機後四碼：{checkinProfile.phoneLast4}
                   </p>
                   <p className="text-[11px] font-bold text-[#00B8B8] mt-1">
-                    今日堂次：{todayService} {checkedInService ? "已鎖定" : "待報到確認"}
+                    今日堂次：{todayService} {checkedInService ? "已鎖定" : "待確認"}
                   </p>
                 </div>
                 <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
@@ -1988,30 +2038,74 @@ export default function App() {
               </div>
             )}
 
+            {!isCheckedIn && (
+              <div className="mb-5 p-5 rounded-[24px] bg-white border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5">
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div>
+                    <h3 className="text-[16px] font-black text-[#1F2937] mb-1">報到時確認堂次</h3>
+                    <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
+                      請確認您本次服事堂次。按「立即報到」後會鎖定，後續流程不會因時間自動切換。
+                    </p>
+                  </div>
+                  <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
+                    currentService
+                      ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
+                      : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
+                  }`}>
+                    {currentService || "待確認"}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {serviceOptions.map((srv) => (
+                    <button
+                      key={srv}
+                      type="button"
+                      onClick={() => {
+                        setCurrentService(srv);
+                        hasManuallySwitchedRef.current = true;
+                        setNewNode((prev) => ({ ...prev, service_type: srv }));
+                      }}
+                      className={`px-3 py-3 rounded-[16px] text-[13px] font-black transition-all ${
+                        currentService === srv
+                          ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20"
+                          : "bg-[#F3EEFF]/60 text-[#6D55A3] border border-[#6D55A3]/10 hover:bg-[#F3EEFF]"
+                      }`}
+                    >
+                      {srv}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
               {!isCheckedIn ? (
                 <>
                   <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成今日報到</h3>
                   <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                    報到只用現場 Wi-Fi 連線，確認同工人在教會現場。AprilTag / 視覺碼會留到崗位確認使用。
+                    報到會同時確認現場 Wi-Fi 與本次服事堂次。AprilTag / 視覺碼會留到崗位確認使用。
                   </p>
                   <button
                     type="button"
                     onClick={handleLocalCheckin}
                     className={`w-full py-4 font-black rounded-[18px] transition-all ${
-                      wifiVerified
+                      wifiVerified && currentService
                         ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 hover:opacity-90"
                         : "bg-[#E6EAF0] text-[#7B7B74] cursor-not-allowed"
                     }`}
                   >
-                    立即報到
+                    {currentService ? "立即報到" : "請先確認堂次"}
                   </button>
                 </>
               ) : stationReady ? (
                 <>
                   <h3 className="text-[16px] font-black text-[#1F2937] mb-2">崗位確認完成</h3>
-                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-2">
                     今日崗位：<span className="font-black text-[#6D55A3]">{confirmedStation || personalSettings.role}</span>
+                  </p>
+                  <p className="text-xs font-bold leading-relaxed text-[#7B7B74] mb-5">
+                    今日堂次：<span className="font-black text-[#00B8B8]">{checkedInService || todayService}</span>。崗位已確認後，若需更正堂次，請總招協助處理。
                   </p>
                   <button
                     type="button"
@@ -2027,6 +2121,38 @@ export default function App() {
                   <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
                     目前狀態：已報到，等待分派崗位。拿到總招發的崗位名牌後，可直接在本頁掃描確認。
                   </p>
+
+                  <div className="mb-5 p-4 rounded-[20px] bg-white border border-[#6D55A3]/15">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div>
+                        <h4 className="text-sm font-black text-[#1F2937] mb-1">更正堂次</h4>
+                        <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
+                          尚未確認崗位前，可以更正堂次；系統會更新同一筆報到紀錄，不會新增第二筆報到。
+                        </p>
+                      </div>
+                      <div className="px-3 py-1.5 rounded-full bg-[#00B8B8]/10 text-[#00B8B8] border border-[#00B8B8]/20 text-[11px] font-black whitespace-nowrap">
+                        {checkedInService || todayService}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      {serviceOptions.map((srv) => (
+                        <button
+                          key={srv}
+                          type="button"
+                          onClick={() => handleCorrectCheckedInService(srv)}
+                          className={`px-3 py-3 rounded-[16px] text-[13px] font-black transition-all ${
+                            (checkedInService || currentService) === srv
+                              ? "bg-[#00B8B8]/10 text-[#00B8B8] border border-[#00B8B8]/20"
+                              : "bg-[#F3EEFF]/60 text-[#6D55A3] border border-[#6D55A3]/10 hover:bg-[#F3EEFF]"
+                          }`}
+                        >
+                          {srv}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 gap-3">
                     <button
                       type="button"
