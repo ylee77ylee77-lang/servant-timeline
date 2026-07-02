@@ -2772,14 +2772,11 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => {
-                setIsAdminUnlocked(false);
-                setActiveTab('checkin');
-              }}
-              className="px-3 py-1.5 bg-[#F25D6B]/10 hover:bg-[#F25D6B]/25 text-[#F25D6B] border border-[#F25D6B]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
+              onClick={() => setActiveTab('checkin')}
+              className="px-3 py-1.5 bg-[#F3EEFF] hover:bg-[#EDE6FF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
             >
-              <Lock className="w-3.5 h-3.5" />
-              鎖定登出
+              <X className="w-3.5 h-3.5" />
+              返回報到
             </button>
           </div>
         </div>
