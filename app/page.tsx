@@ -17,7 +17,6 @@ import {
   Sparkles,
   HeartHandshake,
   Edit,
-  Lock,
   Unlock,
   GripVertical,
   ArrowUp,
@@ -122,12 +121,9 @@ export default function App() {
   
   const hasManuallySwitchedRef = useRef(false);
 
-  // --- 權限鎖定相關狀態 ---
+  // --- 管理權限相關狀態 ---
+  // V1 先用本機身分名稱判斷是否顯示管理頁；正式版會改由後端帳號權限判斷。
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordInput, setPasswordInput] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-  const ADMIN_PASSWORD = '1234'; // 管理員驗證密碼
 
   // --- 自訂精美 Modal 提示框狀態 ---
   const [customAlert, setCustomAlert] = useState<{isOpen: boolean, message: string}>({ isOpen: false, message: "" });
@@ -1155,6 +1151,16 @@ export default function App() {
 
   const hasCheckinProfile = Boolean(checkinProfile.name && checkinProfile.phoneLast4);
   const displayCheckinName = checkinProfile.name || personalSettings.name || "";
+  const normalizedCurrentName = displayCheckinName.replace(/\s/g, "");
+  const isCurrentUserAdmin = ["徐東立", "東立徐", "東立"].includes(normalizedCurrentName);
+
+  useEffect(() => {
+    setIsAdminUnlocked(isCurrentUserAdmin);
+
+    if (!isCurrentUserAdmin && activeTab === "admin") {
+      setActiveTab("checkin");
+    }
+  }, [isCurrentUserAdmin, activeTab]);
 
   const isValidPhoneLast4 = (value: string) => /^\d{4}$/.test(value.trim());
   const isValidPassword = (value: string) => value.trim().length >= 10;
@@ -1758,19 +1764,6 @@ export default function App() {
   });
 
 
-  const handleVerifyPassword = () => {
-    if (passwordInput === ADMIN_PASSWORD) {
-      setIsAdminUnlocked(true);
-      setShowPasswordModal(false);
-      setActiveTab('admin');
-      setPasswordError("");
-      setPasswordInput("");
-    } else {
-      setPasswordError("密碼錯誤，請重新輸入！");
-      setPasswordInput("");
-    }
-  };
-
   const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
     const isEditing = activeInlineEdit?.type === type && activeInlineEdit?.id === id && activeInlineEdit?.field === field;
 
@@ -2290,10 +2283,8 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (card.tab === "admin" && !isAdminUnlocked) {
-                      setShowPasswordModal(true);
-                      setPasswordInput("");
-                      setPasswordError("");
+                    if (card.tab === "admin" && !isCurrentUserAdmin) {
+                      setCustomAlert({ isOpen: true, message: "管理頁僅限系統管理員查看。" });
                       return;
                     }
                     setActiveTab(card.tab);
@@ -3315,50 +3306,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 密碼驗證解鎖彈窗 */}
-        {showPasswordModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm" onClick={() => setShowPasswordModal(false)}>
-            <div className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl border border-[#E6EAF0]/50 text-center" onClick={e => e.stopPropagation()}>
-              <div className="w-12 h-12 rounded-2xl bg-[#F3EEFF] flex items-center justify-center mx-auto mb-4">
-                <Lock className="w-6 h-6 text-[#6D55A3]" />
-              </div>
-              <h3 className="text-lg font-bold text-[#1F2937] mb-1">管理員身分驗證</h3>
-              <p className="text-xs text-[#7B7B74] mb-4">請輸入任務 management 驗證密碼</p>
-              
-              <input 
-                type="password" 
-                placeholder="請輸入密碼" 
-                value={passwordInput}
-                onChange={e => setPasswordInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') handleVerifyPassword();
-                }}
-                className="w-full text-center px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-2xl text-base font-bold text-[#1F2937] tracking-widest focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/40 mb-2"
-                autoFocus
-              />
-              
-              {passwordError && (
-                <p className="text-xs font-bold text-[#F25D6B] mb-3">{passwordError}</p>
-              )}
-
-              <div className="flex gap-3 mt-4">
-                <button 
-                  onClick={() => setShowPasswordModal(false)}
-                  className="flex-1 py-3 bg-[#7B7B74]/10 hover:bg-[#7B7B74]/20 text-[#7B7B74] font-bold rounded-2xl text-sm transition-all"
-                >
-                  取消
-                </button>
-                <button 
-                  onClick={handleVerifyPassword}
-                  className="flex-1 py-3 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-2xl text-sm shadow-md shadow-[#F25D6B]/25 hover:opacity-95 transition-all"
-                >
-                  確認解鎖
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* 自訂 brand 質感通知視窗 */}
         {customAlert.isOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
@@ -3411,15 +3358,15 @@ export default function App() {
         )}
 
         {/* 底部功能導覽列：保留原品牌配色與圓角風格，改為新現場流程架構 */}
-        <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center gap-1.5 px-2 py-3 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-10px_40px_rgba(0,0,0,0.03)] pb-safe rounded-t-[32px] sm:rounded-t-[32px] sm:w-[420px] sm:mx-auto overflow-x-auto">
+        <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center gap-1 px-2 py-1.5 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-8px_28px_rgba(0,0,0,0.025)] pb-safe rounded-t-[22px] sm:rounded-t-[22px] sm:w-[420px] sm:mx-auto overflow-x-auto">
           {[
             { key: "checkin", label: "報到", icon: Check, color: "rose" },
             { key: "timeline", label: "流程", icon: ListTodo, color: "rose" },
             { key: "status", label: "狀態", icon: BarChart2, color: "purple" },
             { key: "control", label: "控場", icon: HeartHandshake, color: "purple" },
             { key: "settings", label: "設定", icon: User, color: "purple" },
-            { key: "admin", label: "管理", icon: isAdminUnlocked ? Unlock : Settings, color: "purple", locked: !isAdminUnlocked }
-          ].map((item) => {
+            { key: "admin", label: "管理", icon: Unlock, color: "purple" }
+          ].filter((item) => item.key !== "admin" || isCurrentUserAdmin).map((item) => {
             const NavIcon = item.icon;
             const active = activeTab === item.key;
             const activeClass = item.color === "rose"
@@ -3431,20 +3378,14 @@ export default function App() {
                 key={item.key}
                 type="button"
                 onClick={() => {
-                  if (item.key === "admin" && !isAdminUnlocked) {
-                    setShowPasswordModal(true);
-                    setPasswordInput("");
-                    setPasswordError("");
-                    return;
-                  }
                   setActiveTab(item.key);
                 }}
-                className={`flex flex-col items-center justify-center gap-1.5 transition-all duration-300 min-w-[58px] px-2 py-2 rounded-2xl ${
+                className={`flex flex-col items-center justify-center gap-0.5 transition-all duration-300 min-w-[54px] px-1.5 py-1 rounded-xl ${
                   active ? activeClass : "text-[#7B7B74] hover:bg-[#F3EEFF]"
                 }`}
               >
-                <NavIcon className="w-5 h-5" strokeWidth={active ? 2.5 : 2} />
-                <span className="text-[10px] font-black tracking-widest whitespace-nowrap">{item.label}</span>
+                <NavIcon className="w-4 h-4" strokeWidth={active ? 2.5 : 2} />
+                <span className="text-[9px] font-black tracking-widest whitespace-nowrap">{item.label}</span>
               </button>
             );
           })}
