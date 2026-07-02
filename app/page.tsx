@@ -91,7 +91,28 @@ export default function App() {
   const serviceOptions = ['六晚崇', '主一堂', '主二堂'];
 
   // --- 報到 / 崗位 UI 狀態 ---
-  // 這一版先建立前端流程入口；正式 Wi-Fi 驗證、Supabase 報到紀錄與相機掃描會接在下一階段。
+  // 這一版先完成報到前端流程；正式密碼雜湊、Wi-Fi 驗證與 Supabase 報到紀錄會接在下一階段。
+  const CHECKIN_PROFILE_STORAGE_KEY = "shekinah_checkin_profile_v1";
+  const [checkinProfile, setCheckinProfile] = useState({
+    name: "",
+    phoneLast4: "",
+    deviceRemembered: false
+  });
+  const [checkinForm, setCheckinForm] = useState({
+    name: "",
+    phoneLast4: "",
+    password: "",
+    confirmPassword: ""
+  });
+  const [resetPasswordForm, setResetPasswordForm] = useState({
+    name: "",
+    phoneLast4: "",
+    resetCode: "",
+    newPassword: "",
+    confirmPassword: ""
+  });
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [wifiVerified, setWifiVerified] = useState(false);
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
   const [confirmedStation, setConfirmedStation] = useState("");
@@ -225,11 +246,37 @@ export default function App() {
     if (typeof window === "undefined") return;
 
     try {
-      window.localStorage.setItem(PERSONAL_REMINDER_STORAGE_KEY, JSON.stringify(personalSettings));
+      const saved = window.localStorage.getItem(CHECKIN_PROFILE_STORAGE_KEY);
+      if (!saved) return;
+
+      const parsed = JSON.parse(saved);
+      setCheckinProfile({
+        name: parsed.name || "",
+        phoneLast4: parsed.phoneLast4 || "",
+        deviceRemembered: parsed.deviceRemembered === true
+      });
+
+      if (parsed.name) {
+        setPersonalSettings(prev => ({
+          ...prev,
+          name: parsed.name
+        }));
+      }
     } catch (err) {
-      console.error("儲存個人提醒設定失敗:", err);
+      console.error("讀取報到身分失敗:", err);
     }
-  }, [personalSettings]);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!checkinProfile.name || !checkinProfile.phoneLast4) return;
+
+    try {
+      window.localStorage.setItem(CHECKIN_PROFILE_STORAGE_KEY, JSON.stringify(checkinProfile));
+    } catch (err) {
+      console.error("儲存報到身分失敗:", err);
+    }
+  }, [checkinProfile]);
 
   const updatePersonalSettings = (patch: Partial<typeof personalSettings>) => {
     setPersonalSettings(prev => ({ ...prev, ...patch }));
@@ -1101,7 +1148,159 @@ export default function App() {
     }
   };
 
+  const hasCheckinProfile = Boolean(checkinProfile.name && checkinProfile.phoneLast4);
+  const displayCheckinName = checkinProfile.name || personalSettings.name || "";
+
+  const isValidPhoneLast4 = (value: string) => /^\d{4}$/.test(value.trim());
+  const isValidPassword = (value: string) => value.trim().length >= 10;
+
+  const clearCheckinIdentity = () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(CHECKIN_PROFILE_STORAGE_KEY);
+    }
+
+    setCheckinProfile({
+      name: "",
+      phoneLast4: "",
+      deviceRemembered: false
+    });
+    setCheckinForm({
+      name: "",
+      phoneLast4: "",
+      password: "",
+      confirmPassword: ""
+    });
+    setResetPasswordForm({
+      name: "",
+      phoneLast4: "",
+      resetCode: "",
+      newPassword: "",
+      confirmPassword: ""
+    });
+    setShowResetPassword(false);
+    setWifiVerified(false);
+    setCheckinStatus("not_checked_in");
+    setCheckedInAt("");
+    setConfirmedStation("");
+    setPersonalSettings(prev => ({ ...prev, name: "" }));
+  };
+
+  const handleCreateCheckinProfile = () => {
+    const name = checkinForm.name.trim();
+    const phoneLast4 = checkinForm.phoneLast4.trim();
+
+    if (!name) {
+      setCustomAlert({ isOpen: true, message: "請輸入姓名。" });
+      return;
+    }
+
+    if (!isValidPhoneLast4(phoneLast4)) {
+      setCustomAlert({ isOpen: true, message: "手機後四碼請輸入 4 位數字。" });
+      return;
+    }
+
+    if (!isValidPassword(checkinForm.password)) {
+      setCustomAlert({ isOpen: true, message: "密碼請至少設定 10 個字元。" });
+      return;
+    }
+
+    if (checkinForm.password !== checkinForm.confirmPassword) {
+      setCustomAlert({ isOpen: true, message: "兩次輸入的密碼不一致。" });
+      return;
+    }
+
+    // V1 前端先記住身分與可信裝置；正式版密碼需交由後端雜湊儲存，不放 localStorage。
+    setCheckinProfile({
+      name,
+      phoneLast4,
+      deviceRemembered: true
+    });
+    setPersonalSettings(prev => ({
+      ...prev,
+      name
+    }));
+    setCheckinForm({
+      name: "",
+      phoneLast4: "",
+      password: "",
+      confirmPassword: ""
+    });
+    setCustomAlert({ isOpen: true, message: "已建立服事身分。這台手機下次會自動記住您。" });
+  };
+
+  const handleResetPassword = () => {
+    const name = resetPasswordForm.name.trim();
+    const phoneLast4 = resetPasswordForm.phoneLast4.trim();
+
+    if (!name) {
+      setCustomAlert({ isOpen: true, message: "請輸入姓名。" });
+      return;
+    }
+
+    if (!isValidPhoneLast4(phoneLast4)) {
+      setCustomAlert({ isOpen: true, message: "手機後四碼請輸入 4 位數字。" });
+      return;
+    }
+
+    if (!isValidPassword(resetPasswordForm.newPassword)) {
+      setCustomAlert({ isOpen: true, message: "新密碼請至少設定 10 個字元。" });
+      return;
+    }
+
+    if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
+      setCustomAlert({ isOpen: true, message: "兩次輸入的新密碼不一致。" });
+      return;
+    }
+
+    const isSameTrustedDevice = checkinProfile.deviceRemembered
+      && checkinProfile.name === name
+      && checkinProfile.phoneLast4 === phoneLast4;
+
+    if (!isSameTrustedDevice && resetPasswordForm.resetCode.trim().length < 4) {
+      setCustomAlert({
+        isOpen: true,
+        message: "這不是原本可信裝置，請輸入總招或管理員提供的一次性重設碼。"
+      });
+      return;
+    }
+
+    setCheckinProfile({
+      name,
+      phoneLast4,
+      deviceRemembered: true
+    });
+    setPersonalSettings(prev => ({
+      ...prev,
+      name
+    }));
+    setResetPasswordForm({
+      name: "",
+      phoneLast4: "",
+      resetCode: "",
+      newPassword: "",
+      confirmPassword: ""
+    });
+    setShowResetPassword(false);
+    setCustomAlert({ isOpen: true, message: "已重新設定新密碼。請使用新密碼進入系統。" });
+  };
+
+  const handleWifiCheck = () => {
+    // V1 前端先提供流程按鈕；正式版會由後端檢查來源 IP 是否屬於教會現場 Wi-Fi。
+    setWifiVerified(true);
+    setCustomAlert({ isOpen: true, message: "已通過現場 Wi-Fi 驗證。正式版會改由後端自動檢查。" });
+  };
+
   const handleLocalCheckin = () => {
+    if (!hasCheckinProfile) {
+      setCustomAlert({ isOpen: true, message: "請先建立服事身分，再進行報到。" });
+      return;
+    }
+
+    if (!wifiVerified) {
+      setCustomAlert({ isOpen: true, message: "尚未通過現場 Wi-Fi 驗證，請先連上教會 Wi-Fi 後按「重新檢查」。" });
+      return;
+    }
+
     const now = new Date();
     const timeText = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     setCheckedInAt(timeText);
@@ -1498,99 +1697,260 @@ export default function App() {
           <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">報到</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
             <Check className="w-4 h-4 text-[#6D55A3]" />
-            首頁｜登入、報到、等待分派
+            首頁｜建立身分、現場報到、等待分派
           </p>
         </div>
 
-        <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
-              <h3 className="text-xl font-black text-[#1F2937]">{personalSettings.name || "服事同工"}</h3>
-              <p className="text-sm font-bold text-[#6D55A3] mt-1">{currentService}｜{personalSettings.role || "未設定角色"}</p>
+        {!hasCheckinProfile ? (
+          <div className="space-y-5">
+            <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5">
+              <div className="w-14 h-14 rounded-[22px] bg-[#F3EEFF] flex items-center justify-center mb-4">
+                <User className="w-7 h-7 text-[#6D55A3]" />
+              </div>
+              <h3 className="text-[18px] font-black text-[#1F2937] mb-2">第一次使用</h3>
+              <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                請先建立您的服事身分。正式版會將密碼交由後端雜湊儲存；這一版先建立前端報到流程。
+              </p>
+
+              <div className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">姓名</label>
+                  <input
+                    type="text"
+                    value={checkinForm.name}
+                    onChange={e => setCheckinForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="例如：陳姊妹"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">手機後四碼</label>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={checkinForm.phoneLast4}
+                    onChange={e => setCheckinForm(prev => ({ ...prev, phoneLast4: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                    placeholder="例如：6820"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">建立密碼</label>
+                  <input
+                    type="password"
+                    value={checkinForm.password}
+                    onChange={e => setCheckinForm(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="至少 10 個字元"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">再次輸入密碼</label>
+                  <input
+                    type="password"
+                    value={checkinForm.confirmPassword}
+                    onChange={e => setCheckinForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                    placeholder="再次確認密碼"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCreateCheckinProfile}
+                  className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+                >
+                  建立服事身分
+                </button>
+              </div>
             </div>
-            <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
-              isCheckedIn
-                ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
-                : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
-            }`}>
-              {isCheckedIn ? "已報到" : "尚未報到"}
-            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowResetPassword(prev => !prev)}
+              className="w-full text-center text-[12px] font-black text-[#6D55A3] hover:text-[#F25D6B] transition-colors"
+            >
+              忘記密碼？重新設定新密碼
+            </button>
+
+            {showResetPassword && (
+              <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5">
+                <h3 className="text-[16px] font-black text-[#1F2937] mb-2">重新設定新密碼</h3>
+                <p className="text-xs font-medium leading-relaxed text-[#7B7B74] mb-4">
+                  姓名與手機後四碼用來辨識身分；若不是原本可信裝置，需輸入一次性重設碼。
+                </p>
+
+                <div className="space-y-3.5">
+                  <input
+                    type="text"
+                    value={resetPasswordForm.name}
+                    onChange={e => setResetPasswordForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="姓名"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={resetPasswordForm.phoneLast4}
+                    onChange={e => setResetPasswordForm(prev => ({ ...prev, phoneLast4: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                    placeholder="手機後四碼"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                  <input
+                    type="text"
+                    value={resetPasswordForm.resetCode}
+                    onChange={e => setResetPasswordForm(prev => ({ ...prev, resetCode: e.target.value }))}
+                    placeholder="一次性重設碼，新裝置才需要"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                  <input
+                    type="password"
+                    value={resetPasswordForm.newPassword}
+                    onChange={e => setResetPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                    placeholder="新密碼，至少 10 個字元"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                  <input
+                    type="password"
+                    value={resetPasswordForm.confirmPassword}
+                    onChange={e => setResetPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                    placeholder="再次輸入新密碼"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleResetPassword}
+                    className="w-full py-3.5 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#EDE6FF] transition-colors"
+                  >
+                    重新設定
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
+        ) : (
+          <>
+            <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
+                  <h3 className="text-xl font-black text-[#1F2937]">{displayCheckinName || "服事同工"}</h3>
+                  <p className="text-sm font-bold text-[#6D55A3] mt-1">{currentService}｜{personalSettings.role || "未設定角色"}</p>
+                  <p className="text-[11px] font-bold text-[#7B7B74] mt-1">
+                    手機後四碼：{checkinProfile.phoneLast4}
+                  </p>
+                </div>
+                <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
+                  isCheckedIn
+                    ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
+                    : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
+                }`}>
+                  {isCheckedIn ? "已報到" : "尚未報到"}
+                </div>
+              </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <div className="p-4 rounded-[20px] bg-[#F3EEFF]/60 border border-[#6D55A3]/10">
-              <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現在時間</div>
-              <div className="text-2xl font-black font-mono text-[#1F2937]">{currentTime || "--:--"}</div>
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <div className="p-4 rounded-[20px] bg-[#F3EEFF]/60 border border-[#6D55A3]/10">
+                  <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現在時間</div>
+                  <div className="text-2xl font-black font-mono text-[#1F2937]">{currentTime || "--:--"}</div>
+                </div>
+                <div className={`p-4 rounded-[20px] border ${
+                  wifiVerified
+                    ? "bg-[#00B8B8]/10 border-[#00B8B8]/20"
+                    : "bg-[#FFF2F4]/60 border-[#F25D6B]/10"
+                }`}>
+                  <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現場 Wi-Fi</div>
+                  <div className={`text-sm font-black ${wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"}`}>
+                    {wifiVerified ? "已通過" : "尚未通過"}
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="p-4 rounded-[20px] bg-[#FFF2F4]/60 border border-[#F25D6B]/10">
-              <div className="text-[10px] font-black text-[#7B7B74] tracking-widest mb-1">現場 Wi-Fi</div>
-              <div className="text-sm font-black text-[#F25D6B]">等待驗證</div>
+
+            {!wifiVerified && !isCheckedIn && (
+              <div className="mb-5 p-4 rounded-[20px] bg-[#FFF2F4] border border-[#F25D6B]/20">
+                <h3 className="text-sm font-black text-[#F25D6B] mb-1">尚未通過現場 Wi-Fi 驗證</h3>
+                <p className="text-xs font-bold leading-relaxed text-[#7B7B74] mb-3">
+                  請開啟手機 Wi-Fi，連上教會現場 Wi-Fi 後，再按「重新檢查」。
+                </p>
+                <button
+                  type="button"
+                  onClick={handleWifiCheck}
+                  className="w-full py-3 bg-white text-[#F25D6B] border border-[#F25D6B]/20 font-black rounded-[16px] hover:bg-[#FFF2F4] transition-colors"
+                >
+                  重新檢查 Wi-Fi
+                </button>
+              </div>
+            )}
+
+            <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+              {!isCheckedIn ? (
+                <>
+                  <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成今日報到</h3>
+                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                    報到只用現場 Wi-Fi 驗證，確認同工人在教會現場。AprilTag / 視覺碼會留到崗位確認使用。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleLocalCheckin}
+                    className={`w-full py-4 font-black rounded-[18px] transition-all ${
+                      wifiVerified
+                        ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 hover:opacity-90"
+                        : "bg-[#E6EAF0] text-[#7B7B74] cursor-not-allowed"
+                    }`}
+                  >
+                    立即報到
+                  </button>
+                </>
+              ) : stationReady ? (
+                <>
+                  <h3 className="text-[16px] font-black text-[#1F2937] mb-2">崗位確認完成</h3>
+                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                    今日崗位：<span className="font-black text-[#6D55A3]">{confirmedStation || personalSettings.role}</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("timeline")}
+                    className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+                  >
+                    進入今日流程
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-[16px] font-black text-[#1F2937] mb-2">您已於 {checkedInAt || "--:--"} 報到</h3>
+                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                    目前狀態：已報到，等待分派崗位。拿到總招發的崗位名牌後，請到「崗位」頁掃描確認。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("station")}
+                    className="w-full py-4 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#EDE6FF] transition-colors"
+                  >
+                    前往崗位確認
+                  </button>
+                </>
+              )}
             </div>
-          </div>
-        </div>
 
-        <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
-          {!isCheckedIn ? (
-            <>
-              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成今日報到</h3>
-              <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                到教會現場後，連上現場 Wi-Fi，再按下報到。這一版先保留畫面流程，正式 Wi-Fi 驗證會接在下一階段。
-              </p>
-              <button
-                type="button"
-                onClick={handleLocalCheckin}
-                className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
-              >
-                立即報到
-              </button>
-            </>
-          ) : stationReady ? (
-            <>
-              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">崗位確認完成</h3>
-              <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                今日崗位：<span className="font-black text-[#6D55A3]">{confirmedStation || personalSettings.role}</span>
-              </p>
-              <button
-                type="button"
-                onClick={() => setActiveTab("timeline")}
-                className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
-              >
-                進入今日流程
-              </button>
-            </>
-          ) : (
-            <>
-              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">您已於 {checkedInAt || "--:--"} 報到</h3>
-              <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                目前狀態：等待總招分派崗位。拿到崗位名牌後，請到「崗位」頁掃描確認。
-              </p>
-              <button
-                type="button"
-                onClick={() => setActiveTab("station")}
-                className="w-full py-4 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#EDE6FF] transition-colors"
-              >
-                前往崗位確認
-              </button>
-            </>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            setPersonalSettings(prev => ({ ...prev, name: "" }));
-            setCheckinStatus("not_checked_in");
-            setCheckedInAt("");
-            setConfirmedStation("");
-          }}
-          className="w-full text-center text-[12px] font-black text-[#7B7B74] hover:text-[#F25D6B] transition-colors"
-        >
-          不是我？請重新輸入
-        </button>
+            <button
+              type="button"
+              onClick={clearCheckinIdentity}
+              className="w-full text-center text-[12px] font-black text-[#7B7B74] hover:text-[#F25D6B] transition-colors"
+            >
+              不是我？請重新輸入
+            </button>
+          </>
+        )}
       </div>
     );
   };
+
 
   const renderStationView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
