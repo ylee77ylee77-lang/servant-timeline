@@ -177,7 +177,7 @@ export default function App() {
 
   // --- 自訂精美 Modal 提示框狀態 ---
   const [customAlert, setCustomAlert] = useState<{isOpen: boolean, message: string}>({ isOpen: false, message: "" });
-  const [customConfirm, setCustomConfirm] = useState<{isOpen: boolean, message: string, onConfirm: () => void}>({ isOpen: false, message: "", onConfirm: () => {} });
+  const [customConfirm, setCustomConfirm] = useState<{isOpen: boolean, message: string, onConfirm: () => void, confirmLabel?: string}>({ isOpen: false, message: "", onConfirm: () => {} });
 
   // --- 管理與編輯任務狀態 ---
   const [isAdding, setIsAdding] = useState(false);
@@ -1448,27 +1448,19 @@ export default function App() {
       return;
     }
 
-    const serviceForToday = currentService.trim();
-
-    if (!serviceForToday || !serviceOptions.includes(serviceForToday)) {
-      setCustomAlert({
-        isOpen: true,
-        message: "今日堂次尚未確認。正式版會依今日排班自動帶入；目前測試版請先由管理員切換堂次後再報到。"
-      });
-      return;
-    }
-
     const now = new Date();
     const timeText = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
-    // V1 先用系統目前判斷的堂次鎖定；正式版會優先查今日排班/分派名單。
+    // 第一階段 PWA：報到只代表「人已到場」；堂次與崗位以 QR 名牌為準。
     setCheckedInAt(timeText);
-    setCheckedInService(serviceForToday);
-    setCurrentService(serviceForToday);
-    hasManuallySwitchedRef.current = true;
+    setCheckedInService("");
+    setConfirmedStation("");
     setCheckinStatus("checked_in");
     triggerVibration([200, 100, 200]);
-    setCustomAlert({ isOpen: true, message: `已完成 ${serviceForToday} 報到。請等候總招分派崗位名牌。` });
+    setCustomAlert({
+      isOpen: true,
+      message: "已完成到場報到。請等候總招分派 QR 崗位名牌；掃描名牌後，系統會自動確認堂次與崗位。"
+    });
   };
 
   const handleCorrectCheckedInService = (newService: string) => {
@@ -1618,13 +1610,8 @@ export default function App() {
       return;
     }
 
-    const lockedService = checkedInService || currentService;
-
-    if (parsed.service && lockedService && parsed.service !== lockedService) {
-      setStationScannerMessage(`這張名牌屬於「${parsed.service}」，但您目前報到堂次是「${lockedService}」。請確認是否拿錯名牌。`);
-      triggerVibration([80, 80, 80]);
-      return;
-    }
+    const badgeService = parsed.service || checkedInService || currentService;
+    const existingLockedService = checkedInService;
 
     if (assignedStation && parsed.station !== assignedStation) {
       setStationScannerMessage(`這張名牌是「${parsed.station}」，但總招指定給您的是「${assignedStation}」。請確認是否拿錯名牌。`);
@@ -1632,15 +1619,37 @@ export default function App() {
       return;
     }
 
-    setAssignedStation(prev => prev || parsed.station);
-    setConfirmedStation(parsed.station);
-    setCheckinStatus("station_confirmed");
-    triggerVibration([200, 100, 200]);
-    handleCloseStationScanner();
-    setCustomAlert({
-      isOpen: true,
-      message: `崗位確認完成：${parsed.station}\n堂次：${lockedService || parsed.service || "今日堂次"}`
-    });
+    const applyBadgeStation = () => {
+      if (badgeService && serviceOptions.includes(badgeService)) {
+        setCheckedInService(badgeService);
+        setCurrentService(badgeService);
+        hasManuallySwitchedRef.current = true;
+        setNewNode((prev) => ({ ...prev, service_type: badgeService }));
+      }
+
+      setAssignedStation(prev => prev || parsed.station);
+      setConfirmedStation(parsed.station);
+      setCheckinStatus("station_confirmed");
+      triggerVibration([200, 100, 200]);
+      handleCloseStationScanner();
+      setCustomAlert({
+        isOpen: true,
+        message: `崗位確認完成：${parsed.station}\n堂次：${badgeService || "今日堂次"}`
+      });
+    };
+
+    if (parsed.service && existingLockedService && parsed.service !== existingLockedService) {
+      triggerVibration([80, 80, 80]);
+      setCustomConfirm({
+        isOpen: true,
+        message: `這張名牌屬於「${parsed.service}」，但您目前的報到紀錄是「${existingLockedService}」。\n\n可能是您提早到場報到，或剛剛報到堂次尚未更新。若這是總招發給您的名牌，請以名牌堂次為準。`,
+        confirmLabel: "確認名牌堂次",
+        onConfirm: applyBadgeStation
+      });
+      return;
+    }
+
+    applyBadgeStation();
   };
 
   const handleStartStationCameraScanner = async () => {
@@ -2085,7 +2094,7 @@ export default function App() {
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
-    const todayService = isCheckedIn ? (checkedInService || currentService || "待確認") : "待確認";
+    const todayService = stationReady ? (checkedInService || currentService || "待確認") : isCheckedIn ? "待名牌確認" : "待報到";
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -2105,7 +2114,7 @@ export default function App() {
               </div>
               <h3 className="text-[18px] font-black text-[#1F2937] mb-2">第一次使用</h3>
               <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                請先建立您的服事身分。正式版會將密碼交由後端雜湊儲存；這一版先建立前端報到流程。尚未報到前會顯示「今日堂次：待確認」；正式版會在報到時依今日排班決定並鎖定。
+                請先建立您的服事身分。這一版先完成前端報到流程；報到只確認您已到場，堂次與崗位會在掃描總招發放的 QR 名牌時自動確認。
               </p>
 
               <div className="space-y-3.5">
@@ -2263,41 +2272,16 @@ export default function App() {
 
             {!isCheckedIn && (
               <div className="mb-5 p-5 rounded-[24px] bg-white border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5">
-                <div className="flex items-start justify-between gap-3 mb-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-[18px] bg-[#F3EEFF] flex items-center justify-center shrink-0">
+                    <MapPin className="w-5 h-5 text-[#6D55A3]" />
+                  </div>
                   <div>
-                    <h3 className="text-[16px] font-black text-[#1F2937] mb-1">報到時確認堂次</h3>
+                    <h3 className="text-[16px] font-black text-[#1F2937] mb-1">堂次與崗位由 QR 名牌確認</h3>
                     <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
-                      請確認您本次服事堂次。按「立即報到」後會鎖定，後續流程不會因時間自動切換。
+                      報到只確認您已到場。總招發放 QR 崗位名牌後，掃描名牌會自動帶入正確堂次與崗位。
                     </p>
                   </div>
-                  <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
-                    currentService
-                      ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
-                      : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
-                  }`}>
-                    {currentService || "待確認"}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  {serviceOptions.map((srv) => (
-                    <button
-                      key={srv}
-                      type="button"
-                      onClick={() => {
-                        setCurrentService(srv);
-                        hasManuallySwitchedRef.current = true;
-                        setNewNode((prev) => ({ ...prev, service_type: srv }));
-                      }}
-                      className={`px-3 py-3 rounded-[16px] text-[13px] font-black transition-all ${
-                        currentService === srv
-                          ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20"
-                          : "bg-[#F3EEFF]/60 text-[#6D55A3] border border-[#6D55A3]/10 hover:bg-[#F3EEFF]"
-                      }`}
-                    >
-                      {srv}
-                    </button>
-                  ))}
                 </div>
               </div>
             )}
@@ -2307,7 +2291,7 @@ export default function App() {
                 <>
                   <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成今日報到</h3>
                   <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-4">
-                    報到會同時確認現場 Wi-Fi 與本次服事堂次。QR Code 會留到崗位確認使用。
+                    連上現場 Wi-Fi 後，請手動點選報到。報到只代表您已到場；堂次與崗位會在掃描 QR 名牌時確認。
                   </p>
 
                   <div className={`mb-4 p-4 rounded-[20px] border ${
@@ -2346,13 +2330,14 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleLocalCheckin}
+                    disabled={!wifiVerified}
                     className={`w-full py-4 font-black rounded-[18px] transition-all ${
-                      wifiVerified && currentService
+                      wifiVerified
                         ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 hover:opacity-90"
                         : "bg-[#E6EAF0] text-[#7B7B74] cursor-not-allowed"
                     }`}
                   >
-                    {!wifiVerified ? "請先連上現場 Wi-Fi" : currentService ? "立即報到" : "請先確認堂次"}
+                    {!wifiVerified ? "請先連上現場 Wi-Fi" : "我已到場，完成報到"}
                   </button>
                 </>
               ) : stationReady ? (
@@ -2392,31 +2377,14 @@ export default function App() {
                   <div className="mb-5 p-4 rounded-[20px] bg-white border border-[#6D55A3]/15">
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div>
-                        <h4 className="text-sm font-black text-[#1F2937] mb-1">更正堂次</h4>
+                        <h4 className="text-sm font-black text-[#1F2937] mb-1">掃描 QR 名牌確認堂次與崗位</h4>
                         <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
-                          尚未確認崗位前，可以更正堂次；系統會更新同一筆報到紀錄，不會新增第二筆報到。
+                          QR 名牌會帶入正確堂次。若名牌堂次與既有報到紀錄不同，系統會請您確認是否以名牌堂次為準。
                         </p>
                       </div>
-                      <div className="px-3 py-1.5 rounded-full bg-[#00B8B8]/10 text-[#00B8B8] border border-[#00B8B8]/20 text-[11px] font-black whitespace-nowrap">
-                        {checkedInService || todayService}
+                      <div className="px-3 py-1.5 rounded-full bg-[#FFF2F4] text-[#F25D6B] border border-[#F25D6B]/20 text-[11px] font-black whitespace-nowrap">
+                        待名牌確認
                       </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2">
-                      {serviceOptions.map((srv) => (
-                        <button
-                          key={srv}
-                          type="button"
-                          onClick={() => handleCorrectCheckedInService(srv)}
-                          className={`px-3 py-3 rounded-[16px] text-[13px] font-black transition-all ${
-                            (checkedInService || currentService) === srv
-                              ? "bg-[#00B8B8]/10 text-[#00B8B8] border border-[#00B8B8]/20"
-                              : "bg-[#F3EEFF]/60 text-[#6D55A3] border border-[#6D55A3]/10 hover:bg-[#F3EEFF]"
-                          }`}
-                        >
-                          {srv}
-                        </button>
-                      ))}
                     </div>
                   </div>
 
@@ -3893,7 +3861,7 @@ export default function App() {
                   }}
                   className="flex-1 py-3 bg-[#F25D6B] hover:bg-[#F25D6B]/90 text-white font-bold rounded-[16px] text-sm shadow-md shadow-[#F25D6B]/20 transition-all"
                 >
-                  確認執行
+                  {customConfirm.confirmLabel || "確認執行"}
                 </button>
               </div>
             </div>
