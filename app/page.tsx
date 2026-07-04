@@ -1734,7 +1734,7 @@ export default function App() {
       const codeReader = new BrowserQRCodeReader();
       stationQrReaderRef.current = codeReader;
       setStationCameraActive(true);
-      setStationScannerMessage("正在開啟相機，請允許相機權限。開啟後請將 QR Code 放入畫面中央。");
+      setStationScannerMessage("開啟後請將 QR Code 放入畫面中央。");
 
       const controls = await codeReader.decodeFromConstraints(
         {
