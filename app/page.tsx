@@ -3770,11 +3770,14 @@ export default function App() {
         {stationScannerOpen && (
           <div className="fixed inset-0 z-[105] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
             <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl border border-[#E6EAF0] overflow-hidden">
-              <div className="p-4 bg-[#FFF9F3] border-b border-[#E6EAF0] flex justify-end">
+              <div className="p-4 bg-[#FFF9F3] border-b border-[#E6EAF0] flex items-center justify-between gap-3">
+                <p className="text-xs font-black leading-relaxed text-[#6D55A3]">
+                  {stationCameraActive ? "相機已開啟，請將 QR Code 放入畫面中央。" : stationScannerMessage}
+                </p>
                 <button
                   type="button"
                   onClick={handleCloseStationScanner}
-                  className="w-9 h-9 rounded-full bg-white text-[#7B7B74] flex items-center justify-center border border-[#E6EAF0] hover:text-[#F25D6B] transition-colors"
+                  className="w-9 h-9 rounded-full bg-white text-[#7B7B74] flex items-center justify-center border border-[#E6EAF0] hover:text-[#F25D6B] transition-colors shrink-0"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -3794,10 +3797,6 @@ export default function App() {
                     </div>
                   )}
                 </div>
-
-                <p className="text-xs font-bold leading-relaxed text-[#7B7B74] whitespace-pre-line">
-                  {stationScannerMessage}
-                </p>
 
                 <div className="pt-4 border-t border-[#E6EAF0]">
                   <label className="block text-[11px] font-black text-[#7B7B74] tracking-widest mb-2">
