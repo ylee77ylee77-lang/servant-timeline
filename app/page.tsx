@@ -2409,7 +2409,7 @@ export default function App() {
                   disabled={!wifiVerified || isCheckedIn}
                   className={`min-w-[108px] px-5 rounded-[18px] text-sm font-black transition-all ${
                     isCheckedIn
-                      ? "bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3] cursor-default"
+                      ? "bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 cursor-default"
                       : wifiVerified
                         ? "bg-[#F25D6B] text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E]"
                         : "bg-[#E6EAF0] text-[#9CA3AF] cursor-not-allowed"
