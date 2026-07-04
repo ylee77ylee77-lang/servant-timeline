@@ -27,6 +27,7 @@ import {
   MicOff,
   Loader2 
 } from 'lucide-react';
+import { BrowserQRCodeReader } from '@zxing/browser';
 
 // 第一階段 PWA 完成版：報到、堂次、QR Code 崗位確認、總招控場
 // 1. 您的專屬雲端鑰匙 (維持原樣)
@@ -167,6 +168,8 @@ export default function App() {
   const [controlNote, setControlNote] = useState("");
   const stationScanVideoRef = useRef<HTMLVideoElement>(null);
   const stationScanStreamRef = useRef<MediaStream | null>(null);
+  const stationQrReaderRef = useRef<BrowserQRCodeReader | null>(null);
+  const stationQrControlsRef = useRef<any>(null);
 
   const hasManuallySwitchedRef = useRef(false);
 
@@ -1583,12 +1586,27 @@ export default function App() {
   };
 
   const stopStationScanner = useCallback(() => {
+    if (stationQrControlsRef.current) {
+      try {
+        stationQrControlsRef.current.stop();
+      } catch (err) {
+        console.warn("停止 ZXing 掃描失敗", err);
+      }
+      stationQrControlsRef.current = null;
+    }
+
+    stationQrReaderRef.current = null;
+
     if (stationScanStreamRef.current) {
       stationScanStreamRef.current.getTracks().forEach(track => track.stop());
       stationScanStreamRef.current = null;
     }
 
     if (stationScanVideoRef.current) {
+      const stream = stationScanVideoRef.current.srcObject as MediaStream | null;
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
       stationScanVideoRef.current.srcObject = null;
     }
 
@@ -1654,60 +1672,68 @@ export default function App() {
 
   const handleStartStationCameraScanner = async () => {
     try {
-      const Detector = (window as any).BarcodeDetector;
-
-      if (!Detector) {
-        setStationScannerMessage("此裝置目前無法直接使用原生 QR 掃描。請先用「手動輸入崗位碼」完成測試。");
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        setStationScannerMessage("此瀏覽器不支援相機權限。請改用 Safari / Chrome 開啟，或使用手動輸入崗位碼。");
         return;
       }
 
-      const detector = new Detector({ formats: ["qr_code"] });
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" }
-        },
-        audio: false
-      });
-
-      stationScanStreamRef.current = stream;
-      setStationCameraActive(true);
-
-      if (stationScanVideoRef.current) {
-        stationScanVideoRef.current.srcObject = stream;
-        await stationScanVideoRef.current.play();
+      const video = stationScanVideoRef.current;
+      if (!video) {
+        setStationScannerMessage("相機畫面尚未準備好，請關閉視窗後再重新開啟掃描。");
+        return;
       }
 
-      setStationScannerMessage("請將崗位名牌上的 QR Code 放入畫面中央。");
+      stopStationScanner();
 
-      const scanFrame = async () => {
-        const video = stationScanVideoRef.current;
+      const codeReader = new BrowserQRCodeReader();
+      stationQrReaderRef.current = codeReader;
+      setStationCameraActive(true);
+      setStationScannerMessage("正在開啟相機，請允許相機權限。開啟後請將 QR Code 放入畫面中央。");
 
-        if (!stationScanStreamRef.current || !video || video.readyState < 2) {
-          if (stationScanStreamRef.current) requestAnimationFrame(scanFrame);
-          return;
-        }
+      const controls = await codeReader.decodeFromConstraints(
+        {
+          video: {
+            facingMode: { ideal: "environment" }
+          },
+          audio: false
+        },
+        video,
+        (result, error, controls) => {
+          if (result) {
+            const rawValue = (result as any).getText?.() || (result as any).text || String(result);
 
-        try {
-          const codes = await detector.detect(video);
-
-          if (codes && codes.length > 0) {
-            const rawValue = codes[0]?.rawValue || "";
-            if (rawValue) {
-              confirmStationFromQrCode(rawValue);
-              return;
+            try {
+              controls.stop();
+            } catch (stopError) {
+              console.warn("停止 ZXing 掃描失敗", stopError);
             }
+
+            stationQrControlsRef.current = null;
+            setStationCameraActive(false);
+            confirmStationFromQrCode(rawValue);
+            return;
           }
-        } catch (scanError) {
-          console.warn("QR 掃描失敗", scanError);
         }
+      );
 
-        if (stationScanStreamRef.current) requestAnimationFrame(scanFrame);
-      };
+      stationQrControlsRef.current = controls;
+      setStationScannerMessage("相機已開啟。請將 QR Code 放入畫面中央，系統會自動辨識。");
+    } catch (error: any) {
+      console.error("ZXing 開啟相機失敗", error);
+      stopStationScanner();
 
-      requestAnimationFrame(scanFrame);
-    } catch (error) {
-      console.error("開啟相機失敗", error);
-      setStationScannerMessage("無法開啟相機。請確認瀏覽器相機權限，或改用手動輸入崗位碼。");
+      const errorMessage = String(error?.message || error || "");
+      if (errorMessage.includes("Permission") || errorMessage.includes("NotAllowed")) {
+        setStationScannerMessage("相機權限被拒絕。請到瀏覽器設定允許相機權限，或改用手動輸入崗位碼。");
+        return;
+      }
+
+      if (errorMessage.includes("NotFound") || errorMessage.includes("DevicesNotFound")) {
+        setStationScannerMessage("找不到可用相機。請確認裝置有相機，或改用手動輸入崗位碼。");
+        return;
+      }
+
+      setStationScannerMessage("無法開啟 ZXing QR 掃描。請確認使用 HTTPS 網址與 Safari / Chrome，或改用手動輸入崗位碼。");
     }
   };
 
@@ -3791,7 +3817,7 @@ export default function App() {
                   onClick={handleStartStationCameraScanner}
                   className="w-full py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
                 >
-                  開啟相機掃描
+                  開啟 ZXing 掃描
                 </button>
 
                 <div className="pt-4 border-t border-[#E6EAF0]">
