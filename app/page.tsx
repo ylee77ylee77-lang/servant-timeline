@@ -1734,7 +1734,7 @@ export default function App() {
       const codeReader = new BrowserQRCodeReader();
       stationQrReaderRef.current = codeReader;
       setStationCameraActive(true);
-      setStationScannerMessage("正在開啟相機，請允許相機權限。開啟後請將 QR Code 放入畫面中央。");
+      setStationScannerMessage("");
 
       const controls = await codeReader.decodeFromConstraints(
         {
@@ -1800,7 +1800,7 @@ export default function App() {
 
     stationAutoStartAttemptedRef.current = false;
     setStationScannerOpen(true);
-    setStationScannerMessage("正在開啟相機，請允許相機權限。");
+    setStationScannerMessage("");
   };
 
   useEffect(() => {
@@ -3773,7 +3773,11 @@ export default function App() {
           <div className="fixed inset-0 z-[105] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
             <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl border border-[#E6EAF0] overflow-hidden">
               <div className="p-4 bg-[#FFF9F3] border-b border-[#E6EAF0] flex items-center justify-between gap-3">
-                <p className="text-xs font-black leading-relaxed text-[#6D55A3]">
+                <p className={`flex-1 text-center font-black text-[#6D55A3] ${
+                  stationCameraActive
+                    ? "text-[14px] sm:text-[15px] leading-none whitespace-nowrap"
+                    : "text-xs leading-relaxed"
+                }`}>
                   {stationCameraActive ? "相機已開啟，請將 QR Code 放入畫面中央。" : stationScannerMessage}
                 </p>
                 <button
