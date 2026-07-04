@@ -154,7 +154,7 @@ export default function App() {
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [wifiVerified, setWifiVerified] = useState(false);
   const [wifiChecking, setWifiChecking] = useState(false);
-  const [wifiCheckMessage, setWifiCheckMessage] = useState("請確認連接上 Wi-Fi：Slllc 後重試");
+  const [wifiCheckMessage, setWifiCheckMessage] = useState("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
   const [checkedInDay, setCheckedInDay] = useState<number | null>(null);
@@ -1245,7 +1245,7 @@ export default function App() {
     setShowResetPassword(false);
     setWifiVerified(false);
     setWifiChecking(false);
-    setWifiCheckMessage("請確認連接上 Wi-Fi：Slllc 後重試");
+    setWifiCheckMessage("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
     setCheckinStatus("not_checked_in");
     setCheckedInAt("");
     setCheckedInDay(null);
@@ -1373,15 +1373,15 @@ export default function App() {
 
       if (response.ok && result.connected) {
         setWifiVerified(true);
-        setWifiCheckMessage("Wi-Fi：Slllc 已連結");
+        setWifiCheckMessage("目前您在教會網路，可進行簽到");
       } else {
         setWifiVerified(false);
-        setWifiCheckMessage("請確認連接上 Wi-Fi：Slllc 後重試");
+        setWifiCheckMessage("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
       }
     } catch (err) {
       console.error("檢查 Wi-Fi 連線失敗:", err);
       setWifiVerified(false);
-      setWifiCheckMessage("請確認連接上 Wi-Fi：Slllc 後重試");
+      setWifiCheckMessage("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
     } finally {
       setWifiChecking(false);
     }
@@ -2353,22 +2353,34 @@ export default function App() {
                   </p>
 
                   <div className="grid grid-cols-[1fr_auto] gap-3 items-stretch">
-                    <div className={`min-h-[72px] p-3.5 rounded-[18px] border flex flex-col justify-center ${
+                    <div className={`min-h-[92px] p-3.5 rounded-[18px] border flex flex-col justify-center ${
                       wifiVerified
                         ? "bg-[#EAF8EF] border-[#BFE8CC] text-[#176B3A]"
                         : "bg-white border-[#F25D6B]/25 text-[#F25D6B]"
                     }`}>
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-black">
-                          {wifiVerified ? "Wi-Fi：Slllc 已連結" : "Wi-Fi：Slllc 未連結"}
+                        <div>
+                          <div className="text-sm font-black">
+                            {wifiVerified ? "Wi-Fi：已連結" : "Wi-Fi：未連結"}
+                          </div>
+                          <p className={`text-[11px] font-bold leading-relaxed mt-1.5 ${
+                            wifiVerified ? "text-[#176B3A]" : "text-[#F25D6B]"
+                          }`}>
+                            {wifiVerified
+                              ? "目前您在教會網路，可進行簽到"
+                              : wifiChecking
+                                ? "檢查中..."
+                                : "目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試"}
+                          </p>
                         </div>
+
                         {!wifiVerified && (
                           <button
                             type="button"
                             onClick={handleWifiCheck}
                             disabled={wifiChecking}
                             aria-label="重新檢查 Wi-Fi"
-                            className={`w-8 h-8 rounded-full border font-black text-lg leading-none flex items-center justify-center transition-all ${
+                            className={`w-8 h-8 rounded-full border font-black text-lg leading-none flex items-center justify-center transition-all shrink-0 ${
                               wifiChecking
                                 ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed animate-spin"
                                 : "bg-white text-[#F25D6B] border-[#F25D6B]/25 hover:bg-[#FFF2F4]"
@@ -2378,12 +2390,6 @@ export default function App() {
                           </button>
                         )}
                       </div>
-
-                      {!wifiVerified && (
-                        <p className="text-[11px] font-bold leading-relaxed mt-1.5 text-[#F25D6B]">
-                          {wifiChecking ? "檢查中..." : "請確認連接上 Wi-Fi：Slllc 後重試"}
-                        </p>
-                      )}
                     </div>
 
                     <button
