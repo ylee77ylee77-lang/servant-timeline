@@ -1505,6 +1505,54 @@ export default function App() {
     });
   };
 
+  const serviceTimeWindows = [
+    { service: "六晚崇", day: 6, start: "17:30", end: "21:30", label: "週六 17:30–21:30" },
+    { service: "主一堂", day: 0, start: "07:30", end: "09:59", label: "週日 07:30–09:59" },
+    { service: "主二堂", day: 0, start: "10:00", end: "12:30", label: "週日 10:00–12:30" }
+  ];
+
+  const weekdayLabels = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+
+  const timeTextToMinutes = (timeText: string) => {
+    const [hours = "0", minutes = "0"] = timeText.split(":");
+    return Number(hours) * 60 + Number(minutes);
+  };
+
+  const getQrServiceTimeCheck = (badgeService: string) => {
+    const now = new Date();
+    const nowDay = now.getDay();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const nowLabel = `${weekdayLabels[nowDay]} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+    const activeWindows = serviceTimeWindows.filter((window) => {
+      return window.day === nowDay
+        && nowMinutes >= timeTextToMinutes(window.start)
+        && nowMinutes <= timeTextToMinutes(window.end);
+    });
+
+    const isReasonable = activeWindows.some((window) => window.service === badgeService);
+
+    if (isReasonable) {
+      return {
+        isReasonable: true,
+        nowLabel,
+        reason: `目前時間符合「${badgeService}」報到時段。`,
+        activeServices: activeWindows.map((window) => window.service)
+      };
+    }
+
+    const reason = activeWindows.length > 0
+      ? `目前時間較接近「${activeWindows.map((window) => window.service).join("、")}」報到時段。`
+      : "目前不在任何堂次的主要報到時段內。";
+
+    return {
+      isReasonable: false,
+      nowLabel,
+      reason,
+      activeServices: activeWindows.map((window) => window.service)
+    };
+  };
+
   const parseStationQrCode = (rawCode: string) => {
     const value = rawCode.trim();
     if (!value) return null;
@@ -1665,6 +1713,21 @@ export default function App() {
         onConfirm: applyBadgeStation
       });
       return;
+    }
+
+    if (parsed.service) {
+      const timeCheck = getQrServiceTimeCheck(parsed.service);
+
+      if (!timeCheck.isReasonable) {
+        triggerVibration([80, 80, 80]);
+        setCustomConfirm({
+          isOpen: true,
+          message: `這張名牌屬於「${parsed.service}」，但現在時間與此堂次不一致。\n\n現在時間：${timeCheck.nowLabel}\n系統判斷：${timeCheck.reason}\n\n可能是太早報到，或拿到不同堂次的名牌。若這是總招發給您的名牌，請以名牌堂次為準。`,
+          confirmLabel: "確認名牌堂次",
+          onConfirm: applyBadgeStation
+        });
+        return;
+      }
     }
 
     applyBadgeStation();
@@ -2405,7 +2468,7 @@ export default function App() {
                       <div>
                         <h4 className="text-sm font-black text-[#1F2937] mb-1">掃描 QR 名牌確認堂次與崗位</h4>
                         <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
-                          QR 名牌會帶入正確堂次。若名牌堂次與既有報到紀錄不同，系統會請您確認是否以名牌堂次為準。
+                          QR 名牌會帶入正確堂次。若名牌堂次與現在時間不一致，系統會請您確認是否以名牌堂次為準。
                         </p>
                       </div>
                       <div className="px-3 py-1.5 rounded-full bg-[#FFF2F4] text-[#F25D6B] border border-[#F25D6B]/20 text-[11px] font-black whitespace-nowrap">
