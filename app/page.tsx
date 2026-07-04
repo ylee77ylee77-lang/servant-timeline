@@ -279,6 +279,9 @@ export default function App() {
   const [recognition, setRecognition] = useState<any>(null); // SpeechRecognition 實例
   const announcedNodesRef = useRef<Set<string>>(new Set()); // 紀錄已報時的任務，避免重複提醒
   const voiceAudioContextRef = useRef<any>(null);
+  const voiceBufferCacheRef = useRef<Map<string, any>>(new Map());
+  const voiceQueueRef = useRef<string[]>([]);
+  const voiceProcessingRef = useRef(false);
 
   // --- 【Gemini API 服事智慧生成狀態】 ---
   const [aiSuggestions, setAiSuggestions] = useState<{ [nodeId: string]: any[] }>({}); // AI 推薦 Checklist
@@ -474,6 +477,8 @@ export default function App() {
     return voiceAudioContextRef.current;
   };
 
+  const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
+
   const playSoftDing = async () => {
     const ctx = getVoiceAudioContext();
     if (!ctx) return;
@@ -509,15 +514,156 @@ export default function App() {
     }
   };
 
+  const getVoiceProfile = () => personalSettings.voiceProfile || "young_female";
+
+  const createVoiceCacheId = (text: string, voiceProfile = getVoiceProfile()) => {
+    const input = `${voiceProfile}|${text}`;
+    let hash = 2166136261;
+
+    for (let i = 0; i < input.length; i++) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+
+    return `${voiceProfile}-${(hash >>> 0).toString(16)}-${input.length}`;
+  };
+
+  const fetchVoiceBlob = async (text: string) => {
+    if (typeof window === "undefined") return null;
+
+    const cleanText = String(text || "").trim();
+    if (!cleanText) return null;
+
+    const voiceProfile = getVoiceProfile();
+    const cacheId = createVoiceCacheId(cleanText, voiceProfile);
+    const cacheUrl = `${window.location.origin}/voice-cache/${cacheId}.mp3`;
+
+    if ("caches" in window) {
+      const cache = await caches.open("shekinah_voice_audio_v1");
+      const cached = await cache.match(cacheUrl);
+      if (cached) {
+        return cached.blob();
+      }
+
+      const response = await fetch("/api/voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: cleanText, voiceProfile })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(errorText || "語音產生失敗");
+      }
+
+      const blob = await response.blob();
+      await cache.put(cacheUrl, new Response(blob, {
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "Cache-Control": "public, max-age=31536000, immutable"
+        }
+      }));
+
+      return blob;
+    }
+
+    const response = await fetch("/api/voice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: cleanText, voiceProfile })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(errorText || "語音產生失敗");
+    }
+
+    return response.blob();
+  };
+
+  const loadVoiceBuffer = async (text: string) => {
+    const ctx = getVoiceAudioContext();
+    if (!ctx) return null;
+
+    const cleanText = String(text || "").trim();
+    if (!cleanText) return null;
+
+    const cacheId = createVoiceCacheId(cleanText);
+    const existingBuffer = voiceBufferCacheRef.current.get(cacheId);
+    if (existingBuffer) return existingBuffer;
+
+    const blob = await fetchVoiceBlob(cleanText);
+    if (!blob) return null;
+
+    const arrayBuffer = await blob.arrayBuffer();
+    const decodedBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+    voiceBufferCacheRef.current.set(cacheId, decodedBuffer);
+    return decodedBuffer;
+  };
+
+  const preloadVoiceText = async (text: string) => {
+    try {
+      await loadVoiceBuffer(text);
+    } catch (err) {
+      console.warn("語音助理預載失敗:", err);
+    }
+  };
+
+  const playVoiceBuffer = async (buffer: any) => {
+    const ctx = getVoiceAudioContext();
+    if (!ctx || !buffer) return;
+
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      try {
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.onended = () => resolve();
+        source.start(ctx.currentTime);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  };
+
+  const processVoiceQueue = async () => {
+    if (voiceProcessingRef.current) return;
+    voiceProcessingRef.current = true;
+
+    try {
+      while (voiceQueueRef.current.length > 0) {
+        const nextText = voiceQueueRef.current.shift();
+        if (!nextText) continue;
+
+        try {
+          await playSoftDing();
+          await wait(360);
+          const buffer = await loadVoiceBuffer(nextText);
+          await playVoiceBuffer(buffer);
+          await wait(850);
+        } catch (err) {
+          console.error("語音助理播放失敗:", err);
+          await playSoftDing();
+        }
+      }
+    } finally {
+      voiceProcessingRef.current = false;
+    }
+  };
+
   const speak = (text: string) => {
     const cleanText = String(text || "").trim();
     if (!cleanText) return;
 
-    // 第一階段先停用瀏覽器機械語音，只保留可愛輕柔提示音與自然播報文字。
-    // 後續放入真人短句音檔後，可在這裡依 voiceProfile 接上 /audio/voices/young_female 或 mature_male。
-    void playSoftDing();
-    setVoiceAssistantMessage(`叮。${cleanText}`);
-    console.info("[語音助理]", personalSettings.voiceProfile, `叮。${cleanText}`);
+    // 真正人聲由 /api/voice 產生 MP3，前端以 Cache Storage 與 Web Audio 預載播放。
+    // 介面不顯示播報文字，避免耳機提醒變成多餘視覺干擾。
+    setVoiceAssistantMessage("");
+    voiceQueueRef.current.push(cleanText);
+    void processVoiceQueue();
   };
 
   // --- Gemini API 指令產生器 (內嵌夏凱納招待處專業知識庫) ---
@@ -952,6 +1098,46 @@ export default function App() {
     personalSettings.voiceDetailLevel
   ]);
 
+
+  useEffect(() => {
+    if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled || filteredNodes.length === 0) return;
+
+    const currentMinutes = timeToMinutes(currentTime);
+    const upcomingVoiceTexts = filteredNodes
+      .flatMap((node) => {
+        const settings = getReminderSettings(node);
+        if (!settings.voiceReminderEnabled) return [];
+
+        const nodeMinutes = timeToMinutes(node.time);
+        const items: string[] = [];
+
+        if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled && nodeMinutes - 5 >= currentMinutes) {
+          items.push(buildReminderSpeechText(node, "pre5"));
+        }
+
+        if (settings.reminderNowEnabled && personalSettings.reminderNowEnabled && nodeMinutes >= currentMinutes) {
+          items.push(buildReminderSpeechText(node, "now"));
+        }
+
+        return items;
+      })
+      .filter(Boolean)
+      .slice(0, 10);
+
+    upcomingVoiceTexts.forEach((voiceText) => {
+      void preloadVoiceText(voiceText);
+    });
+  }, [
+    isVoiceEnabled,
+    currentTime,
+    filteredNodes,
+    personalSettings.voiceReminderEnabled,
+    personalSettings.reminderPre5Enabled,
+    personalSettings.reminderNowEnabled,
+    personalSettings.voiceDetailLevel,
+    personalSettings.voiceProfile
+  ]);
+
   const fetchData = async (isBackgroundSync = false) => {
     try {
       if (!isBackgroundSync) setFetchError("");
@@ -1217,17 +1403,59 @@ export default function App() {
     return phrase || "進行服事任務";
   };
 
+  const buildDetailedVoiceHint = (node: any) => {
+    if (personalSettings.voiceDetailLevel !== "detailed") return "";
+
+    const hints: string[] = [];
+
+    if (node.details) {
+      const cleanDetails = String(node.details)
+        .replace(/\s+/g, " ")
+        .replace(/[。.!！]+$/g, "")
+        .trim();
+
+      if (cleanDetails) hints.push(cleanDetails);
+    }
+
+    const checklistItems = (node.checklist || [])
+      .map((item: any) => String(item.text || "").trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+    hints.push(...checklistItems);
+
+    const uniqueHints = Array.from(new Set(hints))
+      .filter(Boolean)
+      .slice(0, 3);
+
+    if (uniqueHints.length === 0) return "";
+
+    return `記得${uniqueHints.join("、")}。`;
+  };
+
   const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now") => {
     const phrase = simplifyTaskPhrase(node);
+    const detailHint = buildDetailedVoiceHint(node);
 
     if (reminderType === "pre5") {
       const taskTime = formatTaskTimeForVoice(node.time);
+
+      if (personalSettings.voiceDetailLevel === "simple") {
+        return taskTime
+          ? `提醒您，五分鐘後，${taskTime}，${phrase}。`
+          : `提醒您，五分鐘後，${phrase}。`;
+      }
+
       return taskTime
-        ? `提醒您，五分鐘後，${taskTime}，要${phrase}。`
-        : `提醒您，五分鐘後，要${phrase}。`;
+        ? `提醒您，五分鐘後，${taskTime}，要${phrase}。${detailHint}`
+        : `提醒您，五分鐘後，要${phrase}。${detailHint}`;
     }
 
-    return `可以${phrase}了。`;
+    if (personalSettings.voiceDetailLevel === "simple") {
+      return `可以${phrase}了。`;
+    }
+
+    return `可以${phrase}了。${detailHint}`;
   };
 
   const getNextReminderInfo = () => {
@@ -1283,13 +1511,8 @@ export default function App() {
       return "語音助理已開啟。";
     }
 
-    const phrase = simplifyTaskPhrase(nextReminder.node);
-    const taskTime = formatTaskTimeForVoice(nextReminder.node.time);
-
     if (nextReminder.reminderType === "pre5") {
-      return taskTime
-        ? `提醒您，${formatMinutesText(nextReminder.minutesUntil)}，${taskTime}，要${phrase}。`
-        : `提醒您，${formatMinutesText(nextReminder.minutesUntil)}，要${phrase}。`;
+      return buildReminderSpeechText(nextReminder.node, "pre5");
     }
 
     return "語音助理已開啟。";
@@ -3115,13 +3338,6 @@ export default function App() {
           </>
         )}
 
-        {voiceAssistantMessage && (
-          <div className="mb-4 p-3 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-[#6D55A3] shadow-md">
-            <Volume2 className="w-4 h-4 text-[#F25D6B] shrink-0" />
-            <span>{voiceAssistantMessage}</span>
-          </div>
-        )}
-
         {(voiceResultText || isThinking) && (
           <div className="mb-4 p-3 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-[#6D55A3] animate-bounce shadow-md">
             {isThinking ? (
@@ -3443,7 +3659,7 @@ export default function App() {
             <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">語音風格</div>
             <div className="text-sm font-black text-[#1F2937]">溫柔女聲</div>
             <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
-              預設使用年輕、清楚、輕柔的女性提醒聲；沉穩男聲可在未來加入。
+              AI 生成語音，會直接播放人聲；沉穩男聲可在未來加入。
             </div>
           </div>
 
@@ -3507,7 +3723,7 @@ export default function App() {
             <div className="mt-3 p-3 rounded-2xl bg-[#FFF9F3] border border-[#E6EAF0] text-[12px] leading-relaxed text-[#7B7B74] font-medium">
               {personalSettings.voiceDetailLevel === "simple" && "極簡：提醒更短，適合服事中快速聽懂。"}
               {personalSettings.voiceDetailLevel === "standard" && "標準：預告含時間，即時提醒更短。"}
-              {personalSettings.voiceDetailLevel === "detailed" && "詳細：保留更多任務提示，適合流程較少時使用。"}
+              {personalSettings.voiceDetailLevel === "detailed" && "詳細：會加上任務提示與前三項確認清單，適合任務不多的崗位。"}
             </div>
           </div>
 
