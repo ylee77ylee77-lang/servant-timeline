@@ -2362,7 +2362,7 @@ export default function App() {
             <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
               <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成報到</h3>
               <div className={`text-xs font-bold leading-relaxed mb-4 ${
-                wifiVerified ? "text-[#176B3A]" : "text-[#F25D6B]"
+                wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"
               }`}>
                 {wifiVerified ? (
                   <>
@@ -2395,7 +2395,7 @@ export default function App() {
               <div className="grid grid-cols-[1fr_auto] gap-3 items-stretch">
                 <div className={`min-h-[64px] p-3.5 rounded-[18px] border flex items-center justify-center ${
                   wifiVerified
-                    ? "bg-[#EAF8EF] border-[#BFE8CC] text-[#176B3A]"
+                    ? "bg-[#00B8B8]/10 border-[#00B8B8]/20 text-[#00B8B8]"
                     : "bg-white border-[#F25D6B]/25 text-[#F25D6B]"
                 }`}>
                   <div className="text-sm font-black">
@@ -2409,7 +2409,7 @@ export default function App() {
                   disabled={!wifiVerified || isCheckedIn}
                   className={`min-w-[108px] px-5 rounded-[18px] text-sm font-black transition-all ${
                     isCheckedIn
-                      ? "bg-[#F3EEFF] text-[#6D55A3] cursor-default"
+                      ? "bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3] cursor-default"
                       : wifiVerified
                         ? "bg-[#F25D6B] text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E]"
                         : "bg-[#E6EAF0] text-[#9CA3AF] cursor-not-allowed"
