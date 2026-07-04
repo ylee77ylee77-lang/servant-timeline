@@ -154,7 +154,7 @@ export default function App() {
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [wifiVerified, setWifiVerified] = useState(false);
   const [wifiChecking, setWifiChecking] = useState(false);
-  const [wifiCheckMessage, setWifiCheckMessage] = useState("系統會自動檢查現場 Wi-Fi 連線；您也可以手動重新檢查。");
+  const [wifiCheckMessage, setWifiCheckMessage] = useState("請確認連接上 Wi-Fi：Slllc 後重試");
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
   const [checkedInDay, setCheckedInDay] = useState<number | null>(null);
@@ -1245,7 +1245,7 @@ export default function App() {
     setShowResetPassword(false);
     setWifiVerified(false);
     setWifiChecking(false);
-    setWifiCheckMessage("系統會自動檢查現場 Wi-Fi 連線；您也可以手動重新檢查。");
+    setWifiCheckMessage("請確認連接上 Wi-Fi：Slllc 後重試");
     setCheckinStatus("not_checked_in");
     setCheckedInAt("");
     setCheckedInDay(null);
@@ -1373,40 +1373,22 @@ export default function App() {
 
       if (response.ok && result.connected) {
         setWifiVerified(true);
-        setWifiCheckMessage("現場 Wi-Fi：已連結，可以進行報到。");
-
-        if (!silent) {
-          setCustomAlert({ isOpen: true, message: "現場 Wi-Fi：已連結，可以進行報到。" });
-        }
+        setWifiCheckMessage("Wi-Fi：Slllc 已連結");
       } else {
         setWifiVerified(false);
-        setWifiCheckMessage("尚未連上教會現場 Wi-Fi。請確認手機已連上教會 Wi-Fi，系統會自動重新檢查。");
-
-        if (!silent) {
-          setCustomAlert({
-            isOpen: true,
-            message: "尚未連上教會現場 Wi-Fi。請確認手機已連上教會 Wi-Fi 後再試一次。"
-          });
-        }
+        setWifiCheckMessage("請確認連接上 Wi-Fi：Slllc 後重試");
       }
     } catch (err) {
       console.error("檢查 Wi-Fi 連線失敗:", err);
       setWifiVerified(false);
-      setWifiCheckMessage("目前無法檢查 Wi-Fi 連線，請確認網路正常後再試一次。");
-
-      if (!silent) {
-        setCustomAlert({
-          isOpen: true,
-          message: "目前無法檢查 Wi-Fi 連線，請確認網路正常後再試一次。"
-        });
-      }
+      setWifiCheckMessage("請確認連接上 Wi-Fi：Slllc 後重試");
     } finally {
       setWifiChecking(false);
     }
   }, []);
 
   const handleWifiCheck = () => {
-    void checkWifiConnection({ silent: false });
+    void checkWifiConnection({ silent: true });
   };
 
   useEffect(() => {
@@ -1449,7 +1431,7 @@ export default function App() {
     }
 
     if (!wifiVerified) {
-      setCustomAlert({ isOpen: true, message: "尚未連結現場 Wi-Fi 連線。系統會自動重新檢查，您也可以按「手動重新檢查」。" });
+      setCustomAlert({ isOpen: true, message: "請確認連接上 Wi-Fi：Slllc 後重試。" });
       return;
     }
 
@@ -2362,75 +2344,61 @@ export default function App() {
 
             </div>
 
-            {!isCheckedIn && (
-              <div className="mb-5 p-5 rounded-[24px] bg-white border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5">
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-[18px] bg-[#F3EEFF] flex items-center justify-center shrink-0">
-                    <MapPin className="w-5 h-5 text-[#6D55A3]" />
-                  </div>
-                  <div>
-                    <h3 className="text-[16px] font-black text-[#1F2937] mb-1">堂次與崗位由 QR 名牌確認</h3>
-                    <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
-                      報到只確認您已到場。總招發放 QR 崗位名牌後，掃描名牌會自動帶入正確堂次與崗位。
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
               {!isCheckedIn ? (
                 <>
-                  <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成今日報到</h3>
+                  <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成報到</h3>
                   <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-4">
-                    連上現場 Wi-Fi 後，請手動點選報到。報到只代表您已到場；堂次與崗位會在掃描 QR 名牌時確認。
+                    搜尋並連接 Wi-Fi：<span className="font-black text-[#1F2937]">Slllc</span> 後，請點選報到。
                   </p>
 
-                  <div className={`mb-4 p-4 rounded-[20px] border ${
-                    wifiVerified
-                      ? "bg-[#00B8B8]/10 border-[#00B8B8]/20"
-                      : "bg-[#FFF2F4] border-[#F25D6B]/20"
-                  }`}>
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div>
-                        <h4 className={`text-sm font-black mb-1 ${wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"}`}>
-                          {wifiVerified ? "現場 Wi-Fi：已連結" : wifiChecking ? "正在檢查現場 Wi-Fi..." : "現場 Wi-Fi：尚未連結"}
-                        </h4>
-                        <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
-                          {wifiVerified ? "已確認來自教會現場網路，可以進行報到。" : wifiCheckMessage}
-                        </p>
+                  <div className="grid grid-cols-[1fr_auto] gap-3 items-stretch">
+                    <div className={`min-h-[72px] p-3.5 rounded-[18px] border flex flex-col justify-center ${
+                      wifiVerified
+                        ? "bg-[#EAF8EF] border-[#BFE8CC] text-[#176B3A]"
+                        : "bg-white border-[#F25D6B]/25 text-[#F25D6B]"
+                    }`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-black">
+                          {wifiVerified ? "Wi-Fi：Slllc 已連結" : "Wi-Fi：Slllc 未連結"}
+                        </div>
+                        {!wifiVerified && (
+                          <button
+                            type="button"
+                            onClick={handleWifiCheck}
+                            disabled={wifiChecking}
+                            aria-label="重新檢查 Wi-Fi"
+                            className={`w-8 h-8 rounded-full border font-black text-lg leading-none flex items-center justify-center transition-all ${
+                              wifiChecking
+                                ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed animate-spin"
+                                : "bg-white text-[#F25D6B] border-[#F25D6B]/25 hover:bg-[#FFF2F4]"
+                            }`}
+                          >
+                            ⟳
+                          </button>
+                        )}
                       </div>
-                      <div className={`w-3 h-3 rounded-full mt-1.5 shrink-0 ${wifiVerified ? "bg-[#00B8B8]" : "bg-[#F25D6B] animate-pulse"}`} />
+
+                      {!wifiVerified && (
+                        <p className="text-[11px] font-bold leading-relaxed mt-1.5 text-[#F25D6B]">
+                          {wifiChecking ? "檢查中..." : "請確認連接上 Wi-Fi：Slllc 後重試"}
+                        </p>
+                      )}
                     </div>
 
-                    {!wifiVerified && (
-                      <button
-                        type="button"
-                        onClick={handleWifiCheck}
-                        disabled={wifiChecking}
-                        className={`w-full py-3 border font-black rounded-[16px] transition-colors ${
-                          wifiChecking
-                            ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed"
-                            : "bg-white text-[#F25D6B] border-[#F25D6B]/20 hover:bg-[#FFF2F4]"
-                        }`}
-                      >
-                        {wifiChecking ? "檢查中..." : "手動重新檢查"}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={handleLocalCheckin}
+                      disabled={!wifiVerified}
+                      className={`min-w-[108px] px-5 rounded-[18px] text-sm font-black transition-all ${
+                        wifiVerified
+                          ? "bg-[#F25D6B] text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E]"
+                          : "bg-[#E6EAF0] text-[#9CA3AF] cursor-not-allowed"
+                      }`}
+                    >
+                      立即報到
+                    </button>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={handleLocalCheckin}
-                    disabled={!wifiVerified}
-                    className={`w-full py-4 font-black rounded-[18px] transition-all ${
-                      wifiVerified
-                        ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 hover:opacity-90"
-                        : "bg-[#E6EAF0] text-[#7B7B74] cursor-not-allowed"
-                    }`}
-                  >
-                    {!wifiVerified ? "請先連上現場 Wi-Fi" : "我已到場，完成報到"}
-                  </button>
                 </>
               ) : stationReady ? (
                 <>
