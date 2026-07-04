@@ -2770,25 +2770,28 @@ export default function App() {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         {isTimelineEditMode && (
-          <div className="sticky top-3 z-50 mb-4 p-4 bg-[#F3EEFF]/95 backdrop-blur border border-[#6D55A3]/20 rounded-[20px] flex items-center justify-between gap-3 shadow-lg shadow-[#6D55A3]/10">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-sm font-black text-[#6D55A3]">
-                <Edit className="w-4 h-4 text-[#F25D6B]" />
-                修正模式
+          <>
+            <div className="fixed top-[calc(env(safe-area-inset-top)+12px)] left-5 right-5 z-[120] mx-auto max-w-md p-4 bg-[#F3EEFF]/95 backdrop-blur border border-[#6D55A3]/20 rounded-[20px] flex items-center justify-between gap-3 shadow-2xl shadow-[#6D55A3]/20">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-black text-[#6D55A3]">
+                  <Edit className="w-4 h-4 text-[#F25D6B]" />
+                  修正模式
+                </div>
+                <p className="text-[11px] font-bold text-[#7B7B74] leading-relaxed mt-1">
+                  所有可修正內容已展開，點選文字即可修改。
+                </p>
               </div>
-              <p className="text-[11px] font-bold text-[#7B7B74] leading-relaxed mt-1">
-                所有可修正內容已展開，點選文字即可修改。
-              </p>
+              <button
+                type="button"
+                onClick={handleToggleTimelineEditMode}
+                className="px-3 py-2 rounded-[14px] bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white text-xs font-black flex items-center gap-1 shadow-md shadow-[#F25D6B]/20 shrink-0"
+              >
+                <Check className="w-3.5 h-3.5" />
+                完成修正
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleToggleTimelineEditMode}
-              className="px-3 py-2 rounded-[14px] bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white text-xs font-black flex items-center gap-1 shadow-md shadow-[#F25D6B]/20 shrink-0"
-            >
-              <Check className="w-3.5 h-3.5" />
-              完成修正
-            </button>
-          </div>
+            <div className="h-[94px] mb-4" />
+          </>
         )}
 
         {(voiceResultText || isThinking) && (
