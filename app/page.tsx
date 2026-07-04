@@ -179,6 +179,7 @@ export default function App() {
   // --- 管理權限相關狀態 ---
   // V1 先用本機身分名稱判斷是否顯示管理頁；正式版會改由後端帳號權限判斷。
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [isTimelineEditMode, setIsTimelineEditMode] = useState(false);
 
   // --- 自訂精美 Modal 提示框狀態 ---
   const [customAlert, setCustomAlert] = useState<{isOpen: boolean, message: string}>({ isOpen: false, message: "" });
@@ -1951,7 +1952,7 @@ export default function App() {
   };
 
   const handleInlineClick = (type: 'node' | 'checklist', id: string, field: string, currentValue: string) => {
-    if (!isAdminUnlocked) return; 
+    if (!isAdminUnlocked || !isTimelineEditMode) return; 
     setActiveInlineEdit({ type, id, field });
     setInlineEditValue(currentValue);
   };
@@ -2125,10 +2126,23 @@ export default function App() {
   });
 
 
+  const handleToggleTimelineEditMode = () => {
+    if (isTimelineEditMode) {
+      setActiveInlineEdit(null);
+      setInlineEditValue("");
+      setIsTimelineEditMode(false);
+      setActiveTab("timeline");
+      return;
+    }
+
+    setIsTimelineEditMode(true);
+    setActiveTab("timeline");
+  };
+
   const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
     const isEditing = activeInlineEdit?.type === type && activeInlineEdit?.id === id && activeInlineEdit?.field === field;
 
-    if (!isAdminUnlocked) {
+    if (!isAdminUnlocked || !isTimelineEditMode) {
       return <span className={styleClass}>{currentValue || "(未填寫)"}</span>;
     }
 
@@ -2747,6 +2761,28 @@ export default function App() {
   const renderTimelineView = () => {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        {isTimelineEditMode && (
+          <div className="mb-4 p-4 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-[20px] flex items-center justify-between gap-3 shadow-md shadow-[#6D55A3]/5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-sm font-black text-[#6D55A3]">
+                <Edit className="w-4 h-4 text-[#F25D6B]" />
+                修正模式
+              </div>
+              <p className="text-[11px] font-bold text-[#7B7B74] leading-relaxed mt-1">
+                所有可修正內容已展開，點選文字即可修改。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleTimelineEditMode}
+              className="px-3 py-2 rounded-[14px] bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white text-xs font-black flex items-center gap-1 shadow-md shadow-[#F25D6B]/20 shrink-0"
+            >
+              <Check className="w-3.5 h-3.5" />
+              完成修正
+            </button>
+          </div>
+        )}
+
         {(voiceResultText || isThinking) && (
           <div className="mb-4 p-3 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-[#6D55A3] animate-bounce shadow-md">
             {isThinking ? (
@@ -2897,28 +2933,28 @@ export default function App() {
                                 <div 
                                   className={`flex items-start gap-1.5 ${item.details ? 'cursor-pointer group' : ''}`}
                                   onClick={() => {
-                                    if (!isAdminUnlocked && item.details) {
+                                    if (!isTimelineEditMode && item.details) {
                                       setDetailModal({ isOpen: true, title: item.text, details: item.details });
                                     }
                                   }}
                                 >
                                   <span className={`text-[14px] font-semibold leading-relaxed transition-all ${
                                     item.is_completed ? 'text-[#7B7B74] line-through opacity-70' : 'text-[#1F2937]'
-                                  } ${(!isAdminUnlocked && item.details) ? 'group-hover:text-[#F25D6B]' : ''}`}>
+                                  } ${(!isTimelineEditMode && item.details) ? 'group-hover:text-[#F25D6B]' : ''}`}>
                                     {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
                                   </span>
                                   
-                                  {!isAdminUnlocked && item.details && (
+                                  {!isTimelineEditMode && item.details && (
                                     <div className={`mt-0.5 shrink-0 transition-colors ${item.is_completed ? 'text-[#E6EAF0]' : 'text-[#00B8B8] group-hover:text-[#F25D6B]'}`}>
                                       <Info className="w-4 h-4" />
                                     </div>
                                   )}
                                 </div>
 
-                                {isAdminUnlocked && (
-                                  <div className="mt-1 text-xs text-slate-500 bg-slate-50 p-1.5 rounded-lg border border-dashed border-slate-200">
+                                {isTimelineEditMode && (
+                                  <div className="mt-1 text-xs text-[#7B7B74] bg-[#F3EEFF]/40 p-2 rounded-lg border border-dashed border-[#6D55A3]/20">
                                     <span className="font-bold text-[10px] text-[#6D55A3] block mb-0.5">備註細節：</span>
-                                    {renderInlineEdit('checklist', item.id, 'details', item.details, "w-full text-xs text-slate-600 block", "textarea")}
+                                    {renderInlineEdit('checklist', item.id, 'details', item.details, "w-full text-xs text-[#7B7B74] block", "textarea")}
                                   </div>
                                 )}
                                 
@@ -3077,17 +3113,6 @@ export default function App() {
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 space-y-6">
           <div>
-            <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">我的名稱</label>
-            <input
-              type="text"
-              value={personalSettings.name}
-              onChange={e => updatePersonalSettings({ name: e.target.value })}
-              placeholder="例如：陳姊妹"
-              className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-            />
-          </div>
-
-          <div>
             <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒方式</label>
             <div className="space-y-2.5">
               {[
@@ -3187,22 +3212,17 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2">
-
             <button
               type="button"
-              onClick={() => setCustomAlert({ isOpen: true, message: "可直接點選任務文字、時間、地點或確認清單進行修正。" })}
-              className="px-3 py-1.5 bg-[#F3EEFF] hover:bg-[#EDE6FF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-bold rounded-xl flex items-center gap-1 transition-all"
+              onClick={handleToggleTimelineEditMode}
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1 transition-all ${
+                isTimelineEditMode
+                  ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-md shadow-[#F25D6B]/20 hover:opacity-90"
+                  : "bg-[#F3EEFF] hover:bg-[#EDE6FF] text-[#6D55A3] border border-[#6D55A3]/20"
+              }`}
             >
-              <Edit className="w-3.5 h-3.5" />
-              修正內容
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('checkin')}
-              className="px-3 py-1.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-md shadow-[#F25D6B]/20 transition-all hover:opacity-90"
-            >
-              <Check className="w-3.5 h-3.5" />
-              完成修正
+              {isTimelineEditMode ? <Check className="w-3.5 h-3.5" /> : <Edit className="w-3.5 h-3.5" />}
+              {isTimelineEditMode ? "完成修正" : "修正內容"}
             </button>
           </div>
         </div>
