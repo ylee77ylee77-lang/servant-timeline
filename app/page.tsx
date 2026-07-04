@@ -1734,7 +1734,7 @@ export default function App() {
       const codeReader = new BrowserQRCodeReader();
       stationQrReaderRef.current = codeReader;
       setStationCameraActive(true);
-      setStationScannerMessage("開啟後請將 QR Code 放入畫面中央。");
+      setStationScannerMessage("正在開啟相機，請允許相機權限。開啟後請將 QR Code 放入畫面中央。");
 
       const controls = await codeReader.decodeFromConstraints(
         {
@@ -2439,7 +2439,9 @@ export default function App() {
               </div>
             ) : isCheckedIn ? (
               <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
-                <h3 className="text-[16px] font-black text-[#1F2937] mb-2">您已於 {checkedInAt || "--:--"} 完成報到</h3>
+                <h3 className="text-[16px] font-black text-[#1F2937] mb-2">
+                  您已於 <span className="text-[#F25D6B]">{checkedInAt || "--:--"}</span> 完成報到
+                </h3>
                 <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
                   目前狀態：等待總招分派崗位
                 </p>
@@ -3612,8 +3614,8 @@ export default function App() {
         <h1 className="text-[24px] leading-tight font-black tracking-tight text-[#1F2937]">
           主日崇拜招待
         </h1>
-        <p className="text-[13px] font-bold text-[#6D55A3] mt-2 flex items-start gap-1.5 opacity-90 leading-snug">
-          <HeartHandshake className="w-4 h-4 shrink-0 mt-0.5" />
+        <p className="text-[12px] sm:text-[13px] font-bold text-[#6D55A3] mt-2 flex items-center gap-1.5 opacity-90 leading-none whitespace-nowrap">
+          <HeartHandshake className="w-4 h-4 shrink-0" />
           <span>今天，我們一起歡迎家人回家</span>
         </p>
       </div>
