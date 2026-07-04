@@ -171,6 +171,7 @@ export default function App() {
   const stationScanStreamRef = useRef<MediaStream | null>(null);
   const stationQrReaderRef = useRef<BrowserQRCodeReader | null>(null);
   const stationQrControlsRef = useRef<any>(null);
+  const stationAutoStartAttemptedRef = useRef(false);
 
   const hasManuallySwitchedRef = useRef(false);
 
@@ -1445,10 +1446,6 @@ export default function App() {
     setConfirmedStation("");
     setCheckinStatus("checked_in");
     triggerVibration([200, 100, 200]);
-    setCustomAlert({
-      isOpen: true,
-      message: "已完成到場報到。請等候總招分派 QR 崗位名牌；掃描名牌後，系統會自動確認堂次與崗位。"
-    });
   };
 
   const handleCorrectCheckedInService = (newService: string) => {
@@ -1648,6 +1645,7 @@ export default function App() {
 
   const handleCloseStationScanner = () => {
     stopStationScanner();
+    stationAutoStartAttemptedRef.current = false;
     setStationScannerOpen(false);
     setStationManualCode("");
     setStationScannerMessage("可掃描崗位名牌上的 QR Code，或手動輸入崗位碼內容。");
@@ -1800,9 +1798,26 @@ export default function App() {
       return;
     }
 
+    stationAutoStartAttemptedRef.current = false;
     setStationScannerOpen(true);
-    setStationScannerMessage("可掃描崗位名牌上的 QR Code，或手動輸入崗位碼內容。");
+    setStationScannerMessage("正在開啟相機，請允許相機權限。");
   };
+
+  useEffect(() => {
+    if (!stationScannerOpen) {
+      stationAutoStartAttemptedRef.current = false;
+      return;
+    }
+
+    if (stationAutoStartAttemptedRef.current) return;
+
+    const autoStartTimer = window.setTimeout(() => {
+      stationAutoStartAttemptedRef.current = true;
+      void handleStartStationCameraScanner();
+    }, 250);
+
+    return () => window.clearTimeout(autoStartTimer);
+  }, [stationScannerOpen]);
 
   const handleDemoStationConfirm = () => {
     const demoStation = assignedStation || (personalSettings.role === "牧招" ? "2C 區塊牧招" : personalSettings.role);
@@ -2319,7 +2334,7 @@ export default function App() {
                 <div>
                   <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
                   <h3 className="text-xl font-black text-[#1F2937]">{displayCheckinName || "服事同工"}</h3>
-                  <p className="text-sm font-bold text-[#6D55A3] mt-1">今日堂次：{todayService}｜{personalSettings.role || "未設定角色"}</p>
+                  <p className="text-sm font-bold text-[#6D55A3] mt-1">今日堂次：{todayService}</p>
                   <p className="text-[11px] font-bold text-[#00B8B8] mt-1">
                     今日堂次：{todayService} {checkedInService ? "已鎖定" : "待確認"}
                   </p>
@@ -2345,132 +2360,109 @@ export default function App() {
             </div>
 
             <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
-              {!isCheckedIn ? (
-                <>
-                  <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成報到</h3>
-                  <div className={`text-xs font-bold leading-relaxed mb-4 ${
-                    wifiVerified ? "text-[#176B3A]" : "text-[#F25D6B]"
-                  }`}>
-                    {wifiVerified ? (
-                      <>
-                        <p>目前您在教會網路</p>
-                        <p>可進行點選簽到</p>
-                      </>
-                    ) : (
-                      <>
-                        <p>目前不在教會網路</p>
-                        <p className="flex items-center gap-1">
-                          <span>請確認連上 Wi-Fi：Slllc 後重試</span>
-                          <button
-                            type="button"
-                            onClick={handleWifiCheck}
-                            disabled={wifiChecking}
-                            aria-label="重新檢查 Wi-Fi"
-                            className={`inline-flex w-6 h-6 items-center justify-center rounded-full border font-black text-base leading-none transition-all ${
-                              wifiChecking
-                                ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed animate-spin"
-                                : "bg-white text-[#F25D6B] border-[#F25D6B]/25 hover:bg-[#FFF2F4]"
-                            }`}
-                          >
-                            ⟳
-                          </button>
-                        </p>
-                      </>
-                    )}
+              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成報到</h3>
+              <div className={`text-xs font-bold leading-relaxed mb-4 ${
+                wifiVerified ? "text-[#176B3A]" : "text-[#F25D6B]"
+              }`}>
+                {wifiVerified ? (
+                  <>
+                    <p>目前您在教會網路</p>
+                    <p>可進行點選簽到</p>
+                  </>
+                ) : (
+                  <>
+                    <p>目前不在教會網路</p>
+                    <p className="flex items-center gap-1">
+                      <span>請確認連上 Wi-Fi：Slllc 後重試</span>
+                      <button
+                        type="button"
+                        onClick={handleWifiCheck}
+                        disabled={wifiChecking}
+                        aria-label="重新檢查 Wi-Fi"
+                        className={`inline-flex w-6 h-6 items-center justify-center rounded-full border font-black text-base leading-none transition-all ${
+                          wifiChecking
+                            ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed animate-spin"
+                            : "bg-white text-[#F25D6B] border-[#F25D6B]/25 hover:bg-[#FFF2F4]"
+                        }`}
+                      >
+                        ⟳
+                      </button>
+                    </p>
+                  </>
+                )}
+              </div>
+
+              <div className="grid grid-cols-[1fr_auto] gap-3 items-stretch">
+                <div className={`min-h-[64px] p-3.5 rounded-[18px] border flex items-center justify-center ${
+                  wifiVerified
+                    ? "bg-[#EAF8EF] border-[#BFE8CC] text-[#176B3A]"
+                    : "bg-white border-[#F25D6B]/25 text-[#F25D6B]"
+                }`}>
+                  <div className="text-sm font-black">
+                    {wifiVerified ? "Wi-Fi：已連結" : "Wi-Fi：未連結"}
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-[1fr_auto] gap-3 items-stretch">
-                    <div className={`min-h-[64px] p-3.5 rounded-[18px] border flex items-center justify-center ${
-                      wifiVerified
-                        ? "bg-[#EAF8EF] border-[#BFE8CC] text-[#176B3A]"
-                        : "bg-white border-[#F25D6B]/25 text-[#F25D6B]"
-                    }`}>
-                      <div className="text-sm font-black">
-                        {wifiVerified ? "Wi-Fi：已連結" : "Wi-Fi：未連結"}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleLocalCheckin}
-                      disabled={!wifiVerified}
-                      className={`min-w-[108px] px-5 rounded-[18px] text-sm font-black transition-all ${
-                        wifiVerified
-                          ? "bg-[#F25D6B] text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E]"
-                          : "bg-[#E6EAF0] text-[#9CA3AF] cursor-not-allowed"
-                      }`}
-                    >
-                      立即報到
-                    </button>
-                  </div>
-                </>
-              ) : stationReady ? (
-                <>
-                  <h3 className="text-[16px] font-black text-[#1F2937] mb-2">崗位確認完成</h3>
-                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-2">
-                    今日崗位：<span className="font-black text-[#6D55A3]">{confirmedStation || personalSettings.role}</span>
-                  </p>
-                  <p className="text-xs font-bold leading-relaxed text-[#7B7B74] mb-5">
-                    今日堂次：<span className="font-black text-[#00B8B8]">{checkedInService || todayService}</span>。崗位已確認後，若需更正堂次，請總招協助處理。
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("timeline")}
-                    className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
-                  >
-                    進入今日流程
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h3 className="text-[16px] font-black text-[#1F2937] mb-2">您已於 {checkedInAt || "--:--"} 報到</h3>
-                  <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-4">
-                    目前狀態：已報到，等待分派崗位。拿到總招發的崗位名牌後，可直接在本頁掃描確認。
-                  </p>
-
-                  {assignedStation && (
-                    <div className="mb-5 p-4 rounded-[20px] bg-[#00B8B8]/10 border border-[#00B8B8]/20">
-                      <div className="text-[11px] font-black text-[#00B8B8] tracking-widest mb-1">總招指定崗位</div>
-                      <div className="text-[16px] font-black text-[#1F2937]">{assignedStation}</div>
-                      <p className="text-xs font-bold text-[#7B7B74] mt-1 leading-relaxed">
-                        請掃描這張崗位名牌上的 QR Code。若掃到不同崗位，系統會提醒可能拿錯名牌。
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="mb-5 p-4 rounded-[20px] bg-white border border-[#6D55A3]/15">
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div>
-                        <h4 className="text-sm font-black text-[#1F2937] mb-1">掃描 QR 名牌確認堂次與崗位</h4>
-                        <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
-                          QR 名牌會帶入正確堂次。若名牌堂次與報到時間不一致，系統會請您確認是否以名牌堂次為準。
-                        </p>
-                      </div>
-                      <div className="px-3 py-1.5 rounded-full bg-[#FFF2F4] text-[#F25D6B] border border-[#F25D6B]/20 text-[11px] font-black whitespace-nowrap">
-                        待名牌確認
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3">
-                    <button
-                      type="button"
-                      onClick={handleOpenStationScanner}
-                      className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
-                    >
-                      掃描崗位名牌
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDemoStationConfirm}
-                      className="w-full py-3.5 bg-white text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#F3EEFF] transition-colors"
-                    >
-                      先用目前角色模擬確認
-                    </button>
-                  </div>
-                </>
-              )}
+                <button
+                  type="button"
+                  onClick={handleLocalCheckin}
+                  disabled={!wifiVerified || isCheckedIn}
+                  className={`min-w-[108px] px-5 rounded-[18px] text-sm font-black transition-all ${
+                    isCheckedIn
+                      ? "bg-[#F3EEFF] text-[#6D55A3] cursor-default"
+                      : wifiVerified
+                        ? "bg-[#F25D6B] text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E]"
+                        : "bg-[#E6EAF0] text-[#9CA3AF] cursor-not-allowed"
+                  }`}
+                >
+                  {isCheckedIn ? "已完成報到" : "立即報到"}
+                </button>
+              </div>
             </div>
+
+            {stationReady ? (
+              <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+                <h3 className="text-[16px] font-black text-[#1F2937] mb-2">崗位確認完成</h3>
+                <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-2">
+                  今日崗位：<span className="font-black text-[#6D55A3]">{confirmedStation || personalSettings.role}</span>
+                </p>
+                <p className="text-xs font-bold leading-relaxed text-[#7B7B74] mb-5">
+                  今日堂次：<span className="font-black text-[#00B8B8]">{checkedInService || todayService}</span>。崗位已確認後，若需更正堂次，請總招協助處理。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("timeline")}
+                  className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+                >
+                  進入今日流程
+                </button>
+              </div>
+            ) : isCheckedIn ? (
+              <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+                <h3 className="text-[16px] font-black text-[#1F2937] mb-2">您已於 {checkedInAt || "--:--"} 完成報到</h3>
+                <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
+                  目前狀態：等待總招分派崗位
+                </p>
+
+                {assignedStation && (
+                  <div className="mb-5 p-4 rounded-[20px] bg-[#00B8B8]/10 border border-[#00B8B8]/20">
+                    <div className="text-[11px] font-black text-[#00B8B8] tracking-widest mb-1">總招指定崗位</div>
+                    <div className="text-[16px] font-black text-[#1F2937]">{assignedStation}</div>
+                    <p className="text-xs font-bold text-[#7B7B74] mt-1 leading-relaxed">
+                      請掃描這張崗位名牌上的 QR Code。若掃到不同崗位，系統會提醒可能拿錯名牌。
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleOpenStationScanner}
+                  className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+                >
+                  掃描崗位名牌 QR code
+                </button>
+              </div>
+            ) : null}
 
           </>
         )}
@@ -2529,18 +2521,6 @@ export default function App() {
             掃描崗位名牌
           </button>
 
-          <button
-            type="button"
-            disabled={!isCheckedIn}
-            onClick={handleDemoStationConfirm}
-            className={`w-full py-3.5 rounded-[18px] border text-sm font-black transition-all ${
-              isCheckedIn
-                ? "bg-white text-[#6D55A3] border-[#6D55A3]/20 hover:bg-[#F3EEFF]"
-                : "bg-white text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed opacity-60"
-            }`}
-          >
-            先用目前角色模擬確認
-          </button>
         </div>
       </div>
     );
@@ -3103,31 +3083,6 @@ export default function App() {
               placeholder="例如：陳姊妹"
               className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
             />
-          </div>
-
-          <div>
-            <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">我的服事角色</label>
-            <select
-              value={personalSettings.role}
-              onChange={e => updatePersonalSettings({ role: e.target.value })}
-              className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-            >
-              {roleOptions.map(role => (
-                <option key={role} value={role}>{role}</option>
-              ))}
-            </select>
-
-            <div className="mt-3 p-3 rounded-2xl bg-[#FFF9F3] border border-[#E6EAF0] text-[12px] leading-relaxed text-[#7B7B74] font-medium">
-              {personalSettings.role === "總招" ? (
-                <span>總招會看到並接收全場任務提醒。</span>
-              ) : personalSettings.role === "副總招" ? (
-                <span>副總招會看到並接收三樓相關任務提醒。</span>
-              ) : personalSettings.role === "聖餐助手" ? (
-                <span>聖餐助手只會在每月第一週聖餐週出現，系統會顯示聖餐相關任務。</span>
-              ) : (
-                <span>系統會自動只顯示並提醒與「{personalSettings.role}」相關的任務。</span>
-              )}
-            </div>
           </div>
 
           <div>
@@ -3849,14 +3804,6 @@ export default function App() {
                 <p className="text-xs font-bold leading-relaxed text-[#7B7B74] whitespace-pre-line">
                   {stationScannerMessage}
                 </p>
-
-                <button
-                  type="button"
-                  onClick={handleStartStationCameraScanner}
-                  className="w-full py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
-                >
-                  開啟 ZXing 掃描
-                </button>
 
                 <div className="pt-4 border-t border-[#E6EAF0]">
                   <label className="block text-[11px] font-black text-[#7B7B74] tracking-widest mb-2">
