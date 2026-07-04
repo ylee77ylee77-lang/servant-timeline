@@ -3612,9 +3612,9 @@ export default function App() {
         <h1 className="text-[24px] leading-tight font-black tracking-tight text-[#1F2937]">
           主日崇拜招待
         </h1>
-        <p className="text-[13px] font-bold text-[#6D55A3] mt-2 flex items-center gap-1.5 opacity-90">
-          <HeartHandshake className="w-4 h-4 shrink-0" />
-          <span className="truncate">今天，我們一起歡迎家人回家</span>
+        <p className="text-[13px] font-bold text-[#6D55A3] mt-2 flex items-start gap-1.5 opacity-90 leading-snug">
+          <HeartHandshake className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>今天，我們一起歡迎家人回家</span>
         </p>
       </div>
     </div>
