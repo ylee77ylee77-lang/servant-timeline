@@ -167,6 +167,7 @@ export default function App() {
   const [assignedStation, setAssignedStation] = useState("");
   const [controlSelectedStation, setControlSelectedStation] = useState("");
   const [controlNote, setControlNote] = useState("");
+  const checkinCompletedCardRef = useRef<HTMLDivElement>(null);
   const stationScanVideoRef = useRef<HTMLVideoElement>(null);
   const stationScanStreamRef = useRef<MediaStream | null>(null);
   const stationQrReaderRef = useRef<BrowserQRCodeReader | null>(null);
@@ -1447,6 +1448,13 @@ export default function App() {
     setConfirmedStation("");
     setCheckinStatus("checked_in");
     triggerVibration([200, 100, 200]);
+
+    window.setTimeout(() => {
+      checkinCompletedCardRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }, 180);
   };
 
   const handleCorrectCheckedInService = (newService: string) => {
@@ -2452,7 +2460,7 @@ export default function App() {
                 </button>
               </div>
             ) : isCheckedIn ? (
-              <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+              <div ref={checkinCompletedCardRef} className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5 scroll-mt-6">
                 <h3 className="text-[16px] font-black text-[#1F2937] mb-2">
                   您已於 <span className="text-[#F25D6B]">{checkedInAt || "--:--"}</span> 完成報到
                 </h3>
@@ -2762,7 +2770,7 @@ export default function App() {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         {isTimelineEditMode && (
-          <div className="mb-4 p-4 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-[20px] flex items-center justify-between gap-3 shadow-md shadow-[#6D55A3]/5">
+          <div className="sticky top-3 z-50 mb-4 p-4 bg-[#F3EEFF]/95 backdrop-blur border border-[#6D55A3]/20 rounded-[20px] flex items-center justify-between gap-3 shadow-lg shadow-[#6D55A3]/10">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-sm font-black text-[#6D55A3]">
                 <Edit className="w-4 h-4 text-[#F25D6B]" />
