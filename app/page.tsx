@@ -25,7 +25,9 @@ import {
   VolumeX,
   Mic,    
   MicOff,
-  Loader2 
+  Loader2,
+  Eye,
+  EyeOff 
 } from 'lucide-react';
 import { BrowserQRCodeReader } from '@zxing/browser';
 
@@ -133,9 +135,50 @@ export default function App() {
   // --- 報到 / 崗位 UI 狀態 ---
   // 這一版先完成報到前端流程；正式密碼雜湊、Wi-Fi 驗證與 Supabase 報到紀錄會接在下一階段。
   const CHECKIN_PROFILE_STORAGE_KEY = "shekinah_checkin_profile_v1";
+  const CHECKIN_REGISTRY_STORAGE_KEY = "shekinah_checkin_registry_v1";
+  const IDENTITY_RESET_CODE = "SHK@";
+
+  const normalizeCheckinName = (value: string) => value.trim().replace(/\s/g, "");
+  const getCheckinProfileKey = (name: string, phoneLast4: string) => `${normalizeCheckinName(name)}|${phoneLast4.trim()}`;
+
+  const buildCheckinPasswordHash = (name: string, phoneLast4: string, password: string) => {
+    const raw = `${normalizeCheckinName(name)}|${phoneLast4.trim()}|${password}`;
+    let hash = 2166136261;
+
+    for (let i = 0; i < raw.length; i += 1) {
+      hash ^= raw.charCodeAt(i);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+
+    return (hash >>> 0).toString(16);
+  };
+
+  const readCheckinRegistry = () => {
+    if (typeof window === "undefined") return {} as Record<string, any>;
+
+    try {
+      const saved = window.localStorage.getItem(CHECKIN_REGISTRY_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch (err) {
+      console.error("讀取報到身分綁定資料失敗:", err);
+      return {};
+    }
+  };
+
+  const writeCheckinRegistry = (registry: Record<string, any>) => {
+    if (typeof window === "undefined") return;
+
+    try {
+      window.localStorage.setItem(CHECKIN_REGISTRY_STORAGE_KEY, JSON.stringify(registry));
+    } catch (err) {
+      console.error("儲存報到身分綁定資料失敗:", err);
+    }
+  };
+
   const [checkinProfile, setCheckinProfile] = useState({
     name: "",
     phoneLast4: "",
+    passwordHash: "",
     deviceRemembered: false
   });
   const [checkinForm, setCheckinForm] = useState({
@@ -151,7 +194,18 @@ export default function App() {
     newPassword: "",
     confirmPassword: ""
   });
+  const [phoneChangeForm, setPhoneChangeForm] = useState({
+    currentPassword: "",
+    newPhoneLast4: "",
+    confirmPhoneLast4: ""
+  });
+  const [showPhoneChange, setShowPhoneChange] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
+  const [visiblePasswordFields, setVisiblePasswordFields] = useState<Record<string, boolean>>({});
+  const isPasswordVisible = (key: string) => visiblePasswordFields[key] === true;
+  const togglePasswordField = (key: string) => {
+    setVisiblePasswordFields(prev => ({ ...prev, [key]: !prev[key] }));
+  };
   const [wifiVerified, setWifiVerified] = useState(false);
   const [wifiChecking, setWifiChecking] = useState(false);
   const [wifiCheckMessage, setWifiCheckMessage] = useState("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
@@ -309,6 +363,7 @@ export default function App() {
       setCheckinProfile({
         name: parsed.name || "",
         phoneLast4: parsed.phoneLast4 || "",
+        passwordHash: parsed.passwordHash || "",
         deviceRemembered: parsed.deviceRemembered === true
       });
 
@@ -1230,6 +1285,7 @@ export default function App() {
     setCheckinProfile({
       name: "",
       phoneLast4: "",
+      passwordHash: "",
       deviceRemembered: false
     });
     setCheckinForm({
@@ -1245,7 +1301,14 @@ export default function App() {
       newPassword: "",
       confirmPassword: ""
     });
+    setPhoneChangeForm({
+      currentPassword: "",
+      newPhoneLast4: "",
+      confirmPhoneLast4: ""
+    });
+    setShowPhoneChange(false);
     setShowResetPassword(false);
+    setVisiblePasswordFields({});
     setWifiVerified(false);
     setWifiChecking(false);
     setWifiCheckMessage("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
@@ -1288,10 +1351,45 @@ export default function App() {
       return;
     }
 
-    // V1 前端先記住身分與可信裝置；正式版密碼需交由後端雜湊儲存，不放 localStorage。
+    const profileKey = getCheckinProfileKey(name, phoneLast4);
+    const passwordHash = buildCheckinPasswordHash(name, phoneLast4, checkinForm.password);
+    const registry = readCheckinRegistry();
+    const existingBinding = registry[profileKey];
+    const normalizedName = normalizeCheckinName(name);
+    const sameNameDifferentPhoneBinding = Object.values(registry).some((item: any) => {
+      return normalizeCheckinName(item?.name || "") === normalizedName
+        && String(item?.phoneLast4 || "") !== phoneLast4;
+    });
+
+    if (sameNameDifferentPhoneBinding) {
+      setCustomAlert({
+        isOpen: true,
+        message: "此姓名已綁定另一組手機後四碼。若已更換門號，或第一次綁定時輸入錯誤，請找總招重設身分。"
+      });
+      return;
+    }
+
+    if (existingBinding?.passwordHash && existingBinding.passwordHash !== passwordHash) {
+      setCustomAlert({
+        isOpen: true,
+        message: "此姓名與手機後四碼已綁定密碼，密碼不正確。請使用原密碼，或請總招協助處理。"
+      });
+      return;
+    }
+
+    registry[profileKey] = {
+      name,
+      phoneLast4,
+      passwordHash,
+      updatedAt: new Date().toISOString()
+    };
+    writeCheckinRegistry(registry);
+
+    // V1 前端先記住身分與可信裝置；正式版密碼需交由後端雜湊儲存。
     setCheckinProfile({
       name,
       phoneLast4,
+      passwordHash,
       deviceRemembered: true
     });
     setPersonalSettings(prev => ({
@@ -1309,15 +1407,57 @@ export default function App() {
 
   const handleResetPassword = () => {
     const name = resetPasswordForm.name.trim();
-    const phoneLast4 = resetPasswordForm.phoneLast4.trim();
+    const phoneLast4Input = resetPasswordForm.phoneLast4.trim();
+    const isHiddenIdentityReset = phoneLast4Input.toUpperCase() === IDENTITY_RESET_CODE;
 
     if (!name) {
       setCustomAlert({ isOpen: true, message: "請輸入姓名。" });
       return;
     }
 
-    if (!isValidPhoneLast4(phoneLast4)) {
+    if (!isHiddenIdentityReset && !isValidPhoneLast4(phoneLast4Input)) {
       setCustomAlert({ isOpen: true, message: "手機後四碼請輸入 4 位數字。" });
+      return;
+    }
+
+    const registry = readCheckinRegistry();
+    const normalizedName = normalizeCheckinName(name);
+    const matchingKeys = Object.keys(registry).filter((key) => {
+      const item = registry[key];
+      return normalizeCheckinName(item?.name || "") === normalizedName;
+    });
+
+    if (isHiddenIdentityReset) {
+      if (matchingKeys.length === 0) {
+        setCustomAlert({
+          isOpen: true,
+          message: "查無此姓名的已綁定資料。請確認姓名是否輸入正確。"
+        });
+        return;
+      }
+
+      matchingKeys.forEach((key) => {
+        delete registry[key];
+      });
+      writeCheckinRegistry(registry);
+
+      if (normalizeCheckinName(checkinProfile.name || "") === normalizedName) {
+        clearCheckinIdentity();
+      } else {
+        setResetPasswordForm({
+          name: "",
+          phoneLast4: "",
+          resetCode: "",
+          newPassword: "",
+          confirmPassword: ""
+        });
+        setShowResetPassword(false);
+      }
+
+      setCustomAlert({
+        isOpen: true,
+        message: "已重設此姓名的身分綁定。請回到第一次使用，重新建立姓名、手機後四碼與密碼。"
+      });
       return;
     }
 
@@ -1331,21 +1471,34 @@ export default function App() {
       return;
     }
 
-    const isSameTrustedDevice = checkinProfile.deviceRemembered
-      && checkinProfile.name === name
-      && checkinProfile.phoneLast4 === phoneLast4;
+    const profileKey = getCheckinProfileKey(name, phoneLast4Input);
+    const existingBinding = registry[profileKey];
+    const hasSameNameBinding = matchingKeys.length > 0;
 
-    if (!isSameTrustedDevice && resetPasswordForm.resetCode.trim().length < 4) {
+    if (!existingBinding?.passwordHash) {
       setCustomAlert({
         isOpen: true,
-        message: "這不是原本可信裝置，請輸入總招或管理員提供的一次性重設碼。"
+        message: hasSameNameBinding
+          ? "手機後四碼不正確，無法重設密碼。"
+          : "查無此姓名的已綁定資料。請先建立服事身分，或請總招協助處理。"
       });
       return;
     }
 
+    const newPasswordHash = buildCheckinPasswordHash(name, phoneLast4Input, resetPasswordForm.newPassword);
+    registry[profileKey] = {
+      ...existingBinding,
+      name,
+      phoneLast4: phoneLast4Input,
+      passwordHash: newPasswordHash,
+      updatedAt: new Date().toISOString()
+    };
+    writeCheckinRegistry(registry);
+
     setCheckinProfile({
       name,
-      phoneLast4,
+      phoneLast4: phoneLast4Input,
+      passwordHash: newPasswordHash,
       deviceRemembered: true
     });
     setPersonalSettings(prev => ({
@@ -1360,7 +1513,86 @@ export default function App() {
       confirmPassword: ""
     });
     setShowResetPassword(false);
-    setCustomAlert({ isOpen: true, message: "已重新設定新密碼。請使用新密碼進入系統。" });
+    setCustomAlert({ isOpen: true, message: "已設定新密碼。請使用新密碼進入系統。" });
+  };
+
+  const handleChangePhoneLast4 = () => {
+    if (!checkinProfile.name || !checkinProfile.phoneLast4) {
+      setCustomAlert({ isOpen: true, message: "請先建立服事身分。" });
+      return;
+    }
+
+    const currentPassword = phoneChangeForm.currentPassword;
+    const newPhoneLast4 = phoneChangeForm.newPhoneLast4.trim();
+    const confirmPhoneLast4 = phoneChangeForm.confirmPhoneLast4.trim();
+
+    if (!currentPassword) {
+      setCustomAlert({ isOpen: true, message: "請輸入目前密碼。" });
+      return;
+    }
+
+    if (!isValidPhoneLast4(newPhoneLast4) || !isValidPhoneLast4(confirmPhoneLast4)) {
+      setCustomAlert({ isOpen: true, message: "新的手機後四碼請輸入 4 位數字。" });
+      return;
+    }
+
+    if (newPhoneLast4 !== confirmPhoneLast4) {
+      setCustomAlert({ isOpen: true, message: "兩次輸入的新手機後四碼不一致。" });
+      return;
+    }
+
+    if (newPhoneLast4 === checkinProfile.phoneLast4) {
+      setCustomAlert({ isOpen: true, message: "新的手機後四碼與目前相同，不需要更換。" });
+      return;
+    }
+
+    const registry = readCheckinRegistry();
+    const oldKey = getCheckinProfileKey(checkinProfile.name, checkinProfile.phoneLast4);
+    const oldBinding = registry[oldKey];
+
+    if (!oldBinding?.passwordHash) {
+      setCustomAlert({ isOpen: true, message: "找不到目前身分綁定資料，請重新建立服事身分。" });
+      return;
+    }
+
+    const currentPasswordHash = buildCheckinPasswordHash(checkinProfile.name, checkinProfile.phoneLast4, currentPassword);
+
+    if (currentPasswordHash !== oldBinding.passwordHash) {
+      setCustomAlert({ isOpen: true, message: "目前密碼不正確，無法更換手機後四碼。" });
+      return;
+    }
+
+    const newKey = getCheckinProfileKey(checkinProfile.name, newPhoneLast4);
+
+    if (registry[newKey]?.passwordHash) {
+      setCustomAlert({ isOpen: true, message: "此姓名與新的手機後四碼已存在綁定，無法覆蓋。" });
+      return;
+    }
+
+    const newPasswordHash = buildCheckinPasswordHash(checkinProfile.name, newPhoneLast4, currentPassword);
+    delete registry[oldKey];
+    registry[newKey] = {
+      ...oldBinding,
+      name: checkinProfile.name,
+      phoneLast4: newPhoneLast4,
+      passwordHash: newPasswordHash,
+      updatedAt: new Date().toISOString()
+    };
+    writeCheckinRegistry(registry);
+
+    setCheckinProfile(prev => ({
+      ...prev,
+      phoneLast4: newPhoneLast4,
+      passwordHash: newPasswordHash,
+      deviceRemembered: true
+    }));
+    setPhoneChangeForm({
+      currentPassword: "",
+      newPhoneLast4: "",
+      confirmPhoneLast4: ""
+    });
+    setShowPhoneChange(false);
+    setCustomAlert({ isOpen: true, message: "手機後四碼已更新完成。" });
   };
 
   const checkWifiConnection = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -2255,24 +2487,44 @@ export default function App() {
 
                 <div>
                   <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">建立密碼</label>
-                  <input
-                    type="password"
-                    value={checkinForm.password}
-                    onChange={e => setCheckinForm(prev => ({ ...prev, password: e.target.value }))}
-                    placeholder="至少 10 個字元"
-                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-                  />
+                  <div className="relative">
+                    <input
+                      type={isPasswordVisible("createPassword") ? "text" : "password"}
+                      value={checkinForm.password}
+                      onChange={e => setCheckinForm(prev => ({ ...prev, password: e.target.value }))}
+                      placeholder="至少 10 個字元"
+                      className="w-full px-4 py-3 pr-12 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => togglePasswordField("createPassword")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full text-[#6D55A3] hover:bg-[#F3EEFF] flex items-center justify-center"
+                      aria-label={isPasswordVisible("createPassword") ? "隱藏密碼" : "顯示密碼"}
+                    >
+                      {isPasswordVisible("createPassword") ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">再次輸入密碼</label>
-                  <input
-                    type="password"
-                    value={checkinForm.confirmPassword}
-                    onChange={e => setCheckinForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                    placeholder="再次確認密碼"
-                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-                  />
+                  <div className="relative">
+                    <input
+                      type={isPasswordVisible("createConfirmPassword") ? "text" : "password"}
+                      value={checkinForm.confirmPassword}
+                      onChange={e => setCheckinForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                      placeholder="再次確認密碼"
+                      className="w-full px-4 py-3 pr-12 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => togglePasswordField("createConfirmPassword")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full text-[#6D55A3] hover:bg-[#F3EEFF] flex items-center justify-center"
+                      aria-label={isPasswordVisible("createConfirmPassword") ? "隱藏密碼" : "顯示密碼"}
+                    >
+                      {isPasswordVisible("createConfirmPassword") ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 <button
@@ -2290,14 +2542,14 @@ export default function App() {
               onClick={() => setShowResetPassword(prev => !prev)}
               className="w-full text-center text-[12px] font-black text-[#6D55A3] hover:text-[#F25D6B] transition-colors"
             >
-              忘記密碼？重新設定新密碼
+              忘記密碼？設定新密碼新密碼
             </button>
 
             {showResetPassword && (
               <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5">
-                <h3 className="text-[16px] font-black text-[#1F2937] mb-2">重新設定新密碼</h3>
+                <h3 className="text-[16px] font-black text-[#1F2937] mb-2">設定新密碼新密碼</h3>
                 <p className="text-xs font-medium leading-relaxed text-[#7B7B74] mb-4">
-                  姓名與手機後四碼用來辨識身分；若不是原本可信裝置，需輸入一次性重設碼。
+                  忘記密碼時，必須輸入正確的手機後四碼；手機後四碼不正確，就不能重設。若已更換門號，或第一次綁定時輸入錯誤，請找總招重設身分。
                 </p>
 
                 <div className="space-y-3.5">
@@ -2309,41 +2561,60 @@ export default function App() {
                     className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
                   />
                   <input
-                    type="tel"
-                    inputMode="numeric"
+                    type="text"
+                    inputMode="text"
                     maxLength={4}
                     value={resetPasswordForm.phoneLast4}
-                    onChange={e => setResetPasswordForm(prev => ({ ...prev, phoneLast4: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                    onChange={e => {
+                      const value = e.target.value;
+                      const nextValue = value.toUpperCase().startsWith("SHK")
+                        ? value.toUpperCase().slice(0, 4)
+                        : value.replace(/\D/g, "").slice(0, 4);
+                      setResetPasswordForm(prev => ({ ...prev, phoneLast4: nextValue }));
+                    }}
                     placeholder="手機後四碼"
                     className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
                   />
-                  <input
-                    type="text"
-                    value={resetPasswordForm.resetCode}
-                    onChange={e => setResetPasswordForm(prev => ({ ...prev, resetCode: e.target.value }))}
-                    placeholder="一次性重設碼，新裝置才需要"
-                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-                  />
-                  <input
-                    type="password"
-                    value={resetPasswordForm.newPassword}
-                    onChange={e => setResetPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
-                    placeholder="新密碼，至少 10 個字元"
-                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-                  />
-                  <input
-                    type="password"
-                    value={resetPasswordForm.confirmPassword}
-                    onChange={e => setResetPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                    placeholder="再次輸入新密碼"
-                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-                  />
+                  <div className="relative">
+                    <input
+                      type={isPasswordVisible("resetNewPassword") ? "text" : "password"}
+                      value={resetPasswordForm.newPassword}
+                      onChange={e => setResetPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                      placeholder="新密碼，至少 10 個字元"
+                      className="w-full px-4 py-3 pr-12 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => togglePasswordField("resetNewPassword")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full text-[#6D55A3] hover:bg-[#F3EEFF] flex items-center justify-center"
+                      aria-label={isPasswordVisible("resetNewPassword") ? "隱藏密碼" : "顯示密碼"}
+                    >
+                      {isPasswordVisible("resetNewPassword") ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={isPasswordVisible("resetConfirmPassword") ? "text" : "password"}
+                      value={resetPasswordForm.confirmPassword}
+                      onChange={e => setResetPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                      placeholder="再次輸入新密碼"
+                      className="w-full px-4 py-3 pr-12 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => togglePasswordField("resetConfirmPassword")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full text-[#6D55A3] hover:bg-[#F3EEFF] flex items-center justify-center"
+                      aria-label={isPasswordVisible("resetConfirmPassword") ? "隱藏密碼" : "顯示密碼"}
+                    >
+                      {isPasswordVisible("resetConfirmPassword") ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onClick={handleResetPassword}
                     className="w-full py-3.5 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#EDE6FF] transition-colors"
                   >
-                    重新設定
+                    設定新密碼
                   </button>
                 </div>
               </div>
@@ -3186,6 +3457,72 @@ export default function App() {
               {personalSettings.voiceDetailLevel === "detailed" && "詳細：會加上任務提示與前三項確認清單，適合任務不多的崗位。"}
             </div>
           </div>
+
+          {hasCheckinProfile && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowPhoneChange(prev => !prev)}
+                className="w-full p-4 rounded-[18px] bg-[#FFF9F3] border border-[#E6EAF0] text-left hover:bg-[#F3EEFF]/50 transition-colors"
+              >
+                <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">報到身分</div>
+                <div className="text-sm font-black text-[#1F2937]">更換手機後四碼</div>
+                <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
+                  目前綁定：{checkinProfile.name}｜後四碼 {checkinProfile.phoneLast4}
+                </div>
+              </button>
+
+              {showPhoneChange && (
+                <div className="mt-3 p-4 rounded-[18px] bg-white border border-[#E6EAF0] space-y-3">
+                  <div className="relative">
+                    <input
+                      type={isPasswordVisible("phoneChangePassword") ? "text" : "password"}
+                      value={phoneChangeForm.currentPassword}
+                      onChange={e => setPhoneChangeForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                      placeholder="目前密碼"
+                      className="w-full px-4 py-3 pr-12 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => togglePasswordField("phoneChangePassword")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full text-[#6D55A3] hover:bg-[#F3EEFF] flex items-center justify-center"
+                      aria-label={isPasswordVisible("phoneChangePassword") ? "隱藏密碼" : "顯示密碼"}
+                    >
+                      {isPasswordVisible("phoneChangePassword") ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={phoneChangeForm.newPhoneLast4}
+                    onChange={e => setPhoneChangeForm(prev => ({ ...prev, newPhoneLast4: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                    placeholder="新的手機後四碼"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={phoneChangeForm.confirmPhoneLast4}
+                    onChange={e => setPhoneChangeForm(prev => ({ ...prev, confirmPhoneLast4: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                    placeholder="再次輸入新的手機後四碼"
+                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={handleChangePhoneLast4}
+                    className="w-full py-3.5 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#EDE6FF] transition-colors"
+                  >
+                    確認更換
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <button
