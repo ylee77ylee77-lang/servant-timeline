@@ -1763,7 +1763,7 @@ export default function App() {
       );
 
       stationQrControlsRef.current = controls;
-      setStationScannerMessage("相機已開啟。請將 QR Code 放入畫面中央，系統會自動辨識。");
+      setStationScannerMessage("相機已開啟，請將 QR Code 放入畫面中央。");
     } catch (error: any) {
       console.error("ZXing 開啟相機失敗", error);
       stopStationScanner();
@@ -3770,13 +3770,7 @@ export default function App() {
         {stationScannerOpen && (
           <div className="fixed inset-0 z-[105] flex items-center justify-center p-5 bg-[#1F2937]/50 backdrop-blur-sm">
             <div className="bg-white rounded-[32px] w-full max-w-sm shadow-2xl border border-[#E6EAF0] overflow-hidden">
-              <div className="p-5 bg-[#FFF9F3] border-b border-[#E6EAF0] flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-black text-[#1F2937] mb-1">掃描 QR 崗位名牌</h3>
-                  <p className="text-xs font-bold text-[#7B7B74] leading-relaxed">
-                    堂次：{checkedInService || currentService || "待確認"}｜掃描後會鎖定今日崗位
-                  </p>
-                </div>
+              <div className="p-4 bg-[#FFF9F3] border-b border-[#E6EAF0] flex justify-end">
                 <button
                   type="button"
                   onClick={handleCloseStationScanner}
