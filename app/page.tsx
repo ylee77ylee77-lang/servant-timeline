@@ -157,6 +157,7 @@ export default function App() {
   const [wifiCheckMessage, setWifiCheckMessage] = useState("系統會自動檢查現場 Wi-Fi 連線；您也可以手動重新檢查。");
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
+  const [checkedInDay, setCheckedInDay] = useState<number | null>(null);
   const [checkedInService, setCheckedInService] = useState("");
   const [confirmedStation, setConfirmedStation] = useState("");
   const [stationScannerOpen, setStationScannerOpen] = useState(false);
@@ -1247,6 +1248,7 @@ export default function App() {
     setWifiCheckMessage("系統會自動檢查現場 Wi-Fi 連線；您也可以手動重新檢查。");
     setCheckinStatus("not_checked_in");
     setCheckedInAt("");
+    setCheckedInDay(null);
     setCheckedInService("");
     setConfirmedStation("");
     setAssignedStation("");
@@ -1456,6 +1458,7 @@ export default function App() {
 
     // 第一階段 PWA：報到只代表「人已到場」；堂次與崗位以 QR 名牌為準。
     setCheckedInAt(timeText);
+    setCheckedInDay(now.getDay());
     setCheckedInService("");
     setConfirmedStation("");
     setCheckinStatus("checked_in");
@@ -1520,14 +1523,14 @@ export default function App() {
 
   const getQrServiceTimeCheck = (badgeService: string) => {
     const now = new Date();
-    const nowDay = now.getDay();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const nowLabel = `${weekdayLabels[nowDay]} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const checkinDay = checkedInDay ?? now.getDay();
+    const checkinMinutes = checkedInAt ? timeTextToMinutes(checkedInAt) : (now.getHours() * 60 + now.getMinutes());
+    const checkinLabel = `${weekdayLabels[checkinDay]} ${checkedInAt || `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`}`;
 
     const activeWindows = serviceTimeWindows.filter((window) => {
-      return window.day === nowDay
-        && nowMinutes >= timeTextToMinutes(window.start)
-        && nowMinutes <= timeTextToMinutes(window.end);
+      return window.day === checkinDay
+        && checkinMinutes >= timeTextToMinutes(window.start)
+        && checkinMinutes <= timeTextToMinutes(window.end);
     });
 
     const isReasonable = activeWindows.some((window) => window.service === badgeService);
@@ -1535,19 +1538,19 @@ export default function App() {
     if (isReasonable) {
       return {
         isReasonable: true,
-        nowLabel,
-        reason: `目前時間符合「${badgeService}」報到時段。`,
+        checkinLabel,
+        reason: `報到時間符合「${badgeService}」報到時段。`,
         activeServices: activeWindows.map((window) => window.service)
       };
     }
 
     const reason = activeWindows.length > 0
-      ? `目前時間較接近「${activeWindows.map((window) => window.service).join("、")}」報到時段。`
-      : "目前不在任何堂次的主要報到時段內。";
+      ? `報到時間較接近「${activeWindows.map((window) => window.service).join("、")}」報到時段。`
+      : "報到時間不在任何堂次的主要報到時段內。";
 
     return {
       isReasonable: false,
-      nowLabel,
+      checkinLabel,
       reason,
       activeServices: activeWindows.map((window) => window.service)
     };
@@ -1722,8 +1725,8 @@ export default function App() {
         triggerVibration([80, 80, 80]);
         setCustomConfirm({
           isOpen: true,
-          message: `這張名牌屬於「${parsed.service}」，但現在時間與此堂次不一致。\n\n現在時間：${timeCheck.nowLabel}\n系統判斷：${timeCheck.reason}\n\n可能是太早報到，或拿到不同堂次的名牌。若這是總招發給您的名牌，請以名牌堂次為準。`,
-          confirmLabel: "確認名牌堂次",
+          message: `報到時間與名牌堂次不一致。\n\n這張名牌顯示：${parsed.service}\n報到時間：${timeCheck.checkinLabel}\n系統判斷：${timeCheck.reason}\n\n請確認服事時段或名牌堂次是否正確。若這是總招發給您的名牌，請以名牌堂次完成確認。`,
+          confirmLabel: `確認名牌堂次：${parsed.service}`,
           onConfirm: applyBadgeStation
         });
         return;
@@ -2468,7 +2471,7 @@ export default function App() {
                       <div>
                         <h4 className="text-sm font-black text-[#1F2937] mb-1">掃描 QR 名牌確認堂次與崗位</h4>
                         <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
-                          QR 名牌會帶入正確堂次。若名牌堂次與現在時間不一致，系統會請您確認是否以名牌堂次為準。
+                          QR 名牌會帶入正確堂次。若名牌堂次與報到時間不一致，系統會請您確認是否以名牌堂次為準。
                         </p>
                       </div>
                       <div className="px-3 py-1.5 rounded-full bg-[#FFF2F4] text-[#F25D6B] border border-[#F25D6B]/20 text-[11px] font-black whitespace-nowrap">
