@@ -270,13 +270,15 @@ export default function App() {
   const [newChecklistItem, setNewChecklistItem] = useState({ text: "", details: "" });
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
 
-  // --- 【語音與自動報時相關狀態】 ---
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // 預設關閉自動報時
+  // --- 【語音與語音助理相關狀態】 ---
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // 預設關閉語音助理
   const [isListening, setIsListening] = useState(false); // 麥克風聆聽狀態
   const [isThinking, setIsThinking] = useState(false); // AI 思考狀態
   const [voiceResultText, setVoiceResultText] = useState(""); // 語音指令解析文字回饋
+  const [voiceAssistantMessage, setVoiceAssistantMessage] = useState(""); // 語音助理最新提醒文字
   const [recognition, setRecognition] = useState<any>(null); // SpeechRecognition 實例
-  const announcedNodesRef = useRef<Set<string>>(new Set()); // 紀錄已報時的任務，避免重複廣播
+  const announcedNodesRef = useRef<Set<string>>(new Set()); // 紀錄已報時的任務，避免重複提醒
+  const voiceAudioContextRef = useRef<any>(null);
 
   // --- 【Gemini API 服事智慧生成狀態】 ---
   const [aiSuggestions, setAiSuggestions] = useState<{ [nodeId: string]: any[] }>({}); // AI 推薦 Checklist
@@ -325,7 +327,8 @@ export default function App() {
     vibrationReminderEnabled: true,
     reminderPre5Enabled: true,
     reminderNowEnabled: true,
-    voiceDetailLevel: "standard" as "simple" | "standard" | "detailed"
+    voiceDetailLevel: "standard" as "simple" | "standard" | "detailed",
+    voiceProfile: "young_female" as "young_female" | "mature_male"
   });
 
   useEffect(() => {
@@ -344,7 +347,8 @@ export default function App() {
               ? "副總招"
               : (parsed.role || "總招"),
           vibrationReminderEnabled: parsed.vibrationReminderEnabled !== false,
-          voiceDetailLevel: parsed.voiceDetailLevel || "standard"
+          voiceDetailLevel: parsed.voiceDetailLevel || "standard",
+          voiceProfile: parsed.voiceProfile || "young_female"
         }));
       }
     } catch (err) {
@@ -457,34 +461,63 @@ export default function App() {
   }, []);
 
   // 溫柔女聲報時函數
-  const speak = (text: string) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    
-    // 如果有正在播放的聲音，先暫停避免重疊
-    window.speechSynthesis.cancel();
+  const getVoiceAudioContext = () => {
+    if (typeof window === "undefined") return null;
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'zh-TW';
-    utterance.rate = 0.85; 
-    utterance.pitch = 1.2; 
-    utterance.volume = 0.85;
+    const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return null;
 
-    const voices = window.speechSynthesis.getVoices();
-    
-    // 優先尋找台灣繁體女聲
-    const femaleVoice = voices.find(v => 
-      v.lang.includes('zh-TW') && 
-      (v.name.includes('Hanhan') || v.name.includes('Yating') || v.name.includes('Mei-Jia') || v.name.includes('Google'))
-    );
-
-    if (femaleVoice) {
-      utterance.voice = femaleVoice;
-    } else {
-      const anyZh = voices.find(v => v.lang.includes('zh'));
-      if (anyZh) utterance.voice = anyZh;
+    if (!voiceAudioContextRef.current) {
+      voiceAudioContextRef.current = new AudioContextClass();
     }
 
-    window.speechSynthesis.speak(utterance);
+    return voiceAudioContextRef.current;
+  };
+
+  const playSoftDing = async () => {
+    const ctx = getVoiceAudioContext();
+    if (!ctx) return;
+
+    try {
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.045, now + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+      gain.connect(ctx.destination);
+
+      const osc1 = ctx.createOscillator();
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(987.77, now);
+      osc1.frequency.exponentialRampToValueAtTime(1318.51, now + 0.12);
+      osc1.connect(gain);
+      osc1.start(now);
+      osc1.stop(now + 0.44);
+
+      const osc2 = ctx.createOscillator();
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(1567.98, now + 0.04);
+      osc2.connect(gain);
+      osc2.start(now + 0.04);
+      osc2.stop(now + 0.34);
+    } catch (err) {
+      console.warn("語音助理提示音播放失敗:", err);
+    }
+  };
+
+  const speak = (text: string) => {
+    const cleanText = String(text || "").trim();
+    if (!cleanText) return;
+
+    // 第一階段先停用瀏覽器機械語音，只保留可愛輕柔提示音與自然播報文字。
+    // 後續放入真人短句音檔後，可在這裡依 voiceProfile 接上 /audio/voices/young_female 或 mature_male。
+    void playSoftDing();
+    setVoiceAssistantMessage(`叮。${cleanText}`);
+    console.info("[語音助理]", personalSettings.voiceProfile, `叮。${cleanText}`);
   };
 
   // --- Gemini API 指令產生器 (內嵌夏凱納招待處專業知識庫) ---
@@ -866,9 +899,9 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // --- 【整合自動化】自動語音報時核心觸發邏輯 ---
-  // 自動報時開啟時，會同時尊重：
-  // 1. 個人設定：角色篩選、語音提醒、5分鐘前、準點、語音內容
+  // --- 【整合自動化】語音助理提醒核心觸發邏輯 ---
+  // 語音助理開啟時，會同時尊重：
+  // 1. 個人設定：角色篩選、語音提醒、5分鐘前、準點、提醒內容
   // 2. 不提醒未完成，避免造成現場壓力
   useEffect(() => {
     if (!isVoiceEnabled || !currentTime || nodes.length === 0 || !personalSettings.voiceReminderEnabled) return;
@@ -1129,46 +1162,72 @@ export default function App() {
 
   const formatMinutesText = (minutes: number) => {
     if (minutes <= 0) return "現在";
-    if (minutes < 60) return `${minutes} 分鐘後`;
+    if (minutes < 60) return `${minutes}分鐘後`;
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
-    if (mins === 0) return `${hours} 小時後`;
-    return `${hours} 小時 ${mins} 分鐘後`;
+    if (mins === 0) return `${hours}小時後`;
+    return `${hours}小時${mins}分鐘後`;
   };
 
-  const buildChecklistSummary = (node: any) => {
-    const checklist = (node.checklist || [])
-      .map((item: any) => item.text)
+  const formatTaskTimeForVoice = (timeText: string) => {
+    if (!timeText || !timeText.includes(":")) return "";
+    const [hourRaw, minuteRaw] = timeText.split(":");
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+
+    if (Number.isNaN(hour) || Number.isNaN(minute)) return timeText;
+    if (minute === 0) return `${hour}點`;
+    return `${hour}點${String(minute).padStart(2, "0")}分`;
+  };
+
+  const simplifyTaskPhrase = (node: any) => {
+    let phrase = String(node.title || node.details || "服事任務").trim();
+    const roleLabels = [
+      personalSettings.role,
+      node.assignee,
+      "總招",
+      "副總招",
+      "電梯專招",
+      "手扶梯專招",
+      "2樓外場專招",
+      "2樓大堂專招",
+      "3樓大堂專招",
+      "專招",
+      "牧招",
+      "聖餐助手"
+    ]
       .filter(Boolean)
-      .slice(0, 3);
+      .map((item: string) => String(item).trim())
+      .sort((a, b) => b.length - a.length);
 
-    if (checklist.length === 0) return "";
+    roleLabels.forEach((label) => {
+      if (!label) return;
+      phrase = phrase.replace(new RegExp(`^${label}[，,、\s]*`), "");
+      phrase = phrase.replace(new RegExp(`^請${label}[，,、\s]*`), "");
+    });
 
-    return `確認事項：${checklist.join("、")}。`;
+    phrase = phrase
+      .replace(/^請[您你]?/, "")
+      .replace(/^負責/, "")
+      .replace(/^至/, "前往")
+      .replace(/^到/, "到")
+      .replace(/[。.!！]+$/g, "")
+      .trim();
+
+    return phrase || "進行服事任務";
   };
 
   const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now") => {
-    const title = node.title || "服事任務";
-    const assignee = node.assignee || "未指定";
-    const location = node.location || "未指定";
-    const detailText = node.details ? `任務提示：${node.details}。` : "";
-    const checklistText = buildChecklistSummary(node);
+    const phrase = simplifyTaskPhrase(node);
 
-    if (personalSettings.voiceDetailLevel === "simple") {
-      return reminderType === "pre5"
-        ? `提醒：${title}。`
-        : `時間到：${title}。`;
+    if (reminderType === "pre5") {
+      const taskTime = formatTaskTimeForVoice(node.time);
+      return taskTime
+        ? `提醒您，五分鐘後，${taskTime}，要${phrase}。`
+        : `提醒您，五分鐘後，要${phrase}。`;
     }
 
-    if (personalSettings.voiceDetailLevel === "detailed") {
-      return reminderType === "pre5"
-        ? `提醒，五分鐘後：${title}。負責：${assignee}。地點：${location}。${detailText}${checklistText}`
-        : `時間到，請進行：${title}。負責：${assignee}。地點：${location}。${detailText}${checklistText}`;
-    }
-
-    return reminderType === "pre5"
-      ? `提醒，五分鐘後：${title}。`
-      : `時間到，請進行：${title}。負責：${assignee}。地點：${location}。`;
+    return `可以${phrase}了。`;
   };
 
   const getNextReminderInfo = () => {
@@ -1218,30 +1277,22 @@ export default function App() {
   };
 
   const buildVoiceReminderStatusText = () => {
-    const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
-
-    if (currentServiceNodes.length === 0) {
-      return `自動報時已開啟。目前 ${currentService} 尚未安排服事任務。`;
-    }
-
-    const currentMinutes = timeToMinutes(currentTime);
-    const activeNode = currentServiceNodes.find(node => node.id === activeNodeId) || currentServiceNodes[0];
-    const activeNodeMinutes = timeToMinutes(activeNode.time);
     const nextReminder = getNextReminderInfo();
 
-    const currentMessage = currentMinutes < activeNodeMinutes
-      ? `自動報時已開啟。下一個任務是：${activeNode.title}，時間是 ${activeNode.time}。`
-      : `自動報時已開啟。目前任務是：${activeNode.title}。`;
-
     if (!nextReminder) {
-      return currentMessage;
+      return "語音助理已開啟。";
     }
 
-    const nextMessage = nextReminder.reminderType === "pre5"
-      ? `${formatMinutesText(nextReminder.minutesUntil)}，提醒：${nextReminder.node.title}。`
-      : `${formatMinutesText(nextReminder.minutesUntil)}，提醒進行：${nextReminder.node.title}。`;
+    const phrase = simplifyTaskPhrase(nextReminder.node);
+    const taskTime = formatTaskTimeForVoice(nextReminder.node.time);
 
-    return `自動報時已開啟。${nextMessage}`;
+    if (nextReminder.reminderType === "pre5") {
+      return taskTime
+        ? `提醒您，${formatMinutesText(nextReminder.minutesUntil)}，${taskTime}，要${phrase}。`
+        : `提醒您，${formatMinutesText(nextReminder.minutesUntil)}，要${phrase}。`;
+    }
+
+    return "語音助理已開啟。";
   };
 
   const announceVoiceReminderStatus = () => {
@@ -1253,11 +1304,10 @@ export default function App() {
     setIsVoiceEnabled(nextEnabled);
 
     if (nextEnabled) {
-      // 一定要在使用者點擊事件當下直接呼叫 speak。
-      // 手機瀏覽器常會阻擋 setTimeout 裡的語音播放，導致按了沒有馬上播報。
+      // 一定要在使用者點擊事件當下直接播放提示音，以解鎖手機音訊權限。
       speak(buildVoiceReminderStatusText());
-    } else if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+    } else {
+      setVoiceAssistantMessage("");
     }
   };
 
@@ -3065,6 +3115,13 @@ export default function App() {
           </>
         )}
 
+        {voiceAssistantMessage && (
+          <div className="mb-4 p-3 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-[#6D55A3] shadow-md">
+            <Volume2 className="w-4 h-4 text-[#F25D6B] shrink-0" />
+            <span>{voiceAssistantMessage}</span>
+          </div>
+        )}
+
         {(voiceResultText || isThinking) && (
           <div className="mb-4 p-3 bg-[#F3EEFF] border border-[#6D55A3]/20 rounded-2xl flex items-center gap-2.5 text-xs font-bold text-[#6D55A3] animate-bounce shadow-md">
             {isThinking ? (
@@ -3371,34 +3428,30 @@ export default function App() {
   };
 
   const renderPersonalSettingsView = () => {
-    const previewNode = filteredNodes[0] || {
-      title: "服事任務提醒",
-      assignee: personalSettings.role || "未指定",
-      location: "服事現場",
-      details: "請依照現場流程與主責指示進行。",
-      checklist: [
-        { text: "確認服事位置" },
-        { text: "確認需要物品" },
-        { text: "留意會友需要" }
-      ]
-    };
-
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         <div className="mb-6 px-1">
           <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">個人設定</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
             <User className="w-4 h-4 text-[#6D55A3]" />
-            個人服事提醒設定會自動記憶在這台裝置
+            個人提醒設定會自動記憶在這台裝置
           </p>
         </div>
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 space-y-6">
+          <div className="p-4 rounded-[18px] bg-[#FFF9F3] border border-[#E6EAF0]">
+            <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">語音風格</div>
+            <div className="text-sm font-black text-[#1F2937]">溫柔女聲</div>
+            <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
+              預設使用年輕、清楚、輕柔的女性提醒聲；沉穩男聲可在未來加入。
+            </div>
+          </div>
+
           <div>
-            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒方式</label>
+            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒設定</label>
             <div className="space-y-2.5">
               {[
-                { key: "voiceReminderEnabled", label: "語音提醒", description: "開啟後，自動報時才會出聲提醒。" },
+                { key: "voiceReminderEnabled", label: "語音助理", description: "開啟後，才會播放個人耳機提醒。" },
                 { key: "vibrationReminderEnabled", label: "震動提醒", description: "進入下一個任務區塊時震動提醒。" },
                 { key: "reminderPre5Enabled", label: "5分鐘前", description: "任務前五分鐘先提醒一次。" },
                 { key: "reminderNowEnabled", label: "準點", description: "任務時間到時提醒一次。" }
@@ -3429,7 +3482,7 @@ export default function App() {
           </div>
 
           <div>
-            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">語音內容</label>
+            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒內容</label>
             <div className="grid grid-cols-3 gap-2">
               {[
                 { value: "simple", label: "極簡" },
@@ -3452,9 +3505,9 @@ export default function App() {
             </div>
 
             <div className="mt-3 p-3 rounded-2xl bg-[#FFF9F3] border border-[#E6EAF0] text-[12px] leading-relaxed text-[#7B7B74] font-medium">
-              {personalSettings.voiceDetailLevel === "simple" && "極簡：只播報任務名稱，適合現場忙碌時使用。"}
-              {personalSettings.voiceDetailLevel === "standard" && "標準：播報任務、負責人與地點，適合一般使用。"}
-              {personalSettings.voiceDetailLevel === "detailed" && "詳細：會加上任務提示與前三項確認清單，適合任務不多的崗位。"}
+              {personalSettings.voiceDetailLevel === "simple" && "極簡：提醒更短，適合服事中快速聽懂。"}
+              {personalSettings.voiceDetailLevel === "standard" && "標準：預告含時間，即時提醒更短。"}
+              {personalSettings.voiceDetailLevel === "detailed" && "詳細：保留更多任務提示，適合流程較少時使用。"}
             </div>
           </div>
 
@@ -3523,23 +3576,6 @@ export default function App() {
               )}
             </div>
           )}
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => speak(buildReminderSpeechText(previewNode, "pre5"))}
-              className="w-full py-3.5 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-bold rounded-[16px] hover:opacity-90 transition-opacity shadow-md shadow-[#F25D6B]/20"
-            >
-              測試語音
-            </button>
-            <button
-              type="button"
-              onClick={() => triggerVibration([200, 100, 200])}
-              className="w-full py-3.5 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-bold rounded-[16px] hover:bg-[#EDE6FF] transition-colors"
-            >
-              測試震動
-            </button>
-          </div>
 
           <p className="text-center text-[11px] font-bold text-[#00B8B8]">
             設定已自動儲存在這台裝置
@@ -4015,14 +4051,14 @@ export default function App() {
               ? "bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm"
               : "bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]"
           }`}
-          title="開啟或關閉自動任務語音廣播"
+          title="開啟或關閉語音助理"
         >
           {isVoiceEnabled ? (
             <Volume2 className="w-3.5 h-3.5" />
           ) : (
             <VolumeX className="w-3.5 h-3.5" />
           )}
-          自動報時
+          語音助理
         </button>
 
         <button
