@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Buffer } from "node:buffer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,27 +50,29 @@ const createWavFromPcm = (
   return Buffer.concat([header, pcmBuffer]);
 };
 
-const findAudioBase64 = (value: any): string | null => {
+const findAudioBase64 = (value: unknown): string | null => {
   if (!value || typeof value !== "object") return null;
 
-  if (typeof value.output_audio?.data === "string") return value.output_audio.data;
-  if (typeof value.outputAudio?.data === "string") return value.outputAudio.data;
+  const record = value as Record<string, any>;
 
-  if (Array.isArray(value.output)) {
-    for (const item of value.output) {
+  if (typeof record.output_audio?.data === "string") return record.output_audio.data;
+  if (typeof record.outputAudio?.data === "string") return record.outputAudio.data;
+
+  if (Array.isArray(record.output)) {
+    for (const item of record.output) {
       const found = findAudioBase64(item);
       if (found) return found;
     }
   }
 
-  if (Array.isArray(value.parts)) {
-    for (const part of value.parts) {
+  if (Array.isArray(record.parts)) {
+    for (const part of record.parts) {
       if (typeof part.inlineData?.data === "string") return part.inlineData.data;
       if (typeof part.inline_data?.data === "string") return part.inline_data.data;
     }
   }
 
-  for (const child of Object.values(value)) {
+  for (const child of Object.values(record)) {
     if (child && typeof child === "object") {
       const found = findAudioBase64(child);
       if (found) return found;
@@ -78,7 +81,6 @@ const findAudioBase64 = (value: any): string | null => {
 
   return null;
 };
-
 
 export async function GET() {
   return NextResponse.json({
@@ -156,7 +158,7 @@ export async function POST(request: NextRequest) {
     const pcmBuffer = base64ToBuffer(audioBase64);
     const wavBuffer = createWavFromPcm(pcmBuffer, 24000, 1, 16);
 
-    return new NextResponse(wavBuffer, {
+    return new NextResponse(new Uint8Array(wavBuffer), {
       status: 200,
       headers: {
         "Content-Type": "audio/wav",
@@ -165,7 +167,8 @@ export async function POST(request: NextRequest) {
         "X-Voice-Engine": "gemini"
       }
     });
-  } catch (error: any) {
-    return new NextResponse(error?.message || "Gemini 語音產生失敗。", { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Gemini 語音產生失敗。";
+    return new NextResponse(message, { status: 500 });
   }
 }
