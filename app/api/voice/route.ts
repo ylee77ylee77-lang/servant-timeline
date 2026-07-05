@@ -79,6 +79,16 @@ const findAudioBase64 = (value: any): string | null => {
   return null;
 };
 
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    route: "/api/voice",
+    message: "Gemini voice API route is deployed.",
+    hasGeminiApiKey: Boolean(process.env.GEMINI_API_KEY)
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
