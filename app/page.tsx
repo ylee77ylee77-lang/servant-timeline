@@ -282,6 +282,12 @@ export default function App() {
   const voiceBufferCacheRef = useRef<Map<string, any>>(new Map());
   const voiceQueueRef = useRef<string[]>([]);
   const voiceProcessingRef = useRef(false);
+  const voiceWakeLockRef = useRef<any>(null);
+  const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+
+  // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的身分、手機後四碼或密碼雜湊。
+  const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v2";
+  const VOICE_AUDIO_CACHE_VERSION = "v2";
 
   // --- 【Gemini API 服事智慧生成狀態】 ---
   const [aiSuggestions, setAiSuggestions] = useState<{ [nodeId: string]: any[] }>({}); // AI 推薦 Checklist
@@ -520,8 +526,69 @@ export default function App() {
 
   const getVoiceProfile = () => personalSettings.voiceProfile || "young_female";
 
+  const requestVoiceWakeLock = useCallback(async () => {
+    if (typeof window === "undefined") return;
+
+    const wakeLockApi = (navigator as any).wakeLock;
+    if (!wakeLockApi?.request) return;
+
+    if (voiceWakeLockRef.current) return;
+
+    try {
+      const sentinel = await wakeLockApi.request("screen");
+      voiceWakeLockRef.current = sentinel;
+      setIsWakeLockActive(true);
+
+      sentinel.addEventListener?.("release", () => {
+        voiceWakeLockRef.current = null;
+        setIsWakeLockActive(false);
+      });
+    } catch (err) {
+      console.warn("語音助理保持螢幕喚醒失敗:", err);
+      setIsWakeLockActive(false);
+    }
+  }, []);
+
+  const releaseVoiceWakeLock = useCallback(async () => {
+    const sentinel = voiceWakeLockRef.current;
+    voiceWakeLockRef.current = null;
+    setIsWakeLockActive(false);
+
+    try {
+      await sentinel?.release?.();
+    } catch (err) {
+      console.warn("語音助理解除螢幕喚醒失敗:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isVoiceEnabled) {
+      void releaseVoiceWakeLock();
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void requestVoiceWakeLock();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void requestVoiceWakeLock();
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isVoiceEnabled, requestVoiceWakeLock, releaseVoiceWakeLock]);
+
+  useEffect(() => {
+    return () => {
+      void releaseVoiceWakeLock();
+    };
+  }, [releaseVoiceWakeLock]);
+
   const createVoiceCacheId = (text: string, voiceProfile = getVoiceProfile()) => {
-    const input = `${voiceProfile}|${text}`;
+    const input = `${VOICE_AUDIO_CACHE_VERSION}|${voiceProfile}|${text}`;
     let hash = 2166136261;
 
     for (let i = 0; i < input.length; i++) {
@@ -543,7 +610,7 @@ export default function App() {
     const cacheUrl = `${window.location.origin}/voice-cache/${cacheId}.wav`;
 
     if ("caches" in window) {
-      const cache = await caches.open("shekinah_voice_audio_v1");
+      const cache = await caches.open(VOICE_AUDIO_CACHE_NAME);
       const cached = await cache.match(cacheUrl);
       if (cached) {
         return cached.blob();
@@ -663,7 +730,7 @@ export default function App() {
     const cleanText = String(text || "").trim();
     if (!cleanText) return;
 
-    // 真正人聲由 /api/voice 產生 WAV，前端以 Cache Storage 與 Web Audio 預載播放。
+    // 真正人聲由 /api/voice 產生 WAV，前端以版本化 Cache Storage 與 Web Audio 預載播放。
     // 介面不顯示播報文字，避免耳機提醒變成多餘視覺干擾。
     setVoiceAssistantMessage("");
     voiceQueueRef.current.push(cleanText);
@@ -1521,9 +1588,11 @@ export default function App() {
 
     if (nextEnabled) {
       // 一定要在使用者點擊事件當下直接播放提示音，以解鎖手機音訊權限。
+      void requestVoiceWakeLock();
       speak(buildVoiceReminderStatusText());
     } else {
       setVoiceAssistantMessage("");
+      void releaseVoiceWakeLock();
     }
   };
 
@@ -3652,7 +3721,14 @@ export default function App() {
             <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">語音風格</div>
             <div className="text-sm font-black text-[#1F2937]">溫柔女聲</div>
             <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
-              Google Gemini 生成語音，會直接播放人聲；沉穩男聲可在未來加入。
+              Google Gemini 生成語音；開啟語音助理時會盡量保持畫面亮起，避免手機進入休眠。
+            </div>
+            <div className={`mt-2 text-[10px] font-black ${isWakeLockActive ? "text-[#00B8B8]" : "text-[#7B7B74]"}`}>
+              {isVoiceEnabled
+                ? isWakeLockActive
+                  ? "螢幕保持喚醒：已啟用"
+                  : "螢幕保持喚醒：此裝置可能不支援"
+                : "語音助理關閉時不會保持螢幕喚醒"}
             </div>
           </div>
 
