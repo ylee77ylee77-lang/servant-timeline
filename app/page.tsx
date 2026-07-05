@@ -277,6 +277,8 @@ export default function App() {
   const [voiceResultText, setVoiceResultText] = useState(""); // 語音指令解析文字回饋
   const [voiceAssistantMessage, setVoiceAssistantMessage] = useState(""); // 語音助理最新提醒文字
   const [recognition, setRecognition] = useState<any>(null); // SpeechRecognition 實例
+  const voiceCommandBufferRef = useRef("");
+  const recognitionShouldSubmitRef = useRef(false);
   const announcedNodesRef = useRef<Set<string>>(new Set()); // 紀錄已報時的任務，避免重複提醒
   const voiceAudioContextRef = useRef<any>(null);
   const voiceBufferCacheRef = useRef<Map<string, any>>(new Map());
@@ -286,8 +288,8 @@ export default function App() {
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
 
   // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的身分、手機後四碼或密碼雜湊。
-  const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v2";
-  const VOICE_AUDIO_CACHE_VERSION = "v2";
+  const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v3";
+  const VOICE_AUDIO_CACHE_VERSION = "v3";
 
   // --- 【Gemini API 服事智慧生成狀態】 ---
   const [aiSuggestions, setAiSuggestions] = useState<{ [nodeId: string]: any[] }>({}); // AI 推薦 Checklist
@@ -524,6 +526,44 @@ export default function App() {
     }
   };
 
+  const speakWithBrowserVoiceFallback = async (text: string) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+    const cleanText = String(text || "").trim();
+    if (!cleanText) return;
+
+    await new Promise<void>((resolve) => {
+      try {
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.lang = "zh-TW";
+        utterance.rate = 0.92;
+        utterance.pitch = personalSettings.voiceProfile === "mature_male" ? 0.82 : 1.08;
+        utterance.volume = 1;
+
+        const voices = window.speechSynthesis.getVoices?.() || [];
+        const zhVoice = voices.find((voice) =>
+          voice.lang?.toLowerCase().startsWith("zh") ||
+          voice.name?.toLowerCase().includes("chinese") ||
+          voice.name?.includes("國語") ||
+          voice.name?.includes("中文")
+        );
+
+        if (zhVoice) utterance.voice = zhVoice;
+
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
+
+        window.speechSynthesis.speak(utterance);
+        window.setTimeout(() => resolve(), Math.max(3500, cleanText.length * 180));
+      } catch (err) {
+        console.warn("瀏覽器語音備援播放失敗:", err);
+        resolve();
+      }
+    });
+  };
+
   const getVoiceProfile = () => personalSettings.voiceProfile || "young_female";
 
   const requestVoiceWakeLock = useCallback(async () => {
@@ -607,7 +647,7 @@ export default function App() {
 
     const voiceProfile = getVoiceProfile();
     const cacheId = createVoiceCacheId(cleanText, voiceProfile);
-    const cacheUrl = `${window.location.origin}/voice-cache/${cacheId}.wav`;
+    const cacheUrl = `${window.location.origin}/voice-cache/${cacheId}.mp3`;
 
     if ("caches" in window) {
       const cache = await caches.open(VOICE_AUDIO_CACHE_NAME);
@@ -623,14 +663,25 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        throw new Error(errorText || "語音產生失敗");
+        const contentType = response.headers.get("Content-Type") || "";
+        let errorPayload: any = null;
+
+        if (contentType.includes("application/json")) {
+          errorPayload = await response.json().catch(() => null);
+        } else {
+          const errorText = await response.text().catch(() => "");
+          errorPayload = { error: errorText || "語音產生失敗" };
+        }
+
+        const error: any = new Error(errorPayload?.error || "語音產生失敗");
+        error.fallbackToBrowser = errorPayload?.fallbackToBrowser === true;
+        throw error;
       }
 
       const blob = await response.blob();
       await cache.put(cacheUrl, new Response(blob, {
         headers: {
-          "Content-Type": "audio/wav",
+          "Content-Type": "audio/mpeg",
           "Cache-Control": "public, max-age=31536000, immutable"
         }
       }));
@@ -645,8 +696,19 @@ export default function App() {
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      throw new Error(errorText || "語音產生失敗");
+      const contentType = response.headers.get("Content-Type") || "";
+      let errorPayload: any = null;
+
+      if (contentType.includes("application/json")) {
+        errorPayload = await response.json().catch(() => null);
+      } else {
+        const errorText = await response.text().catch(() => "");
+        errorPayload = { error: errorText || "語音產生失敗" };
+      }
+
+      const error: any = new Error(errorPayload?.error || "語音產生失敗");
+      error.fallbackToBrowser = errorPayload?.fallbackToBrowser === true;
+      throw error;
     }
 
     return response.blob();
@@ -716,9 +778,14 @@ export default function App() {
           const buffer = await loadVoiceBuffer(nextText);
           await playVoiceBuffer(buffer);
           await wait(850);
-        } catch (err) {
+        } catch (err: any) {
+          // 已經播放過第一次提示音；若雲端 TTS 超過月用量或暫時不可用，退回瀏覽器語音，不再補第二聲。
           console.error("語音助理播放失敗:", err);
-          await playSoftDing();
+
+          if (err?.fallbackToBrowser) {
+            await speakWithBrowserVoiceFallback(nextText);
+            await wait(650);
+          }
         }
       }
     } finally {
@@ -730,7 +797,7 @@ export default function App() {
     const cleanText = String(text || "").trim();
     if (!cleanText) return;
 
-    // 真正人聲由 /api/voice 產生 WAV，前端以版本化 Cache Storage 與 Web Audio 預載播放。
+    // 真正人聲由 /api/voice 產生 MP3，前端以版本化 Cache Storage 與 Web Audio 預載播放。
     // 介面不顯示播報文字，避免耳機提醒變成多餘視覺干擾。
     setVoiceAssistantMessage("");
     voiceQueueRef.current.push(cleanText);
@@ -777,8 +844,9 @@ export default function App() {
 
 【回答規則】：
 1. 請用繁體中文回答。
-2. 回答必須非常簡短、精煉、生活化（1至2句話內，不要冗長），因為回答會被語音朗讀。
-3. 絕對不要使用任何 Markdown 標記（如 **、*、###、- 等），請輸出乾淨的純文字。`;
+2. 只能根據上方即時系統數據與招待處專業知識庫回答；資料中找不到答案時，請說「目前資料裡沒有這項資訊，請確認任務內容」。
+3. 回答必須非常短，最多 60 個中文字，因為回答會被語音朗讀。
+4. 絕對不要使用任何 Markdown 標記（如 **、*、###、- 等），請輸出乾淨的純文字。`;
   };
 
   // --- Gemini API 指令重試呼召 (安全後端防禦與沙盒相容機制) ---
@@ -1017,7 +1085,7 @@ export default function App() {
     setIsThinking(true);
     try {
       const instruction = generateSystemInstruction(currentService, currentTimeRef.current, filteredNodesRef.current);
-      const response = await callGeminiWithRetry(commandText, instruction);
+      const response = await callGeminiWithRetry(commandText, instruction, 1, 400);
       speak(response);
     } catch (err) {
       console.error("Gemini AI 語音理解失敗，改用本地關鍵字比對 fallback", err);
@@ -1028,40 +1096,75 @@ export default function App() {
   };
 
   // --- 語音辨識初始化與控制邏輯 ---
+  // 問助理採「按一下開始錄音，再按一下停止錄音」；停止後才送 AI 分析。
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognitionClass) {
         const rec = new SpeechRecognitionClass();
-        rec.continuous = false;
-        rec.interimResults = false;
+        rec.continuous = true;
+        rec.interimResults = true;
         rec.lang = 'zh-TW';
 
         rec.onstart = () => {
+          voiceCommandBufferRef.current = "";
+          recognitionShouldSubmitRef.current = false;
+          setVoiceResultText("正在聆聽，講完後請再按一次停止錄音。");
           setIsListening(true);
         };
 
         rec.onend = () => {
           setIsListening(false);
+
+          if (!recognitionShouldSubmitRef.current) return;
+
+          const finalText = voiceCommandBufferRef.current.trim();
+          voiceCommandBufferRef.current = "";
+          recognitionShouldSubmitRef.current = false;
+
+          if (!finalText) {
+            setVoiceResultText("");
+            setCustomAlert({ isOpen: true, message: "沒有聽到清楚的內容，請再試一次。" });
+            return;
+          }
+
+          setVoiceResultText(finalText);
+          void handleVoiceCommand(finalText);
+
+          window.setTimeout(() => {
+            setVoiceResultText("");
+          }, 4000);
         };
 
         rec.onerror = (event: any) => {
           console.error("語音辨識出錯", event.error);
+          recognitionShouldSubmitRef.current = false;
           setIsListening(false);
           if (event.error === 'not-allowed') {
             setCustomAlert({ isOpen: true, message: "語音助理需要麥克風使用權限，請於瀏覽器中允許麥克風權限後重試！" });
           }
         };
 
-        rec.onresult = async (event: any) => {
-          const transcript = event.results[0][0].transcript;
-          setVoiceResultText(transcript);
-          setIsListening(false); 
-          await handleVoiceCommand(transcript);
-          
-          setTimeout(() => {
-            setVoiceResultText("");
-          }, 4000);
+        rec.onresult = (event: any) => {
+          let finalText = "";
+          let interimText = "";
+
+          for (let i = event.resultIndex; i < event.results.length; i += 1) {
+            const transcript = event.results[i][0].transcript || "";
+
+            if (event.results[i].isFinal) {
+              finalText += transcript;
+            } else {
+              interimText += transcript;
+            }
+          }
+
+          if (finalText.trim()) {
+            voiceCommandBufferRef.current = `${voiceCommandBufferRef.current} ${finalText}`.trim();
+          }
+
+          const displayText = `${voiceCommandBufferRef.current} ${interimText}`.trim();
+          if (displayText) setVoiceResultText(displayText);
         };
 
         setRecognition(rec);
@@ -1069,19 +1172,37 @@ export default function App() {
     }
   }, []);
 
+  const canUseQuestionAssistant = personalSettings.role === "總招" || isCurrentUserAdmin;
+
   const toggleListening = () => {
+    if (!canUseQuestionAssistant) {
+      setCustomAlert({ isOpen: true, message: "問助理功能目前只開放總招與管理員使用。" });
+      return;
+    }
+
     if (!recognition) {
       setCustomAlert({ isOpen: true, message: "您的裝置或瀏覽器不支援語音助理功能。建議使用 Google Chrome 或 Edge 瀏覽器！" });
       return;
     }
+
+    if (isThinking) return;
+
     if (isListening) {
-      recognition.stop();
-    } else {
+      recognitionShouldSubmitRef.current = true;
       try {
-        recognition.start();
+        recognition.stop();
       } catch (err) {
         console.error(err);
       }
+      return;
+    }
+
+    try {
+      voiceCommandBufferRef.current = "";
+      recognitionShouldSubmitRef.current = false;
+      recognition.start();
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -1169,45 +1290,6 @@ export default function App() {
     personalSettings.voiceDetailLevel
   ]);
 
-
-  useEffect(() => {
-    if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled || filteredNodes.length === 0) return;
-
-    const currentMinutes = timeToMinutes(currentTime);
-    const upcomingVoiceTexts = filteredNodes
-      .flatMap((node) => {
-        const settings = getReminderSettings(node);
-        if (!settings.voiceReminderEnabled) return [];
-
-        const nodeMinutes = timeToMinutes(node.time);
-        const items: string[] = [];
-
-        if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled && nodeMinutes - 5 >= currentMinutes) {
-          items.push(buildReminderSpeechText(node, "pre5"));
-        }
-
-        if (settings.reminderNowEnabled && personalSettings.reminderNowEnabled && nodeMinutes >= currentMinutes) {
-          items.push(buildReminderSpeechText(node, "now"));
-        }
-
-        return items;
-      })
-      .filter(Boolean)
-      .slice(0, 10);
-
-    upcomingVoiceTexts.forEach((voiceText) => {
-      void preloadVoiceText(voiceText);
-    });
-  }, [
-    isVoiceEnabled,
-    currentTime,
-    filteredNodes,
-    personalSettings.voiceReminderEnabled,
-    personalSettings.reminderPre5Enabled,
-    personalSettings.reminderNowEnabled,
-    personalSettings.voiceDetailLevel,
-    personalSettings.voiceProfile
-  ]);
 
   const fetchData = async (isBackgroundSync = false) => {
     try {
@@ -3721,7 +3803,7 @@ export default function App() {
             <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">語音風格</div>
             <div className="text-sm font-black text-[#1F2937]">溫柔女聲</div>
             <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
-              Google Gemini 生成語音；開啟語音助理時會盡量保持畫面亮起，避免手機進入休眠。
+              Google Cloud TTS 生成語音；開啟語音助理時會盡量保持畫面亮起，避免手機進入休眠。
             </div>
             <div className={`mt-2 text-[10px] font-black ${isWakeLockActive ? "text-[#00B8B8]" : "text-[#7B7B74]"}`}>
               {isVoiceEnabled
@@ -4320,7 +4402,7 @@ export default function App() {
   {activeTab !== "checkin" && (
     <>
       {/* 第二層：狀態與語音控制 */}
-      <div className="grid grid-cols-3 gap-2 mt-5">
+      <div className={`grid gap-2 mt-5 ${canUseQuestionAssistant ? "grid-cols-3" : "grid-cols-2"}`}>
         <div className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-full bg-white/80 border border-[#00B8B8]/20 shadow-sm">
           <span className="w-1.5 h-1.5 rounded-full bg-[#00B8B8] animate-pulse"></span>
           <span className="text-[10px] font-black text-[#00B8B8] tracking-wider">
@@ -4346,28 +4428,30 @@ export default function App() {
           語音助理
         </button>
 
-        <button
-          type="button"
-          onClick={toggleListening}
-          disabled={isThinking}
-          className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
-            isListening
-              ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25"
-              : isThinking
-                ? "bg-amber-100 text-amber-700 border-amber-300"
-                : "bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]"
-          }`}
-          title="點擊開始對話問答"
-        >
-          {isListening ? (
-            <Mic className="w-3.5 h-3.5 text-white animate-bounce" />
-          ) : isThinking ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
-          ) : (
-            <MicOff className="w-3.5 h-3.5" />
-          )}
-          {isListening ? "聆聽中" : isThinking ? "思考中" : "問助理"}
-        </button>
+        {canUseQuestionAssistant && (
+          <button
+            type="button"
+            onClick={toggleListening}
+            disabled={isThinking}
+            className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-full border text-[10px] font-black transition-all ${
+              isListening
+                ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent animate-pulse shadow-md shadow-[#F25D6B]/25"
+                : isThinking
+                  ? "bg-amber-100 text-amber-700 border-amber-300"
+                  : "bg-white/80 text-[#6D55A3] border-[#E6EAF0] hover:bg-[#F3EEFF]"
+            }`}
+            title={isListening ? "點擊停止錄音並送出問題" : "點擊開始錄音問答"}
+          >
+            {isListening ? (
+              <Mic className="w-3.5 h-3.5 text-white animate-bounce" />
+            ) : isThinking ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+            ) : (
+              <MicOff className="w-3.5 h-3.5" />
+            )}
+            {isListening ? "停止錄音" : isThinking ? "思考中" : "問助理"}
+          </button>
+        )}
       </div>
 
       {isAdminUnlocked && (
