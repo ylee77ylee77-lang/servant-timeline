@@ -3,29 +3,88 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VOICE_PROFILE_MAP: Record<string, { voice: string; instructions: string; speed: number }> = {
+const GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview";
+
+const VOICE_PROFILE_MAP: Record<string, { voice: string; stylePrompt: string }> = {
   young_female: {
-    voice: "shimmer",
-    speed: 0.96,
-    instructions:
-      "使用自然、年輕、溫柔、清楚的台灣繁體中文女性語氣。像戴耳機時在耳邊輕聲提醒，不要像廣播、不要機械、不要催促。語速稍慢，語尾柔和，情緒親切穩定。"
+    voice: "Leda",
+    stylePrompt:
+      "使用年輕、溫柔、清楚、輕柔的台灣華語女性聲音，像戴耳機時在耳邊提醒。語速稍慢，不要像廣播，不要像客服，不要催促，不要加任何多餘文字。"
   },
   mature_male: {
-    voice: "onyx",
-    speed: 0.95,
-    instructions:
-      "使用成熟、沉穩、清楚的台灣繁體中文男性語氣。像戴耳機時在耳邊穩定提醒，不要像廣播、不要命令、不要機械。語速稍慢，語氣可靠柔和。"
+    voice: "Gacrux",
+    stylePrompt:
+      "使用成熟、沉穩、清楚、溫和的台灣華語男性聲音，像戴耳機時在耳邊穩定提醒。語速稍慢，不要像廣播，不要命令，不要加任何多餘文字。"
   }
 };
 
 const normalizeInput = (value: unknown) => String(value || "").replace(/\s+/g, " ").trim();
 
+const base64ToBuffer = (value: string) => Buffer.from(value, "base64");
+
+const createWavFromPcm = (
+  pcmBuffer: Buffer,
+  sampleRate = 24000,
+  channels = 1,
+  bitsPerSample = 16
+) => {
+  const byteRate = sampleRate * channels * bitsPerSample / 8;
+  const blockAlign = channels * bitsPerSample / 8;
+  const header = Buffer.alloc(44);
+
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcmBuffer.length, 40);
+
+  return Buffer.concat([header, pcmBuffer]);
+};
+
+const findAudioBase64 = (value: any): string | null => {
+  if (!value || typeof value !== "object") return null;
+
+  if (typeof value.output_audio?.data === "string") return value.output_audio.data;
+  if (typeof value.outputAudio?.data === "string") return value.outputAudio.data;
+
+  if (Array.isArray(value.output)) {
+    for (const item of value.output) {
+      const found = findAudioBase64(item);
+      if (found) return found;
+    }
+  }
+
+  if (Array.isArray(value.parts)) {
+    for (const part of value.parts) {
+      if (typeof part.inlineData?.data === "string") return part.inlineData.data;
+      if (typeof part.inline_data?.data === "string") return part.inline_data.data;
+    }
+  }
+
+  for (const child of Object.values(value)) {
+    if (child && typeof child === "object") {
+      const found = findAudioBase64(child);
+      if (found) return found;
+    }
+  }
+
+  return null;
+};
+
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      return new NextResponse("缺少 OPENAI_API_KEY，請先在 Vercel 或 .env.local 設定。", { status: 500 });
+      return new NextResponse("缺少 GEMINI_API_KEY，請先在 Vercel Environment Variables 設定。", { status: 500 });
     }
 
     const body = await request.json().catch(() => ({}));
@@ -41,39 +100,62 @@ export async function POST(request: NextRequest) {
     }
 
     const profile = VOICE_PROFILE_MAP[voiceProfile] || VOICE_PROFILE_MAP.young_female;
+    const input = `${profile.stylePrompt}\n\n請只朗讀以下引號內文字：\n「${text}」`;
 
-    const response = await fetch("https://api.openai.com/v1/audio/speech", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
+        "x-goog-api-key": apiKey,
+        "Content-Type": "application/json",
+        "Api-Revision": "2026-05-20"
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini-tts",
-        voice: profile.voice,
-        input: text,
-        instructions: profile.instructions,
-        response_format: "mp3",
-        speed: profile.speed
+        model: GEMINI_TTS_MODEL,
+        input,
+        response_format: {
+          type: "audio"
+        },
+        generation_config: {
+          speech_config: [
+            {
+              voice: profile.voice
+            }
+          ]
+        }
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      return new NextResponse(errorText || "OpenAI 語音產生失敗。", { status: response.status });
+      return new NextResponse(errorText || "Gemini 語音產生失敗。", { status: response.status });
     }
 
-    const audioBuffer = await response.arrayBuffer();
+    const data = await response.json();
+    const audioBase64 = findAudioBase64(data);
 
-    return new NextResponse(audioBuffer, {
+    if (!audioBase64) {
+      return NextResponse.json(
+        {
+          error: "Gemini 回應中找不到音訊資料。",
+          rawKeys: Object.keys(data || {})
+        },
+        { status: 502 }
+      );
+    }
+
+    const pcmBuffer = base64ToBuffer(audioBase64);
+    const wavBuffer = createWavFromPcm(pcmBuffer, 24000, 1, 16);
+
+    return new NextResponse(wavBuffer, {
       status: 200,
       headers: {
-        "Content-Type": "audio/mpeg",
+        "Content-Type": "audio/wav",
         "Cache-Control": "private, max-age=31536000, immutable",
-        "X-Voice-Profile": voiceProfile
+        "X-Voice-Profile": voiceProfile,
+        "X-Voice-Engine": "gemini"
       }
     });
   } catch (error: any) {
-    return new NextResponse(error?.message || "語音產生失敗。", { status: 500 });
+    return new NextResponse(error?.message || "Gemini 語音產生失敗。", { status: 500 });
   }
 }
