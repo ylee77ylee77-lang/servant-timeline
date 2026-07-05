@@ -456,13 +456,6 @@ export default function App() {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
 
-  // 預先載入瀏覽器語音包
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.getVoices();
-    }
-  }, []);
-
   // 溫柔女聲報時函數
   const getVoiceAudioContext = () => {
     if (typeof window === "undefined") return null;
@@ -536,7 +529,7 @@ export default function App() {
 
     const voiceProfile = getVoiceProfile();
     const cacheId = createVoiceCacheId(cleanText, voiceProfile);
-    const cacheUrl = `${window.location.origin}/voice-cache/${cacheId}.mp3`;
+    const cacheUrl = `${window.location.origin}/voice-cache/${cacheId}.wav`;
 
     if ("caches" in window) {
       const cache = await caches.open("shekinah_voice_audio_v1");
@@ -559,7 +552,7 @@ export default function App() {
       const blob = await response.blob();
       await cache.put(cacheUrl, new Response(blob, {
         headers: {
-          "Content-Type": "audio/mpeg",
+          "Content-Type": "audio/wav",
           "Cache-Control": "public, max-age=31536000, immutable"
         }
       }));
@@ -659,7 +652,7 @@ export default function App() {
     const cleanText = String(text || "").trim();
     if (!cleanText) return;
 
-    // 真正人聲由 /api/voice 產生 MP3，前端以 Cache Storage 與 Web Audio 預載播放。
+    // 真正人聲由 /api/voice 產生 WAV，前端以 Cache Storage 與 Web Audio 預載播放。
     // 介面不顯示播報文字，避免耳機提醒變成多餘視覺干擾。
     setVoiceAssistantMessage("");
     voiceQueueRef.current.push(cleanText);
@@ -3659,7 +3652,7 @@ export default function App() {
             <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">語音風格</div>
             <div className="text-sm font-black text-[#1F2937]">溫柔女聲</div>
             <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
-              AI 生成語音，會直接播放人聲；沉穩男聲可在未來加入。
+              Google Gemini 生成語音，會直接播放人聲；沉穩男聲可在未來加入。
             </div>
           </div>
 
