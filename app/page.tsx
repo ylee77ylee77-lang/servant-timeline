@@ -442,6 +442,17 @@ export default function App() {
   };
 
 
+  const serviceNodes = nodes.filter(n => n.service_type === currentService);
+  const filteredNodes = serviceNodes.filter(isNodeForCurrentPerson);
+  const adminNodes = serviceNodes;
+  const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
+
+  const timeToMinutes = (tStr: string) => {
+    if (!tStr) return 0;
+    const [h, m] = tStr.split(':').map(Number);
+    return h * 60 + m;
+  };
+
   // 為語音問答與時間軸綁定最新的狀態 Ref，防範閉包快照問題
   const filteredNodesRef = useRef<any[]>([]);
   const currentTimeRef = useRef<string>("");
@@ -1166,17 +1177,6 @@ export default function App() {
       setIsLoading(false);
     }
   }, []);
-
-  const serviceNodes = nodes.filter(n => n.service_type === currentService);
-  const filteredNodes = serviceNodes.filter(isNodeForCurrentPerson);
-  const adminNodes = serviceNodes;
-  const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
-
-  const timeToMinutes = (tStr: string) => {
-    if (!tStr) return 0;
-    const [h, m] = tStr.split(':').map(Number);
-    return h * 60 + m;
-  };
 
   const getActiveNodeIdByTime = () => {
     if (filteredNodes.length === 0) return null;
