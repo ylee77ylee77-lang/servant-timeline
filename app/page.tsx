@@ -1172,8 +1172,6 @@ export default function App() {
     }
   }, []);
 
-  const canUseQuestionAssistant = personalSettings.role === "總招" || isCurrentUserAdmin;
-
   const toggleListening = () => {
     if (!canUseQuestionAssistant) {
       setCustomAlert({ isOpen: true, message: "問助理功能目前只開放總招與管理員使用。" });
@@ -1682,6 +1680,7 @@ export default function App() {
   const displayCheckinName = checkinProfile.name || personalSettings.name || "";
   const normalizedCurrentName = displayCheckinName.replace(/\s/g, "");
   const isCurrentUserAdmin = ["徐東立", "東立徐", "東立"].includes(normalizedCurrentName);
+  const canUseQuestionAssistant = personalSettings.role === "總招" || isCurrentUserAdmin;
 
   useEffect(() => {
     setIsAdminUnlocked(isCurrentUserAdmin);
