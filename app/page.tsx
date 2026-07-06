@@ -73,6 +73,40 @@ const calculateRate = (completedCount: number, totalCount: number): number => {
   return Math.round((completedCount * 100) / totalCount);
 };
 
+const DEFAULT_GLOBAL_VOICE_SETTINGS = {
+  voice_gender: "female",
+  speaking_rate: 0.92,
+  pitch: 1.5,
+  volume_gain_db: 0,
+  cache_version: "v1",
+  updated_by: "",
+  updated_at: ""
+};
+
+const DEFAULT_TTS_USAGE = {
+  month: "",
+  primary: { usedChars: 0, limitChars: 4000000, remainingChars: 4000000 },
+  backup: { usedChars: 0, limitChars: 4000000, remainingChars: 4000000 },
+  total: { usedChars: 0, limitChars: 8000000, remainingChars: 8000000, usageRate: 0 }
+};
+
+const formatNumber = (value: any) => Number(value || 0).toLocaleString("zh-TW");
+
+const toFixedVoiceNumber = (value: any, fallback: number) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const cleanTextForTtsBilling = (value: any) => {
+  return String(value || "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[\r\n\t]+/g, "")
+    .replace(/[\s　]+/g, "")
+    .replace(/[，。！？、；：,.!?;:"“”'‘’「」『』（）()【】\[\]《》〈〉…—–_~～·・•]/g, "")
+    .replace(/[✅☑️✔️❌⭕⭐🌟✨🔥💡📌📍👉👈🙏🙌🎉🔔]/g, "")
+    .trim();
+};
+
 export default function App() {
   const [nodes, setNodes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -276,6 +310,12 @@ export default function App() {
   const [isThinking, setIsThinking] = useState(false); // AI 思考狀態
   const [voiceResultText, setVoiceResultText] = useState(""); // 語音指令解析文字回饋
   const [voiceAssistantMessage, setVoiceAssistantMessage] = useState(""); // 語音助理最新提醒文字
+  const [globalVoiceSettings, setGlobalVoiceSettings] = useState<any>(DEFAULT_GLOBAL_VOICE_SETTINGS); // 全站共用語音設定
+  const [voiceSettingsDraft, setVoiceSettingsDraft] = useState<any>(DEFAULT_GLOBAL_VOICE_SETTINGS); // 管理員調音草稿
+  const [ttsUsage, setTtsUsage] = useState<any>(DEFAULT_TTS_USAGE); // Google TTS 本月用量
+  const [isVoiceSettingsLoading, setIsVoiceSettingsLoading] = useState(false);
+  const [isVoiceSettingsSaving, setIsVoiceSettingsSaving] = useState(false);
+  const [isVoicePreviewing, setIsVoicePreviewing] = useState(false);
   const [recognition, setRecognition] = useState<any>(null); // SpeechRecognition 實例
   const voiceCommandBufferRef = useRef("");
   const recognitionShouldSubmitRef = useRef(false);
@@ -288,8 +328,8 @@ export default function App() {
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
 
   // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的身分、手機後四碼或密碼雜湊。
-  const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v3";
-  const VOICE_AUDIO_CACHE_VERSION = "v3";
+  const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v6";
+  const VOICE_AUDIO_CACHE_VERSION = "v6";
 
   // --- 【Gemini API 服事智慧生成狀態】 ---
   const [aiSuggestions, setAiSuggestions] = useState<{ [nodeId: string]: any[] }>({}); // AI 推薦 Checklist
@@ -461,6 +501,33 @@ export default function App() {
     return h * 60 + m;
   };
 
+  const getVoiceCloseMinutesForService = (service: string) => {
+    const map: Record<string, number> = {
+      "六晚崇": 21 * 60 + 45,
+      "主一堂": 10 * 60 + 15,
+      "主二堂": 12 * 60 + 45
+    };
+
+    return map[service] ?? null;
+  };
+
+  const isCurrentServiceVoiceClosed = () => {
+    const closeMinutes = getVoiceCloseMinutesForService(currentService);
+    if (closeMinutes === null) return false;
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    return currentMinutes >= closeMinutes;
+  };
+
+  const stopVoiceAssistantForServiceEnd = () => {
+    setIsVoiceEnabled(false);
+    voiceQueueRef.current = [];
+    voiceProcessingRef.current = false;
+    setVoiceAssistantMessage("本場服事已結束，語音助理已自動關閉。");
+    void releaseVoiceWakeLock();
+  };
+
   // 為語音問答與時間軸綁定最新的狀態 Ref，防範閉包快照問題
   const filteredNodesRef = useRef<any[]>([]);
   const currentTimeRef = useRef<string>("");
@@ -538,8 +605,8 @@ export default function App() {
 
         const utterance = new SpeechSynthesisUtterance(cleanText);
         utterance.lang = "zh-TW";
-        utterance.rate = 0.92;
-        utterance.pitch = personalSettings.voiceProfile === "mature_male" ? 0.82 : 1.08;
+        utterance.rate = toFixedVoiceNumber(globalVoiceSettings.speaking_rate, 0.92);
+        utterance.pitch = globalVoiceSettings.voice_gender === "male" ? 0.92 : 1.08;
         utterance.volume = 1;
 
         const voices = window.speechSynthesis.getVoices?.() || [];
@@ -564,7 +631,7 @@ export default function App() {
     });
   };
 
-  const getVoiceProfile = () => personalSettings.voiceProfile || "young_female";
+  const getVoiceProfile = () => globalVoiceSettings.voice_gender === "male" ? "mature_male" : "young_female";
 
   const requestVoiceWakeLock = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -628,7 +695,16 @@ export default function App() {
   }, [releaseVoiceWakeLock]);
 
   const createVoiceCacheId = (text: string, voiceProfile = getVoiceProfile()) => {
-    const input = `${VOICE_AUDIO_CACHE_VERSION}|${voiceProfile}|${text}`;
+    const cleanedText = cleanTextForTtsBilling(text);
+    const voiceFingerprint = [
+      globalVoiceSettings.cache_version || "v1",
+      globalVoiceSettings.voice_gender || "female",
+      toFixedVoiceNumber(globalVoiceSettings.speaking_rate, 0.92),
+      toFixedVoiceNumber(globalVoiceSettings.pitch, 1.5),
+      toFixedVoiceNumber(globalVoiceSettings.volume_gain_db, 0)
+    ].join("|");
+
+    const input = `${VOICE_AUDIO_CACHE_VERSION}|${voiceProfile}|${voiceFingerprint}|${cleanedText}`;
     let hash = 2166136261;
 
     for (let i = 0; i < input.length; i++) {
@@ -642,7 +718,7 @@ export default function App() {
   const fetchVoiceBlob = async (text: string) => {
     if (typeof window === "undefined") return null;
 
-    const cleanText = String(text || "").trim();
+    const cleanText = cleanTextForTtsBilling(text);
     if (!cleanText) return null;
 
     const voiceProfile = getVoiceProfile();
@@ -659,7 +735,7 @@ export default function App() {
       const response = await fetch("/api/voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: cleanText, voiceProfile })
+        body: JSON.stringify({ text: cleanText, voiceProfile, serviceType: currentService, checkinDay: checkedInDay })
       });
 
       if (!response.ok) {
@@ -675,6 +751,7 @@ export default function App() {
 
         const error: any = new Error(errorPayload?.error || "語音產生失敗");
         error.fallbackToBrowser = errorPayload?.fallbackToBrowser === true;
+        error.reason = errorPayload?.reason || "";
         throw error;
       }
 
@@ -692,7 +769,7 @@ export default function App() {
     const response = await fetch("/api/voice", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: cleanText, voiceProfile })
+      body: JSON.stringify({ text: cleanText, voiceProfile, serviceType: currentService, checkinDay: checkedInDay })
     });
 
     if (!response.ok) {
@@ -718,7 +795,7 @@ export default function App() {
     const ctx = getVoiceAudioContext();
     if (!ctx) return null;
 
-    const cleanText = String(text || "").trim();
+    const cleanText = cleanTextForTtsBilling(text);
     if (!cleanText) return null;
 
     const cacheId = createVoiceCacheId(cleanText);
@@ -782,6 +859,11 @@ export default function App() {
           // 已經播放過第一次提示音；若雲端 TTS 超過月用量或暫時不可用，退回瀏覽器語音，不再補第二聲。
           console.error("語音助理播放失敗:", err);
 
+          if (err?.reason === "service_closed" || err?.reason === "service_date_expired") {
+            stopVoiceAssistantForServiceEnd();
+            continue;
+          }
+
           if (err?.fallbackToBrowser) {
             await speakWithBrowserVoiceFallback(nextText);
             await wait(650);
@@ -795,13 +877,78 @@ export default function App() {
 
   const speak = (text: string) => {
     const cleanText = String(text || "").trim();
-    if (!cleanText) return;
+    const billableCleanText = cleanTextForTtsBilling(cleanText);
+    if (!billableCleanText) return;
 
     // 真正人聲由 /api/voice 產生 MP3，前端以版本化 Cache Storage 與 Web Audio 預載播放。
     // 介面不顯示播報文字，避免耳機提醒變成多餘視覺干擾。
     setVoiceAssistantMessage("");
     voiceQueueRef.current.push(cleanText);
     void processVoiceQueue();
+  };
+
+  const previewVoiceDraft = async () => {
+    if (isVoicePreviewing) return;
+
+    const ctx = getVoiceAudioContext();
+    if (!ctx) {
+      setCustomAlert({ isOpen: true, message: "此裝置暫時無法播放試聽音訊。" });
+      return;
+    }
+
+    const sampleText = "提醒您，五分鐘後，18點，要集合專招。";
+
+    try {
+      setIsVoicePreviewing(true);
+
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
+      const response = await fetch("/api/voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: sampleText,
+          preview: true,
+          voiceProfile: voiceSettingsDraft.voice_gender === "male" ? "mature_male" : "young_female",
+          voiceTuning: {
+            speakingRate: toFixedVoiceNumber(voiceSettingsDraft.speaking_rate, 0.92),
+            pitch: toFixedVoiceNumber(voiceSettingsDraft.pitch, 1.5),
+            volumeGainDb: toFixedVoiceNumber(voiceSettingsDraft.volume_gain_db, 0)
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const contentType = response.headers.get("Content-Type") || "";
+        let errorPayload: any = null;
+
+        if (contentType.includes("application/json")) {
+          errorPayload = await response.json().catch(() => null);
+        } else {
+          const errorText = await response.text().catch(() => "");
+          errorPayload = { error: errorText || "試聽語音產生失敗" };
+        }
+
+        if (errorPayload?.fallbackToBrowser) {
+          await speakWithBrowserVoiceFallback(sampleText);
+          return;
+        }
+
+        throw new Error(errorPayload?.error || "試聽語音產生失敗");
+      }
+
+      const blob = await response.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      const decodedBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+      await playVoiceBuffer(decodedBuffer);
+    } catch (err: any) {
+      console.error("全站語音試聽失敗:", err);
+      setCustomAlert({ isOpen: true, message: err?.message || "試聽語音失敗，請稍後再試。" });
+    } finally {
+      setIsVoicePreviewing(false);
+    }
   };
 
   // --- Gemini API 指令產生器 (內嵌夏凱納招待處專業知識庫) ---
@@ -1664,6 +1811,13 @@ export default function App() {
 
   const handleToggleVoiceReminder = () => {
     const nextEnabled = !isVoiceEnabled;
+
+    if (nextEnabled && isCurrentServiceVoiceClosed()) {
+      setCustomAlert({ isOpen: true, message: "本場服事已結束，語音助理已關閉。" });
+      stopVoiceAssistantForServiceEnd();
+      return;
+    }
+
     setIsVoiceEnabled(nextEnabled);
 
     if (nextEnabled) {
@@ -1675,6 +1829,20 @@ export default function App() {
       void releaseVoiceWakeLock();
     }
   };
+
+  useEffect(() => {
+    if (!isVoiceEnabled) return;
+
+    const checkVoiceClose = () => {
+      if (isCurrentServiceVoiceClosed()) {
+        stopVoiceAssistantForServiceEnd();
+      }
+    };
+
+    checkVoiceClose();
+    const timer = window.setInterval(checkVoiceClose, 60_000);
+    return () => window.clearInterval(timer);
+  }, [isVoiceEnabled, currentService]);
 
   const hasCheckinProfile = Boolean(checkinProfile.name && checkinProfile.phoneLast4);
   const displayCheckinName = checkinProfile.name || personalSettings.name || "";
@@ -1689,6 +1857,84 @@ export default function App() {
       setActiveTab("checkin");
     }
   }, [isCurrentUserAdmin, activeTab]);
+
+  const refreshVoiceSettingsAndUsage = useCallback(async () => {
+    try {
+      setIsVoiceSettingsLoading(true);
+      const response = await fetch("/api/voice-settings", { method: "GET" });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(data?.error || "讀取語音設定失敗");
+      }
+
+      const nextSettings = {
+        ...DEFAULT_GLOBAL_VOICE_SETTINGS,
+        ...(data?.settings || {})
+      };
+
+      const nextUsage = {
+        ...DEFAULT_TTS_USAGE,
+        ...(data?.usage || {})
+      };
+
+      setGlobalVoiceSettings(nextSettings);
+      setVoiceSettingsDraft(nextSettings);
+      setTtsUsage(nextUsage);
+    } catch (err) {
+      console.error("讀取全站語音設定失敗:", err);
+    } finally {
+      setIsVoiceSettingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshVoiceSettingsAndUsage();
+  }, [refreshVoiceSettingsAndUsage]);
+
+  const saveGlobalVoiceSettings = async () => {
+    if (!isCurrentUserAdmin) return;
+
+    try {
+      setIsVoiceSettingsSaving(true);
+
+      const response = await fetch("/api/voice-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminName: displayCheckinName || personalSettings.name || "徐東立",
+          settings: {
+            voice_gender: voiceSettingsDraft.voice_gender === "male" ? "male" : "female",
+            speaking_rate: toFixedVoiceNumber(voiceSettingsDraft.speaking_rate, 0.92),
+            pitch: toFixedVoiceNumber(voiceSettingsDraft.pitch, 1.5),
+            volume_gain_db: toFixedVoiceNumber(voiceSettingsDraft.volume_gain_db, 0)
+          }
+        })
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(data?.error || "儲存語音設定失敗");
+      }
+
+      const nextSettings = {
+        ...DEFAULT_GLOBAL_VOICE_SETTINGS,
+        ...(data?.settings || {})
+      };
+
+      setGlobalVoiceSettings(nextSettings);
+      setVoiceSettingsDraft(nextSettings);
+      voiceBufferCacheRef.current.clear();
+      setCustomAlert({ isOpen: true, message: "全站語音設定已套用。所有同工會使用這一組聲音。" });
+      void refreshVoiceSettingsAndUsage();
+    } catch (err: any) {
+      console.error("儲存全站語音設定失敗:", err);
+      setCustomAlert({ isOpen: true, message: err?.message || "儲存語音設定失敗，請稍後再試。" });
+    } finally {
+      setIsVoiceSettingsSaving(false);
+    }
+  };
 
   const isValidPhoneLast4 = (value: string) => /^\d{4}$/.test(value.trim());
   const isValidPassword = (value: string) => value.trim().length >= 10;
@@ -3800,9 +4046,11 @@ export default function App() {
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 space-y-6">
           <div className="p-4 rounded-[18px] bg-[#FFF9F3] border border-[#E6EAF0]">
             <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">語音風格</div>
-            <div className="text-sm font-black text-[#1F2937]">溫柔女聲</div>
+            <div className="text-sm font-black text-[#1F2937]">
+              全站共用｜{globalVoiceSettings.voice_gender === "male" ? "30歲男聲" : "台灣華語女聲"}
+            </div>
             <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
-              Google Cloud TTS 生成語音；開啟語音助理時會盡量保持畫面亮起，避免手機進入休眠。
+              聲音由管理員統一設定；開啟語音助理時會盡量保持畫面亮起，服事結束後會自動關閉。
             </div>
             <div className={`mt-2 text-[10px] font-black ${isWakeLockActive ? "text-[#00B8B8]" : "text-[#7B7B74]"}`}>
               {isVoiceEnabled
@@ -3976,6 +4224,147 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {isCurrentUserAdmin && (
+          <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-6">
+            <div className="flex items-start justify-between gap-3 mb-5">
+              <div>
+                <h3 className="text-[16px] font-black text-[#1F2937] mb-1 flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-[#F25D6B]" />
+                  全站語音設定
+                </h3>
+                <p className="text-xs font-bold leading-relaxed text-[#7B7B74]">
+                  A方案：維持 Google Cloud Text-to-Speech 台灣華語 WaveNet。已加入文字清理與後端共用快取，只有徐東立可調整，所有同工共用。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshVoiceSettingsAndUsage()}
+                disabled={isVoiceSettingsLoading}
+                className="px-3 py-1.5 rounded-xl bg-[#F3EEFF] text-[#6D55A3] text-[11px] font-black border border-[#6D55A3]/10 disabled:opacity-50"
+              >
+                {isVoiceSettingsLoading ? "讀取中" : "更新用量"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 mb-5">
+              <div className="p-4 rounded-[18px] bg-[#FFF9F3] border border-[#E6EAF0]">
+                <div className="text-[11px] font-black text-[#7B7B74] tracking-widest mb-2">本月 Google TTS 用量</div>
+                <div className="text-2xl font-black text-[#1F2937]">{formatNumber(ttsUsage.total?.remainingChars)} 字元</div>
+                <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
+                  剩餘 / 總上限 {formatNumber(ttsUsage.total?.limitChars)} 字元
+                </div>
+                <div className="mt-3 h-2 rounded-full bg-[#E6EAF0] overflow-hidden">
+                  <div
+                    className="h-full bg-[#6D55A3]"
+                    style={{ width: `${Math.min(100, Math.max(0, Number(ttsUsage.total?.usageRate || 0)))}%` }}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div className="rounded-[14px] bg-white border border-[#E6EAF0] p-3">
+                    <div className="text-[10px] font-black text-[#6D55A3]">主帳號</div>
+                    <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
+                      {formatNumber(ttsUsage.primary?.usedChars)} / {formatNumber(ttsUsage.primary?.limitChars)}
+                    </div>
+                  </div>
+                  <div className="rounded-[14px] bg-white border border-[#E6EAF0] p-3">
+                    <div className="text-[10px] font-black text-[#6D55A3]">備用帳號</div>
+                    <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
+                      {formatNumber(ttsUsage.backup?.usedChars)} / {formatNumber(ttsUsage.backup?.limitChars)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-[18px] bg-[#F3EEFF]/50 border border-[#6D55A3]/10">
+                <div className="text-[11px] font-black text-[#7B7B74] tracking-widest mb-3">聲音調整</div>
+
+                <label className="block text-xs font-black text-[#1F2937] mb-1.5">聲音</label>
+                <select
+                  value={voiceSettingsDraft.voice_gender || "female"}
+                  onChange={e => setVoiceSettingsDraft((prev: any) => ({ ...prev, voice_gender: e.target.value }))}
+                  className="w-full px-3 py-2.5 bg-white border border-[#E6EAF0] rounded-[14px] text-sm font-bold text-[#1F2937] focus:outline-none mb-4"
+                >
+                  <option value="female">女聲｜cmn-TW-Wavenet-A</option>
+                  <option value="male">30歲男聲｜cmn-TW-Wavenet-B</option>
+                </select>
+
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex justify-between text-xs font-black text-[#1F2937] mb-1.5">
+                      <span>語速 speakingRate</span>
+                      <span>{Number(voiceSettingsDraft.speaking_rate || 0.92).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.84"
+                      max="1.02"
+                      step="0.01"
+                      value={voiceSettingsDraft.speaking_rate || 0.92}
+                      onChange={e => setVoiceSettingsDraft((prev: any) => ({ ...prev, speaking_rate: Number(e.target.value) }))}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs font-black text-[#1F2937] mb-1.5">
+                      <span>音高 pitch</span>
+                      <span>{Number(voiceSettingsDraft.pitch || 0).toFixed(1)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={voiceSettingsDraft.voice_gender === "male" ? "-2" : "0"}
+                      max={voiceSettingsDraft.voice_gender === "male" ? "2" : "6"}
+                      step="0.1"
+                      value={voiceSettingsDraft.pitch ?? 1.5}
+                      onChange={e => setVoiceSettingsDraft((prev: any) => ({ ...prev, pitch: Number(e.target.value) }))}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs font-black text-[#1F2937] mb-1.5">
+                      <span>柔和度 volumeGainDb</span>
+                      <span>{Number(voiceSettingsDraft.volume_gain_db || 0).toFixed(1)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-3"
+                      max="1"
+                      step="0.5"
+                      value={voiceSettingsDraft.volume_gain_db ?? 0}
+                      onChange={e => setVoiceSettingsDraft((prev: any) => ({ ...prev, volume_gain_db: Number(e.target.value) }))}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-5">
+                  <button
+                    type="button"
+                    onClick={() => void previewVoiceDraft()}
+                    disabled={isVoicePreviewing || isVoiceSettingsSaving}
+                    className="py-3 rounded-[16px] bg-white border border-[#6D55A3]/20 text-[#6D55A3] text-xs font-black disabled:opacity-50"
+                  >
+                    {isVoicePreviewing ? "試聽中" : "試聽目前草稿"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveGlobalVoiceSettings()}
+                    disabled={isVoiceSettingsSaving || isVoicePreviewing}
+                    className="py-3 rounded-[16px] bg-gradient-to-r from-[#6D55A3] to-[#F25D6B] text-white text-xs font-black disabled:opacity-50"
+                  >
+                    {isVoiceSettingsSaving ? "套用中" : "套用全站聲音"}
+                  </button>
+                </div>
+
+                <div className="text-[10px] font-bold text-[#7B7B74] mt-3">
+                  套用後會更新快取版本，下一次正式提醒會使用新聲音。
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* QR 崗位碼設定 */}
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-6">
