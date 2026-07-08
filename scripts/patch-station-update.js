@@ -92,6 +92,129 @@ applyPatch(
 "rename station tab scan button when confirmed"
 );
 
+applyPatch(
+`    try {
+      const response = await fetch("/api/check-wifi", {
+        method: "GET",
+        cache: "no-store"
+      });
+`,
+`    if (!silent) {
+      setWifiCheckMessage("正在重新檢查 Wi-Fi 連線...");
+    }
+
+    try {
+      const response = await fetch(\`/api/check-wifi?t=\${Date.now()}\`, {
+        method: "GET",
+        cache: "no-store"
+      });
+`,
+"force fresh Wi-Fi recheck"
+);
+
+applyPatch(
+`  const handleWifiCheck = () => {
+    void checkWifiConnection({ silent: true });
+  };
+`,
+`  const handleWifiCheck = () => {
+    void checkWifiConnection({ silent: false });
+  };
+`,
+"make manual Wi-Fi check visible and immediate"
+);
+
+applyPatch(
+`    if (wifiVerified) return;
+
+    void checkWifiConnection({ silent: true });
+`,
+`    void checkWifiConnection({ silent: true });
+`,
+"continue Wi-Fi checks after connected"
+);
+
+applyPatch(
+`  }, [activeTab, hasCheckinProfile, checkinStatus, wifiVerified, checkWifiConnection]);
+`,
+`  }, [activeTab, hasCheckinProfile, checkinStatus, checkWifiConnection]);
+`,
+"remove stale Wi-Fi dependency"
+);
+
+applyPatch(
+`                {wifiVerified ? (
+                  <>
+                    <p>目前您在教會網路</p>
+                    <p>可進行點選簽到</p>
+                  </>
+                ) : (
+                  <>
+                    <p>目前不在教會網路</p>
+                    <p className="flex items-center gap-1">
+                      <span>請確認連上 Wi-Fi：Slllc 後重試</span>
+                      <button
+                        type="button"
+                        onClick={handleWifiCheck}
+                        disabled={wifiChecking}
+                        aria-label="重新檢查 Wi-Fi"
+                        className={\`inline-flex w-6 h-6 items-center justify-center rounded-full border font-black text-base leading-none transition-all \${
+                          wifiChecking
+                            ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed animate-spin"
+                            : "bg-white text-[#F25D6B] border-[#F25D6B]/25 hover:bg-[#FFF2F4]"
+                        }\`}
+                      >
+                        ⟳
+                      </button>
+                    </p>
+                  </>
+                )}
+`,
+`                {wifiVerified ? (
+                  <>
+                    <p>目前您在教會網路</p>
+                    <p className="flex flex-wrap items-center gap-2">
+                      <span>可進行點選簽到</span>
+                      <button
+                        type="button"
+                        onClick={handleWifiCheck}
+                        disabled={wifiChecking}
+                        aria-label="重新檢查 Wi-Fi"
+                        className={\`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black transition-all \${
+                          wifiChecking
+                            ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed"
+                            : "bg-white text-[#00B8B8] border-[#00B8B8]/25 hover:bg-[#00B8B8]/10"
+                        }\`}
+                      >
+                        {wifiChecking ? "檢查中..." : "重新檢查"}
+                      </button>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p>目前不在教會網路</p>
+                    <p className="flex flex-wrap items-center gap-2">
+                      <span>請確認連上 Wi-Fi：Slllc 後重試</span>
+                      <button
+                        type="button"
+                        onClick={handleWifiCheck}
+                        disabled={wifiChecking}
+                        aria-label="重新檢查 Wi-Fi"
+                        className={\`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black transition-all \${
+                          wifiChecking
+                            ? "bg-[#E6EAF0] text-[#7B7B74] border-[#E6EAF0] cursor-not-allowed"
+                            : "bg-white text-[#F25D6B] border-[#F25D6B]/25 hover:bg-[#FFF2F4]"
+                        }\`}
+                      >
+                        {wifiChecking ? "檢查中..." : "重新檢查"}
+                      </button>
+                    </p>
+                  </>
+                )}
+`,
+"replace ugly Wi-Fi refresh icon"
+);
+
 if (changed) {
   fs.writeFileSync(pagePath, source, "utf8");
   console.log("[station-update] app/page.tsx patched for this build.");
