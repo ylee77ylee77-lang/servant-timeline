@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/patch-station-update.js && node scripts/patch-wifi-animation.js && node scripts/patch-status-dashboard.js && node scripts/patch-checklist-sync.js && node scripts/patch-checklist-draft-workflow.js",
+    "prebuild": "node scripts/patch-station-update.js && node scripts/patch-wifi-animation.js && node scripts/patch-status-dashboard.js && node scripts/patch-checklist-sync.js && node scripts/patch-checklist-draft-workflow.js && node scripts/patch-checklist-flow-special-color.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
