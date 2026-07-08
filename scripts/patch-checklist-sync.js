@@ -4,21 +4,38 @@ const path = require("path");
 const pagePath = path.join(process.cwd(), "app", "page.tsx");
 let source = fs.readFileSync(pagePath, "utf8");
 let changed = false;
+const bt = String.fromCharCode(96);
 
 const applyReplace = (label, from, to) => {
   if (source.includes(to)) {
-    console.log(`[checklist-sync] ${label} already patched.`);
+    console.log("[checklist-sync] " + label + " already patched.");
     return;
   }
 
   if (!source.includes(from)) {
-    console.warn(`[checklist-sync] ${label} target not found; skipped.`);
+    console.warn("[checklist-sync] " + label + " target not found; skipped.");
     return;
   }
 
   source = source.replace(from, to);
   changed = true;
-  console.log(`[checklist-sync] ${label} patched.`);
+  console.log("[checklist-sync] " + label + " patched.");
+};
+
+const applyReplaceAll = (label, from, to) => {
+  if (source.includes(to)) {
+    console.log("[checklist-sync] " + label + " already patched.");
+    return;
+  }
+
+  if (!source.includes(from)) {
+    console.warn("[checklist-sync] " + label + " target not found; skipped.");
+    return;
+  }
+
+  source = source.replaceAll(from, to);
+  changed = true;
+  console.log("[checklist-sync] " + label + " patched.");
 };
 
 applyReplace(
@@ -75,7 +92,7 @@ applyReplace(
   const getTaskBlockKey = (node: any, includeAssignee = true) => {
     const titleKey = normalizeTaskBlockText(node?.title || "");
     if (!includeAssignee) return titleKey;
-    return `${titleKey}|${normalizeTaskBlockText(node?.assignee || "")}`;
+    return titleKey + "|" + normalizeTaskBlockText(node?.assignee || "");
   };
 
   const isSpecialTaskBlock = (nodeId: string) => specialTaskBlocks[nodeId] === true;
@@ -157,7 +174,7 @@ applyReplace(
       const targetItem = getChecklistItemMatch(targetNode, sourceItem);
       if (!targetItem) continue;
 
-      await supabaseFetch(`checklist_items?id=eq.${targetItem.id}`, 'PATCH', { [field]: updatedValue });
+      await supabaseFetch("checklist_items?id=eq." + targetItem.id, 'PATCH', { [field]: updatedValue });
       syncedCount += 1;
     }
 
@@ -202,31 +219,8 @@ applyReplace(
       const targetItem = getChecklistItemMatch(targetNode, sourceItem);
       if (!targetItem) continue;
 
-      await supabaseFetch(`checklist_items?id=eq.${targetItem.id}`, 'DELETE');
+      await supabaseFetch("checklist_items?id=eq." + targetItem.id, 'DELETE');
       syncedCount += 1;
-    }
-
-    return syncedCount;
-  };
-
-  const syncChecklistOrderAcrossServices = async (sourceNode: any, orderedItems: any[]) => {
-    if (!sourceNode || getTaskBlockSyncMode(sourceNode.id) !== "sync_all") return 0;
-
-    const linkedNodes = findLinkedTaskBlocks(sourceNode).filter((node: any) => !isSpecialTaskBlock(node.id));
-    let syncedCount = 0;
-
-    for (const targetNode of linkedNodes) {
-      const targetChecklist = targetNode.checklist || [];
-
-      for (const sourceItem of orderedItems) {
-        const targetItem = targetChecklist.find((item: any) => normalizeTaskBlockText(item.text) === normalizeTaskBlockText(sourceItem.text));
-        if (!targetItem) continue;
-
-        await supabaseFetch(`checklist_items?id=eq.${targetItem.id}`, 'PATCH', {
-          sort_order: sourceItem.sort_order
-        });
-        syncedCount += 1;
-      }
     }
 
     return syncedCount;
@@ -235,230 +229,64 @@ applyReplace(
   const timeToMinutes = (tStr: string) => {`
 );
 
+const checklistPatchTarget = "        await supabaseFetch(" + bt + "checklist_items?id=eq.${id}" + bt + ", 'PATCH', { [field]: updatedValue });";
 applyReplace(
-  "inline blur sync",
-  String.raw`  const handleInlineBlur = async () => {
-    if (!activeInlineEdit) return;
-    const { type, id, field } = activeInlineEdit;
-    const updatedValue = inlineEditValue.trim();
-
-    if (type === 'node') {
-      setNodes(prev => prev.map(node => {
-        if (node.id !== id) return node;
-        return { ...node, [field]: updatedValue };
-      }));
-    } else if (type === 'checklist') {
-      setNodes(prev => prev.map(node => ({
-        ...node,
-        checklist: node.checklist.map((item: any) => 
-          item.id === id ? { ...item, [field]: updatedValue } : item
-        )
-      })));
-    }
-
-    setActiveInlineEdit(null);
-
-    try {
-      if (type === 'node') {
-        await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
-      } else if (type === 'checklist') {
-        await supabaseFetch(`checklist_items?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
-      }
-      fetchData(true); 
-    } catch (err: any) {
-      console.error("行內修改同步失敗:", err);
-      setCustomAlert({ isOpen: true, message: "行內即時同步失敗，正在復原最新雲端數據..." });
-      fetchData(true);
-    }
-  };`,
-  String.raw`  const handleInlineBlur = async () => {
-    if (!activeInlineEdit) return;
-    const { type, id, field } = activeInlineEdit;
-    const updatedValue = inlineEditValue.trim();
-    const sourceNode = type === 'checklist'
-      ? nodes.find((node: any) => (node.checklist || []).some((item: any) => item.id === id))
-      : null;
-    const sourceChecklistItem = sourceNode?.checklist?.find((item: any) => item.id === id) || null;
-
-    if (type === 'node') {
-      setNodes(prev => prev.map(node => {
-        if (node.id !== id) return node;
-        return { ...node, [field]: updatedValue };
-      }));
-    } else if (type === 'checklist') {
-      setNodes(prev => prev.map(node => ({
-        ...node,
-        checklist: node.checklist.map((item: any) => 
-          item.id === id ? { ...item, [field]: updatedValue } : item
-        )
-      })));
-    }
-
-    setActiveInlineEdit(null);
-
-    try {
-      let syncedCount = 0;
-
-      if (type === 'node') {
-        await supabaseFetch(`timeline_nodes?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
-      } else if (type === 'checklist') {
-        await supabaseFetch(`checklist_items?id=eq.${id}`, 'PATCH', { [field]: updatedValue });
-        syncedCount = await syncChecklistEditAcrossServices(sourceNode, sourceChecklistItem, field, updatedValue);
-      }
-
-      await fetchData(true);
-      if (type === 'checklist' && syncedCount > 0) {
-        setCustomAlert({ isOpen: true, message: `已同步更新另外 ${syncedCount} 堂的相同任務清單。` });
-      }
-    } catch (err: any) {
-      console.error("行內修改同步失敗:", err);
-      setCustomAlert({ isOpen: true, message: "行內即時同步失敗，正在復原最新雲端數據..." });
-      fetchData(true);
-    }
-  };`
-);
-
-applyReplace(
-  "drop order sync",
-  String.raw`      for (const item of updatedItems) {
-        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
-          sort_order: item.sort_order
-        });
-      }
-      fetchData(true);`,
-  String.raw`      for (const item of updatedItems) {
-        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
-          sort_order: item.sort_order
-        });
-      }
-      await syncChecklistOrderAcrossServices(node, updatedItems);
-      fetchData(true);`
-);
-
-applyReplace(
-  "move order sync",
-  String.raw`      for (const item of updatedItems) {
-        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
-          sort_order: item.sort_order
-        });
-      }
-      fetchData(true);`,
-  String.raw`      for (const item of updatedItems) {
-        await supabaseFetch(`checklist_items?id=eq.${item.id}`, 'PATCH', {
-          sort_order: item.sort_order
-        });
-      }
-      await syncChecklistOrderAcrossServices(node, updatedItems);
-      fetchData(true);`
+  "inline checklist sync",
+  checklistPatchTarget,
+  checklistPatchTarget + String.raw`
+        const sourceNode = nodes.find((node: any) => (node.checklist || []).some((item: any) => item.id === id));
+        const sourceChecklistItem = sourceNode?.checklist?.find((item: any) => item.id === id) || null;
+        const syncedCount = await syncChecklistEditAcrossServices(sourceNode, sourceChecklistItem, field, updatedValue);
+        if (syncedCount > 0) {
+          setCustomAlert({ isOpen: true, message: "已同步更新另外 " + syncedCount + " 堂的相同任務清單。" });
+        }`
 );
 
 applyReplace(
   "add checklist sync",
-  String.raw`  const handleAddChecklistItem = async (nodeId: string) => {
-    if (!newChecklistItem.text.trim()) {
-      setCustomAlert({ isOpen: true, message: "請輸入確認項目的標題！" });
-      return;
-    }
-
-    const node = nodes.find(n => n.id === nodeId);
-    const maxOrder = node?.checklist && node.checklist.length > 0 
-      ? Math.max(...node.checklist.map((c: any) => c.sort_order || 0)) 
-      : -1;
-
-    const newItemId = 'c_' + Math.random().toString(36).substr(2, 9);
-    try {
-      await supabaseFetch('checklist_items', 'POST', {
-        id: newItemId,
-        node_id: nodeId,
-        text: newChecklistItem.text.trim(),
-        details: newChecklistItem.details.trim() || '',
-        is_completed: false,
-        sort_order: maxOrder + 1
-      });
-      setNewChecklistItem({ text: "", details: "" });
-      fetchData(true);
-    } catch (err: any) {
-      setCustomAlert({ isOpen: true, message: "新增確認項目失敗：" + err.message });
-    }
-  };`,
-  String.raw`  const handleAddChecklistItem = async (nodeId: string) => {
-    const itemText = newChecklistItem.text.trim();
-    const itemDetails = newChecklistItem.details.trim() || '';
-
-    if (!itemText) {
-      setCustomAlert({ isOpen: true, message: "請輸入確認項目的標題！" });
-      return;
-    }
-
-    const node = nodes.find(n => n.id === nodeId);
-    const maxOrder = node?.checklist && node.checklist.length > 0 
-      ? Math.max(...node.checklist.map((c: any) => c.sort_order || 0)) 
-      : -1;
-    const nextSortOrder = maxOrder + 1;
-
-    const newItemId = 'c_' + Math.random().toString(36).substr(2, 9);
-    try {
-      await supabaseFetch('checklist_items', 'POST', {
-        id: newItemId,
-        node_id: nodeId,
-        text: itemText,
-        details: itemDetails,
-        is_completed: false,
-        sort_order: nextSortOrder
-      });
-      const syncedCount = await syncChecklistAddAcrossServices(node, itemText, itemDetails, nextSortOrder);
+  `      setNewChecklistItem({ text: "", details: "" });
+      fetchData(true);`,
+  String.raw`      const syncedCount = await syncChecklistAddAcrossServices(node, newChecklistItem.text.trim(), newChecklistItem.details.trim() || '', maxOrder + 1);
       setNewChecklistItem({ text: "", details: "" });
       await fetchData(true);
       if (syncedCount > 0) {
-        setCustomAlert({ isOpen: true, message: `已新增，並同步到另外 ${syncedCount} 堂的相同任務區塊。` });
-      }
-    } catch (err: any) {
-      setCustomAlert({ isOpen: true, message: "新增確認項目失敗：" + err.message });
-    }
-  };`
+        setCustomAlert({ isOpen: true, message: "已新增，並同步到另外 " + syncedCount + " 堂的相同任務區塊。" });
+      }`
 );
 
 applyReplace(
-  "delete checklist sync",
-  String.raw`  const handleDeleteChecklistItem = async (itemId: string) => {
-    setCustomConfirm({
-      isOpen: true,
-      message: "確定要刪除這筆任務清單細項嗎？",
-      onConfirm: async () => {
-        try {
-          await supabaseFetch(`checklist_items?id=eq.${itemId}`, 'DELETE');
-          fetchData(true);
-        } catch (err: any) {
-          setCustomAlert({ isOpen: true, message: "刪除清單細項失敗：" + err.message });
-        }
-      }
-    });
-  };`,
+  "delete checklist source",
+  `  const handleDeleteChecklistItem = async (itemId: string) => {
+    setCustomConfirm({`,
   String.raw`  const handleDeleteChecklistItem = async (itemId: string) => {
     const sourceNode = nodes.find((node: any) => (node.checklist || []).some((item: any) => item.id === itemId));
     const sourceItem = sourceNode?.checklist?.find((item: any) => item.id === itemId) || null;
     const willSync = sourceNode && getTaskBlockSyncMode(sourceNode.id) === "sync_all" && findLinkedTaskBlocks(sourceNode).length > 0;
 
-    setCustomConfirm({
-      isOpen: true,
-      message: willSync
+    setCustomConfirm({`
+);
+
+applyReplace(
+  "delete checklist message",
+  `      message: "確定要刪除這筆任務清單細項嗎？",
+      onConfirm: async () => {`,
+  String.raw`      message: willSync
         ? "確定要刪除這筆任務清單細項嗎？\n目前設定為連動三堂，會同步刪除另外兩堂相同任務區塊中對應的清單細項。"
         : "確定要刪除這筆任務清單細項嗎？",
       confirmLabel: willSync ? "刪除並同步" : "確認刪除",
-      onConfirm: async () => {
-        try {
-          const syncedCount = await syncChecklistDeleteAcrossServices(sourceNode, sourceItem);
-          await supabaseFetch(`checklist_items?id=eq.${itemId}`, 'DELETE');
-          await fetchData(true);
-          if (syncedCount > 0) {
-            setCustomAlert({ isOpen: true, message: `已刪除，並同步刪除另外 ${syncedCount} 堂的對應清單細項。` });
-          }
-        } catch (err: any) {
-          setCustomAlert({ isOpen: true, message: "刪除清單細項失敗：" + err.message });
-        }
-      }
-    });
-  };`
+      onConfirm: async () => {`
+);
+
+const deleteTarget = "          await supabaseFetch(" + bt + "checklist_items?id=eq.${itemId}" + bt + ", 'DELETE');\n          fetchData(true);";
+applyReplace(
+  "delete checklist sync",
+  deleteTarget,
+  "          const syncedCount = await syncChecklistDeleteAcrossServices(sourceNode, sourceItem);\n" +
+  "          await supabaseFetch(" + bt + "checklist_items?id=eq.${itemId}" + bt + ", 'DELETE');\n" +
+  "          await fetchData(true);\n" +
+  "          if (syncedCount > 0) {\n" +
+  "            setCustomAlert({ isOpen: true, message: \"已刪除，並同步刪除另外 \" + syncedCount + \" 堂的對應清單細項。\" });\n" +
+  "          }"
 );
 
 applyReplace(
@@ -476,7 +304,7 @@ applyReplace(
               const nodeIsSpecial = isSpecialTaskBlock(node.id);
               const specialStyle = getServiceSpecialStyle(node.service_type);
               return (
-                <div key={node.id} className={`p-4 border rounded-[24px] shadow-sm transition-all duration-300 ${nodeIsSpecial ? specialStyle.card : "bg-white border-[#E6EAF0]"}`}>`
+                <div key={node.id} className={"p-4 border rounded-[24px] shadow-sm transition-all duration-300 " + (nodeIsSpecial ? specialStyle.card : "bg-white border-[#E6EAF0]")}>`
 );
 
 applyReplace(
@@ -484,7 +312,7 @@ applyReplace(
   String.raw`                          <div className="text-xs font-medium text-[#7B7B74] flex flex-wrap items-center gap-x-2 gap-y-1">`,
   String.raw`                          {nodeIsSpecial && (
                             <div className="mb-2">
-                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-black ${specialStyle.badge}`}>
+                              <span className={"inline-flex items-center px-2.5 py-1 rounded-full border text-[10px] font-black " + specialStyle.badge}>
                                 此堂特殊｜{node.service_type}
                               </span>
                             </div>
@@ -495,18 +323,18 @@ applyReplace(
 applyReplace(
   "sync panel",
   String.raw`                            <div className="bg-[#F3EEFF]/30 p-3 rounded-2xl border border-[#E6EAF0]">`,
-  String.raw`                            <div className={`p-3 rounded-2xl border ${nodeIsSpecial ? specialStyle.panel : "bg-[#F3EEFF]/30 border-[#E6EAF0]"}`}>
+  String.raw`                            <div className={"p-3 rounded-2xl border " + (nodeIsSpecial ? specialStyle.panel : "bg-[#F3EEFF]/30 border-[#E6EAF0]")}>
                               <div className="flex items-start justify-between gap-3 mb-3">
                                 <div>
                                   <p className="text-[10px] font-black text-[#6D55A3] tracking-widest">任務清單連動</p>
                                   <p className="text-[10px] font-bold text-[#7B7B74] mt-1 leading-relaxed">
                                     {linkedTaskBlocks.length > 0
-                                      ? `找到另外 ${linkedTaskBlocks.length} 堂相同任務區塊：${linkedTaskBlocks.map((item: any) => item.service_type).join("、")}`
+                                      ? "找到另外 " + linkedTaskBlocks.length + " 堂相同任務區塊：" + linkedTaskBlocks.map((item: any) => item.service_type).join("、")
                                       : "目前沒有找到其他堂的相同任務區塊"}
                                   </p>
                                 </div>
                                 {nodeIsSpecial && (
-                                  <span className={`shrink-0 px-2 py-1 rounded-full border text-[9px] font-black ${specialStyle.badge}`}>
+                                  <span className={"shrink-0 px-2 py-1 rounded-full border text-[9px] font-black " + specialStyle.badge}>
                                     特殊
                                   </span>
                                 )}
@@ -515,14 +343,14 @@ applyReplace(
                                 <button
                                   type="button"
                                   onClick={() => setTaskBlockSyncMode(node, "sync_all")}
-                                  className={`py-2 rounded-xl border text-[11px] font-black transition-all ${checklistSyncMode === "sync_all" ? "bg-[#00B8B8] text-white border-[#00B8B8]" : "bg-white text-[#00B8B8] border-[#00B8B8]/20"}`}
+                                  className={"py-2 rounded-xl border text-[11px] font-black transition-all " + (checklistSyncMode === "sync_all" ? "bg-[#00B8B8] text-white border-[#00B8B8]" : "bg-white text-[#00B8B8] border-[#00B8B8]/20")}
                                 >
                                   連動三堂
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setTaskBlockSyncMode(node, "special_only")}
-                                  className={`py-2 rounded-xl border text-[11px] font-black transition-all ${checklistSyncMode === "special_only" ? specialStyle.activeButton : "bg-white text-[#7B7B74] border-[#E6EAF0]"}`}
+                                  className={"py-2 rounded-xl border text-[11px] font-black transition-all " + (checklistSyncMode === "special_only" ? specialStyle.activeButton : "bg-white text-[#7B7B74] border-[#E6EAF0]")}
                                 >
                                   此堂特殊
                                 </button>
