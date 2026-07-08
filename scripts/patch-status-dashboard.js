@@ -20,7 +20,7 @@ stationOptionPatches.forEach(({ from, to }) => {
   if (!source.includes(to) && source.includes(from)) {
     source = source.replaceAll(from, to);
     changed = true;
-    console.log(`[status-dashboard] station option patched: ${to}`);
+    console.log("[status-dashboard] station option patched: " + to);
   }
 });
 
@@ -54,63 +54,18 @@ if (startIndex === -1 || endIndex === -1) {
     const todayForRules = currentDate || new Date();
     const isCommunionWeek = todayForRules.getDate() <= 7;
     const communionScheduleByService: Record<string, any> = {
-      "六晚崇": {
-        doorClose: "19:12",
-        communionStart: "19:25",
-        communionEnd: "19:37",
-        newsStart: "19:37",
-        newsEnd: "19:42",
-        reportStart: "19:42",
-        reportEnd: "19:46"
-      },
-      "主一堂": {
-        doorClose: "09:12",
-        communionStart: "09:25",
-        communionEnd: "09:37",
-        newsStart: "09:37",
-        newsEnd: "09:42",
-        reportStart: "09:42",
-        reportEnd: "09:46"
-      },
-      "主二堂": {
-        doorClose: "11:12",
-        communionStart: "11:25",
-        communionEnd: "11:37",
-        newsStart: "11:37",
-        newsEnd: "11:42",
-        reportStart: "11:42",
-        reportEnd: "11:46"
-      }
+      "六晚崇": { doorClose: "19:12", communionStart: "19:25", communionEnd: "19:37", newsStart: "19:37", newsEnd: "19:42", reportStart: "19:42", reportEnd: "19:46" },
+      "主一堂": { doorClose: "09:12", communionStart: "09:25", communionEnd: "09:37", newsStart: "09:37", newsEnd: "09:42", reportStart: "09:42", reportEnd: "09:46" },
+      "主二堂": { doorClose: "11:12", communionStart: "11:25", communionEnd: "11:37", newsStart: "11:37", newsEnd: "11:42", reportStart: "11:42", reportEnd: "11:46" }
     };
     const communionSchedule = communionScheduleByService[targetService];
     const isCommunionMode = Boolean(isCommunionWeek && communionSchedule);
     const isEightDoorClosed = isCommunionMode && currentMinute >= timeToMinutes(communionSchedule.doorClose);
     const communionFlowItems = isCommunionMode
       ? [
-          {
-            id: "communion-service",
-            time: communionSchedule.communionStart,
-            end: communionSchedule.communionEnd,
-            title: "領聖餐",
-            location: "大堂",
-            assignee: "聖餐助手、專招、牧招"
-          },
-          {
-            id: "communion-news",
-            time: communionSchedule.newsStart,
-            end: communionSchedule.newsEnd,
-            title: "News",
-            location: "大堂",
-            assignee: "控場與招待團隊"
-          },
-          {
-            id: "communion-report",
-            time: communionSchedule.reportStart,
-            end: communionSchedule.reportEnd,
-            title: "特別報告",
-            location: "大堂",
-            assignee: "控場與招待團隊"
-          }
+          { id: "communion-service", time: communionSchedule.communionStart, end: communionSchedule.communionEnd, title: "領聖餐", location: "大堂", assignee: "聖餐助手、專招、牧招" },
+          { id: "communion-news", time: communionSchedule.newsStart, end: communionSchedule.newsEnd, title: "News", location: "大堂", assignee: "控場與招待團隊" },
+          { id: "communion-report", time: communionSchedule.reportStart, end: communionSchedule.reportEnd, title: "特別報告", location: "大堂", assignee: "控場與招待團隊" }
         ]
       : [];
     const nextCommunionStep = communionFlowItems.find((item) => currentMinute <= timeToMinutes(item.end));
@@ -127,7 +82,7 @@ if (startIndex === -1 || endIndex === -1) {
           .join("、")
       : "尚無流程";
     const nextDisplayTime = nextCommunionStep
-      ? `${nextCommunionStep.time}-${nextCommunionStep.end}`
+      ? nextCommunionStep.time + "-" + nextCommunionStep.end
       : nextNode
         ? nextNode.time
         : "尚無流程";
@@ -136,20 +91,8 @@ if (startIndex === -1 || endIndex === -1) {
     const specialistStations = stationOptions.filter((station) => station.includes("專招"));
     const communionSpecialItems = isCommunionMode
       ? [
-          {
-            id: "communion-2f-outside",
-            title: "2樓外場專招",
-            time: "聖餐週",
-            assignee: "二樓1號門",
-            description: "聖餐週站位：二樓1號門"
-          },
-          {
-            id: "communion-3f-hall",
-            title: "3樓大堂專招",
-            time: "聖餐週",
-            assignee: "三樓1號門",
-            description: "聖餐週站位：三樓1號門"
-          },
+          { id: "communion-2f-outside", title: "2樓外場專招", time: "聖餐週", assignee: "二樓1號門", description: "聖餐週站位：二樓1號門" },
+          { id: "communion-3f-hall", title: "3樓大堂專招", time: "聖餐週", assignee: "三樓1號門", description: "聖餐週站位：三樓1號門" },
           {
             id: "communion-2c-3c",
             title: "牧招2C、3C",
@@ -157,7 +100,7 @@ if (startIndex === -1 || endIndex === -1) {
             assignee: isEightDoorClosed ? "回原崗位2C、3C" : "二樓8號門",
             description: isEightDoorClosed
               ? "8號門已關閉，請回到原服事崗位2C、3C"
-              : `先站位二樓8號門，${communionSchedule.doorClose}關閉後回原崗位2C、3C`
+              : "先站位二樓8號門，" + communionSchedule.doorClose + "關閉後回原崗位2C、3C"
           }
         ]
       : [];
@@ -182,9 +125,7 @@ if (startIndex === -1 || endIndex === -1) {
       {
         title: "報到狀態",
         value: isCheckedIn ? "已報到" : "尚未報到",
-        meta: isCheckedIn
-          ? ((displayCheckinName || "服事同工") + (checkedInAt ? "｜" + checkedInAt : ""))
-          : "請先完成 Wi-Fi 報到",
+        meta: isCheckedIn ? ((displayCheckinName || "服事同工") + (checkedInAt ? "｜" + checkedInAt : "")) : "請先完成 Wi-Fi 報到",
         accent: isCheckedIn ? "text-[#00B8B8]" : "text-[#F25D6B]",
         bg: isCheckedIn ? "bg-[#00B8B8]/10 border-[#00B8B8]/20" : "bg-[#FFF2F4] border-[#F25D6B]/20"
       },
@@ -198,11 +139,7 @@ if (startIndex === -1 || endIndex === -1) {
       {
         title: "專招缺口",
         value: specialistGapItems.length === 0 ? "目前穩定" : specialistGapItems.length + " 項待注意",
-        meta: isCommunionMode
-          ? "聖餐週特殊站位已啟用"
-          : specialistStations.length > 0
-            ? "專招崗位 " + specialistStations.length + " 個"
-            : "本堂次未設定專招崗位",
+        meta: isCommunionMode ? "聖餐週特殊站位已啟用" : specialistStations.length > 0 ? "專招崗位 " + specialistStations.length + " 個" : "本堂次未設定專招崗位",
         accent: specialistGapItems.length === 0 ? "text-[#00B8B8]" : "text-[#F25D6B]",
         bg: specialistGapItems.length === 0 ? "bg-[#00B8B8]/10 border-[#00B8B8]/20" : "bg-[#FFF2F4] border-[#F25D6B]/20"
       },
@@ -237,7 +174,7 @@ if (startIndex === -1 || endIndex === -1) {
           <div className="mb-5 p-4 rounded-[22px] bg-gradient-to-r from-[#FFF2F4] to-[#F3EEFF] border border-[#F25D6B]/15 shadow-sm">
             <div className="text-[12px] font-black text-[#F25D6B] tracking-widest mb-1">聖餐週規則</div>
             <div className="text-sm font-black text-[#1F2937] leading-relaxed">
-              2樓外場：二樓1號門｜3樓大堂：三樓1號門｜牧招2C、3C：{isEightDoorClosed ? "回原崗位2C、3C" : `先站二樓8號門，${communionSchedule.doorClose}後回原崗位`}
+              2樓外場：二樓1號門｜3樓大堂：三樓1號門｜牧招2C、3C：{isEightDoorClosed ? "回原崗位2C、3C" : "先站二樓8號門，" + communionSchedule.doorClose + "後回原崗位"}
             </div>
           </div>
         )}
