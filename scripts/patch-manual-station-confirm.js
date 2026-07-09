@@ -5,13 +5,15 @@ const pagePath = path.join(process.cwd(), "app", "page.tsx");
 let source = fs.readFileSync(pagePath, "utf8");
 let changed = false;
 
-const replaceOnce = (label, from, to) => {
+const replaceOnce = (label, from, to, options = {}) => {
   if (source.includes(to)) {
     console.log("[manual-station-confirm] " + label + " already patched.");
     return;
   }
   if (!source.includes(from)) {
-    console.warn("[manual-station-confirm] " + label + " target not found; skipped.");
+    if (!options.optional) {
+      console.warn("[manual-station-confirm] " + label + " target not found; skipped.");
+    }
     return;
   }
   source = source.replace(from, to);
@@ -27,10 +29,10 @@ replaceOnce(
 `,
   `  const parseStationQrCode = (rawCode: string) => {
     const value = String(rawCode || "")
-      .replace(/[\\r\\n\\t]+/g, " ")
+      .replace(/[\r\n\t]+/g, " ")
       .replace(/[：]/g, ":")
       .replace(/[｜]/g, "|")
-      .replace(/\\s+/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
     if (!value) return null;
 `
@@ -62,7 +64,7 @@ replaceOnce(
     }
 `,
   `    const directOptions = getStationOptionsForService(directService);
-    const normalizeStationText = (text: string) => String(text || "").replace(/\\s/g, "").toLowerCase();
+    const normalizeStationText = (text: string) => String(text || "").replace(/\s/g, "").toLowerCase();
     const normalizedValue = normalizeStationText(value);
     const matchedStation = directOptions.find(option => {
       const normalizedOption = normalizeStationText(option);
@@ -122,7 +124,8 @@ replaceOnce(
   `                     onClick={handleManualStationCodeSubmit}
 `,
   `                     onClick={(event) => handleManualStationCodeSubmit(event)}
-`
+`,
+  { optional: true }
 );
 
 if (changed) {
