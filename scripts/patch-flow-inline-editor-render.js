@@ -11,7 +11,7 @@ const replaceOnce = (label, from, to) => {
     return;
   }
   if (!source.includes(from)) {
-    console.warn("[flow-inline-editor] " + label + " target not found; skipped.");
+    console.log("[flow-inline-editor] " + label + " target not found; skipped.");
     return;
   }
   source = source.replace(from, to);
@@ -64,12 +64,19 @@ replaceOnce(
             autoFocus
           />
           <textarea
-            rows={2}
+            rows={4}
             value={checklistDraftEdit.details}
             onChange={e => setChecklistDraftEdit((prev: any) => prev ? { ...prev, details: e.target.value } : prev)}
-            className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-[11px] font-bold text-[#1F2937] focus:outline-none resize-none"
-            placeholder="任務細節"
+            className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-[11px] font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap"
+            placeholder="任務細節，可分段輸入"
           />
+          <button
+            type="button"
+            onClick={() => setChecklistDraftEdit((prev: any) => prev ? { ...prev, details: prev.details ? prev.details + "\n" : "" } : prev)}
+            className="w-full py-2 rounded-xl bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-black"
+          >
+            插入換行
+          </button>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
