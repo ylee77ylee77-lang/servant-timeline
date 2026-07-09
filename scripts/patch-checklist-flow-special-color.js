@@ -23,45 +23,57 @@ const replaceOnce = (label, from, to) => {
 
 replaceOnce(
   "timeline item variables",
-  `                        {node.checklist.map((item: any) => {
-                          return (`,
-  `                        {node.checklist.map((item: any) => {
-                          const itemIsSpecial = isSpecialChecklistItem(item.id);
-                          const specialStyle = getServiceSpecialStyle(node.service_type || currentService);
-                          return (`
+  [
+    "                        {node.checklist.map((item: any) => {",
+    "                          return ("
+  ].join("\n"),
+  [
+    "                        {node.checklist.map((item: any) => {",
+    "                          const itemIsSpecial = isSpecialChecklistItem(item.id);",
+    "                          const specialStyle = getServiceSpecialStyle(node.service_type || currentService);",
+    "                          return ("
+  ].join("\n")
 );
 
 replaceOnce(
   "timeline item color",
-  String.raw`                            <div key={item.id} className={`flex items-start gap-3 p-3.5 rounded-[16px] transition-all duration-200 ${
-                              item.is_completed ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20' : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'
-                            }`}>`,
-  String.raw`                            <div key={item.id} className={`flex items-start gap-3 p-3.5 rounded-[16px] transition-all duration-200 ${
-                              itemIsSpecial
-                                ? specialStyle.panel + ' shadow-sm'
-                                : item.is_completed
-                                  ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20'
-                                  : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'
-                            }`}>`
+  [
+    "                            <div key={item.id} className={`flex items-start gap-3 p-3.5 rounded-[16px] transition-all duration-200 ${",
+    "                              item.is_completed ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20' : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'",
+    "                            }`}>"
+  ].join("\n"),
+  [
+    "                            <div key={item.id} className={`flex items-start gap-3 p-3.5 rounded-[16px] transition-all duration-200 ${",
+    "                              itemIsSpecial",
+    "                                ? specialStyle.panel + ' shadow-sm'",
+    "                                : item.is_completed",
+    "                                  ? 'bg-[#00B8B8]/5 border border-[#00B8B8]/20'",
+    "                                  : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'",
+    "                            }`}>"
+  ].join("\n")
 );
 
 replaceOnce(
   "timeline special badge",
-  `                                    {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
-                                  </span>`,
-  `                                    {renderInlineEdit('checklist', item.id, 'text', item.text, "w-full")}
-                                  </span>
-                                  {itemIsSpecial && (
-                                    <span className={"ml-1.5 mt-0.5 shrink-0 px-2 py-0.5 rounded-full border text-[9px] font-black " + specialStyle.badge}>
-                                      此堂特殊
-                                    </span>
-                                  )}`
+  [
+    "                                    {renderInlineEdit('checklist', item.id, 'text', item.text, \"w-full\")}",
+    "                                  </span>"
+  ].join("\n"),
+  [
+    "                                    {renderInlineEdit('checklist', item.id, 'text', item.text, \"w-full\")}",
+    "                                  </span>",
+    "                                  {itemIsSpecial && (",
+    "                                    <span className={\"ml-1.5 mt-0.5 shrink-0 px-2 py-0.5 rounded-full border text-[9px] font-black \" + specialStyle.badge}>",
+    "                                      此堂特殊",
+    "                                    </span>",
+    "                                  )}"
+  ].join("\n")
 );
 
 replaceOnce(
   "timeline special detail box",
-  `                                  <div className="mt-1 text-xs text-[#7B7B74] bg-[#F3EEFF]/40 p-2 rounded-lg border border-dashed border-[#6D55A3]/20">`,
-  `                                  <div className={"mt-1 text-xs text-[#7B7B74] p-2 rounded-lg border border-dashed " + (itemIsSpecial ? specialStyle.panel : "bg-[#F3EEFF]/40 border-[#6D55A3]/20")}>`
+  "                                  <div className=\"mt-1 text-xs text-[#7B7B74] bg-[#F3EEFF]/40 p-2 rounded-lg border border-dashed border-[#6D55A3]/20\">",
+  "                                  <div className={\"mt-1 text-xs text-[#7B7B74] p-2 rounded-lg border border-dashed \" + (itemIsSpecial ? specialStyle.panel : \"bg-[#F3EEFF]/40 border-[#6D55A3]/20\")}>"
 );
 
 if (changed) {
