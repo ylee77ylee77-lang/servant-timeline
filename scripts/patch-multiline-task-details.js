@@ -10,10 +10,7 @@ const replaceOnce = (label, from, to) => {
     console.log("[multiline-task-details] " + label + " already patched.");
     return;
   }
-  if (!source.includes(from)) {
-    console.warn("[multiline-task-details] " + label + " target not found; skipped.");
-    return;
-  }
+  if (!source.includes(from)) return;
   source = source.replace(from, to);
   changed = true;
   console.log("[multiline-task-details] " + label + " patched.");
@@ -31,11 +28,11 @@ replaceOnce(
   `  const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
 `,
   `  const insertInlineLineBreak = () => {
-    setInlineEditValue(prev => prev ? prev + "\\n" : "");
+    setInlineEditValue(prev => prev ? "${""}" + prev + "" : "");
   };
 
   const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
-`
+`.replace('prev ? "" + prev + "" : ""', 'prev ? prev + "\\n" : ""')
 );
 
 replaceOnce(
@@ -109,7 +106,7 @@ replaceOnce(
 );
 
 replaceOnce(
-  "inline display preserves details paragraphs",
+  "inline display preserves paragraphs",
   '        className={`${styleClass} border-b-2 border-dashed border-[#6D55A3]/30 hover:border-[#6D55A3] hover:bg-[#F3EEFF]/80 cursor-pointer px-1 rounded transition-colors inline-block`}\n',
   '        className={`${styleClass} border-b-2 border-dashed border-[#6D55A3]/30 hover:border-[#6D55A3] hover:bg-[#F3EEFF]/80 cursor-pointer px-1 rounded transition-colors inline-block whitespace-pre-line`}\n'
 );
@@ -149,53 +146,6 @@ replaceOnce(
 );
 
 replaceOnce(
-  "new checklist details input to textarea",
-  `                                <input 
-                                  type="text"
-                                  placeholder="細節備註 (可選)"
-                                  value={newChecklistItem.details}
-                                  onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
-                                  className="w-full px-2.5 py-1.5 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold text-[#1F2937] focus:outline-none"
-                                />
-`,
-  `                                <textarea
-                                  placeholder="細節備註 (可選，可分段輸入)"
-                                  value={newChecklistItem.details}
-                                  onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
-                                  rows={4}
-                                  className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap"
-                                />
-`
-);
-
-replaceOnce(
-  "new checklist details mobile newline button",
-  `                                <textarea
-                                  placeholder="細節備註 (可選，可分段輸入)"
-                                  value={newChecklistItem.details}
-                                  onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
-                                  rows={4}
-                                  className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap"
-                                />
-`,
-  `                                <textarea
-                                  placeholder="細節備註 (可選，可分段輸入)"
-                                  value={newChecklistItem.details}
-                                  onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
-                                  rows={4}
-                                  className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => setNewChecklistItem(prev => ({ ...prev, details: prev.details ? prev.details + "\\n" : "" }))}
-                                  className="w-full py-2 rounded-xl bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-black"
-                                >
-                                  插入換行
-                                </button>
-`
-);
-
-replaceOnce(
   "flow checklist draft textarea mobile newline",
   `          <textarea
             rows={2}
@@ -222,19 +172,6 @@ replaceOnce(
 `
 );
 
-replaceOnce(
-  "admin checklist details display preserves paragraphs",
-  `                                          <div className="text-[10px] text-slate-500 font-medium">
-                                            {renderInlineEdit('checklist', item.id, 'details', item.details || "點選填寫詳細細節說明", "w-full block", "textarea")}
-                                          </div>
-`,
-  `                                          <div className="text-[10px] text-slate-500 font-medium whitespace-pre-line">
-                                            {renderInlineEdit('checklist', item.id, 'details', item.details || "點選填寫詳細細節說明", "w-full block", "textarea")}
-                                          </div>
-`
-);
-
-replaceAllSafe("display paragraphs in detail text", "{item.details}", "{String(item.details || \"\").split(\"\\n\").map((line: string, lineIdx: number) => (<React.Fragment key={lineIdx}>{line}{lineIdx < String(item.details || \"\").split(\"\\n\").length - 1 ? <br /> : null}</React.Fragment>))}");
 replaceAllSafe("fix duplicate reset password wording", "設定新密碼新密碼", "設定新密碼");
 replaceOnce(
   "remove duplicate today service line",
