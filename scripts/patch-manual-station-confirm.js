@@ -27,10 +27,10 @@ replaceOnce(
 `,
   `  const parseStationQrCode = (rawCode: string) => {
     const value = String(rawCode || "")
-      .replace(/[\r\n\t]+/g, " ")
+      .replace(/[\\r\\n\\t]+/g, " ")
       .replace(/[：]/g, ":")
       .replace(/[｜]/g, "|")
-      .replace(/\s+/g, " ")
+      .replace(/\\s+/g, " ")
       .trim();
     if (!value) return null;
 `
