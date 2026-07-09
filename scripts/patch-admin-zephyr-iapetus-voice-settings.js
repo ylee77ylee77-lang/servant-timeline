@@ -15,7 +15,13 @@ const replaceAllSafe = (label, from, to) => {
 replaceAllSafe(
   "admin voice description",
   "A方案：維持 Google Cloud Text-to-Speech 台灣華語 WaveNet。已加入文字清理與後端共用快取，只有徐東立可調整，所有同工共用。",
-  "管理端預設語音已改為 Gemini TTS：女聲 Zephyr、男聲 Iapetus。已加入文字清理與後端共用快取；同工也可在個人設定自行選擇聲音。"
+  "管理端預設語音已改為 Google Cloud Chirp 3 HD：女聲 Zephyr、男聲 Iapetus。已加入文字清理與後端共用快取；同工也可在個人設定自行選擇聲音。Chirp 3 HD 不支援語速與音高參數，相關滑桿暫作備援紀錄。"
+);
+
+replaceAllSafe(
+  "old Gemini admin voice description",
+  "管理端預設語音已改為 Gemini TTS：女聲 Zephyr、男聲 Iapetus。已加入文字清理與後端共用快取；同工也可在個人設定自行選擇聲音。",
+  "管理端預設語音已改為 Google Cloud Chirp 3 HD：女聲 Zephyr、男聲 Iapetus。已加入文字清理與後端共用快取；同工也可在個人設定自行選擇聲音。Chirp 3 HD 不支援語速與音高參數，相關滑桿暫作備援紀錄。"
 );
 
 replaceAllSafe(
@@ -45,19 +51,31 @@ replaceAllSafe(
 replaceAllSafe(
   "speaking rate label",
   "語速 speakingRate",
-  "語速 speakingRate（備援 / 快取參數）"
+  "語速 speakingRate（Chirp 3 HD 不套用）"
+);
+
+replaceAllSafe(
+  "legacy speaking rate label",
+  "語速 speakingRate（備援 / 快取參數）",
+  "語速 speakingRate（Chirp 3 HD 不套用）"
 );
 
 replaceAllSafe(
   "pitch label",
   "音高 pitch",
-  "音高 pitch（備援 / 快取參數）"
+  "音高 pitch（Chirp 3 HD 不套用）"
+);
+
+replaceAllSafe(
+  "legacy pitch label",
+  "音高 pitch（備援 / 快取參數）",
+  "音高 pitch（Chirp 3 HD 不套用）"
 );
 
 replaceAllSafe(
   "volume label",
   "柔和度 volumeGainDb",
-  "柔和度 volumeGainDb（備援 / 快取參數）"
+  "柔和度 volumeGainDb"
 );
 
 replaceAllSafe(
