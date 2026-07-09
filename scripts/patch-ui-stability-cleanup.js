@@ -71,7 +71,10 @@ page = replaceAll(page,
     { value: "mature_male", label: "男聲｜固定台灣華語", description: "穩重清楚，避免男聲跳成女聲。" }
   ];
 
-  const getVoiceProfile = () => personalSettings.voiceProfile === "mature_male" || personalSettings.voiceProfile === "iapetus" ? "mature_male" : "young_female";`,
+  const getVoiceProfile = () => {
+    const profile = String((personalSettings as any).voiceProfile || "young_female");
+    return profile === "mature_male" || profile === "iapetus" ? "mature_male" : "young_female";
+  };`,
   "stable voice selector"
 );
 page = replaceAll(page,
