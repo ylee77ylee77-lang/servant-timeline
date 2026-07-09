@@ -20,6 +20,18 @@ const replaceOnce = (label, from, to) => {
 };
 
 replaceOnce(
+  "add newline helper",
+  `  const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
+`,
+  `  const insertInlineLineBreak = () => {
+    setInlineEditValue(prev => prev ? prev + "\\n" : "");
+  };
+
+  const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
+`
+);
+
+replaceOnce(
   "inline textarea allows paragraphs",
   `            onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -40,6 +52,52 @@ replaceOnce(
             className="border-2 border-[#6D55A3] rounded-lg p-2 bg-white text-slate-800 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 w-full min-h-[96px] resize-y whitespace-pre-wrap"
             rows={4}
             autoFocus
+`
+);
+
+replaceOnce(
+  "inline textarea mobile newline button",
+  `          <textarea
+            value={inlineEditValue}
+            onChange={e => setInlineEditValue(e.target.value)}
+            onBlur={handleInlineBlur}
+            onKeyDown={e => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                handleInlineBlur();
+              }
+              if (e.key === 'Escape') setActiveInlineEdit(null);
+            }}
+            className="border-2 border-[#6D55A3] rounded-lg p-2 bg-white text-slate-800 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 w-full min-h-[96px] resize-y whitespace-pre-wrap"
+            rows={4}
+            autoFocus
+          />
+`,
+  `          <div className="w-full space-y-2">
+            <textarea
+              value={inlineEditValue}
+              onChange={e => setInlineEditValue(e.target.value)}
+              onBlur={handleInlineBlur}
+              onKeyDown={e => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  handleInlineBlur();
+                }
+                if (e.key === 'Escape') setActiveInlineEdit(null);
+              }}
+              className="border-2 border-[#6D55A3] rounded-lg p-2 bg-white text-slate-800 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30 w-full min-h-[96px] resize-y whitespace-pre-wrap"
+              rows={4}
+              autoFocus
+            />
+            <button
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={insertInlineLineBreak}
+              className="w-full py-2 rounded-xl bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-black"
+            >
+              插入換行
+            </button>
+          </div>
 `
 );
 
@@ -65,6 +123,25 @@ replaceOnce(
 );
 
 replaceOnce(
+  "node edit details mobile newline button",
+  `                          placeholder="可分段輸入，每一行會保留換行"
+                          className="w-full px-2 py-2 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap" 
+                        />
+`,
+  `                          placeholder="可分段輸入，每一行會保留換行"
+                          className="w-full px-2 py-2 bg-[#F3EEFF]/40 border border-[#E6EAF0] rounded-[10px] text-xs font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap" 
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditForm(prev => ({ ...prev, details: prev.details ? prev.details + "\\n" : "" }))}
+                          className="mt-2 w-full py-2 rounded-xl bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-black"
+                        >
+                          插入換行
+                        </button>
+`
+);
+
+replaceOnce(
   "new checklist details input to textarea",
   `                                <input 
                                   type="text"
@@ -81,6 +158,33 @@ replaceOnce(
                                   rows={4}
                                   className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap"
                                 />
+`
+);
+
+replaceOnce(
+  "new checklist details mobile newline button",
+  `                                <textarea
+                                  placeholder="細節備註 (可選，可分段輸入)"
+                                  value={newChecklistItem.details}
+                                  onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
+                                  rows={4}
+                                  className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap"
+                                />
+`,
+  `                                <textarea
+                                  placeholder="細節備註 (可選，可分段輸入)"
+                                  value={newChecklistItem.details}
+                                  onChange={e => setNewChecklistItem({ ...newChecklistItem, details: e.target.value })}
+                                  rows={4}
+                                  className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-xs font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setNewChecklistItem(prev => ({ ...prev, details: prev.details ? prev.details + "\\n" : "" }))}
+                                  className="w-full py-2 rounded-xl bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-black"
+                                >
+                                  插入換行
+                                </button>
 `
 );
 
