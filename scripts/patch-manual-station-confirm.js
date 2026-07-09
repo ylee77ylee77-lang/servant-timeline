@@ -27,7 +27,7 @@ replaceOnce(
     const value = rawCode.trim();
     if (!value) return null;
 `,
-  `  const parseStationQrCode = (rawCode: string) => {
+  String.raw`  const parseStationQrCode = (rawCode: string) => {
     const value = String(rawCode || "")
       .replace(/[\r\n\t]+/g, " ")
       .replace(/[：]/g, ":")
