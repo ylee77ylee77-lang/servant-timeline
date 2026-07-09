@@ -29,6 +29,12 @@ page = replaceAll(page,
 page = replaceAll(page, "limitChars: 4000000, remainingChars: 4000000", "limitChars: 1000000, remainingChars: 1000000", "remaining 4m literals");
 page = replaceAll(page, "limitChars: 8000000, remainingChars: 8000000", "limitChars: 2000000, remainingChars: 2000000", "remaining 8m literals");
 
+// 語音快取版本：每次調整語音引擎或風格提示時要升級，避免前端 Cache Storage 繼續播舊人聲。
+page = replaceAll(page, `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v6";`, `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v8";`, "voice browser cache name v8");
+page = replaceAll(page, `const VOICE_AUDIO_CACHE_VERSION = "v6";`, `const VOICE_AUDIO_CACHE_VERSION = "v8-gemini-style";`, "voice browser cache version v8");
+page = replaceAll(page, `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v7";`, `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v8";`, "voice browser cache name v7 to v8");
+page = replaceAll(page, `const VOICE_AUDIO_CACHE_VERSION = "v7";`, `const VOICE_AUDIO_CACHE_VERSION = "v8-gemini-style";`, "voice browser cache version v7 to v8");
+
 // 修正報到頁重複文字。
 page = replaceAll(page,
   `                  <p className="text-sm font-bold text-[#6D55A3] mt-1">今日堂次：{todayService}</p>
@@ -173,6 +179,12 @@ const generateGeminiTtsAudio = async (text: string, voiceName: string, styleInst
       `      audioBuffer = await generateGeminiTtsAudio(text, baseProfile.geminiVoiceName || baseProfile.name);`,
       `      audioBuffer = await generateGeminiTtsAudio(text, baseProfile.geminiVoiceName || baseProfile.name, buildGeminiVoiceInstruction(voiceProfile, speakingRate, pitch, volumeGainDb));`,
       "use gemini style instruction"
+    );
+
+    api = replaceAll(api,
+      `    const cacheVersion = isPreview ? "preview" : String(globalSettings.cache_version || "v1");`,
+      `    const cacheVersion = isPreview ? "preview-gemini-style-v2" : "gemini-style-v2|" + String(globalSettings.cache_version || "v1");`,
+      "server shared voice cache version v2"
     );
   }
 
