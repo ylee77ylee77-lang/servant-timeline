@@ -19,6 +19,13 @@ const replaceOnce = (label, from, to) => {
   console.log("[multiline-task-details] " + label + " patched.");
 };
 
+const replaceAllSafe = (label, from, to) => {
+  if (!source.includes(from)) return;
+  source = source.split(from).join(to);
+  changed = true;
+  console.log("[multiline-task-details] " + label + " patched.");
+};
+
 replaceOnce(
   "add newline helper",
   `  const renderInlineEdit = (type: 'node' | 'checklist', id: string, field: string, currentValue: string, styleClass: string, inputType: 'text' | 'time' | 'textarea' = 'text') => {
@@ -189,6 +196,33 @@ replaceOnce(
 );
 
 replaceOnce(
+  "flow checklist draft textarea mobile newline",
+  `          <textarea
+            rows={2}
+            value={checklistDraftEdit.details}
+            onChange={e => setChecklistDraftEdit((prev: any) => prev ? { ...prev, details: e.target.value } : prev)}
+            className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-[11px] font-bold text-[#1F2937] focus:outline-none resize-none"
+            placeholder="任務細節"
+          />
+`,
+  `          <textarea
+            rows={4}
+            value={checklistDraftEdit.details}
+            onChange={e => setChecklistDraftEdit((prev: any) => prev ? { ...prev, details: e.target.value } : prev)}
+            className="w-full px-2.5 py-2 bg-white border border-[#E6EAF0] rounded-xl text-[11px] font-bold leading-relaxed text-[#1F2937] focus:outline-none resize-y whitespace-pre-wrap"
+            placeholder="任務細節，可分段輸入"
+          />
+          <button
+            type="button"
+            onClick={() => setChecklistDraftEdit((prev: any) => prev ? { ...prev, details: prev.details ? prev.details + "\\n" : "" } : prev)}
+            className="w-full py-2 rounded-xl bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 text-xs font-black"
+          >
+            插入換行
+          </button>
+`
+);
+
+replaceOnce(
   "admin checklist details display preserves paragraphs",
   `                                          <div className="text-[10px] text-slate-500 font-medium">
                                             {renderInlineEdit('checklist', item.id, 'details', item.details || "點選填寫詳細細節說明", "w-full block", "textarea")}
@@ -197,6 +231,21 @@ replaceOnce(
   `                                          <div className="text-[10px] text-slate-500 font-medium whitespace-pre-line">
                                             {renderInlineEdit('checklist', item.id, 'details', item.details || "點選填寫詳細細節說明", "w-full block", "textarea")}
                                           </div>
+`
+);
+
+replaceAllSafe("display paragraphs in detail text", "{item.details}", "{String(item.details || \"\").split(\"\\n\").map((line: string, lineIdx: number) => (<React.Fragment key={lineIdx}>{line}{lineIdx < String(item.details || \"\").split(\"\\n\").length - 1 ? <br /> : null}</React.Fragment>))}");
+replaceAllSafe("fix duplicate reset password wording", "設定新密碼新密碼", "設定新密碼");
+replaceOnce(
+  "remove duplicate today service line",
+  `                  <p className="text-sm font-bold text-[#6D55A3] mt-1">今日堂次：{todayService}</p>
+                  <p className="text-[11px] font-bold text-[#00B8B8] mt-1">
+                    今日堂次：{todayService} {checkedInService ? "已鎖定" : "待確認"}
+                  </p>
+`,
+  `                  <p className="text-sm font-bold text-[#6D55A3] mt-1">
+                    今日堂次：{todayService} {checkedInService ? "已鎖定" : "待確認"}
+                  </p>
 `
 );
 
