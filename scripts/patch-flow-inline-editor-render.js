@@ -19,10 +19,17 @@ const replaceOnce = (label, from, to) => {
   console.log("[flow-inline-editor] " + label + " patched.");
 };
 
-replaceOnce(
-  "special block fallback",
-  "const itemIsSpecial = isSpecialChecklistItem(item.id);",
-  "const itemIsSpecial = isSpecialChecklistItem(item.id) || isSpecialTaskBlock(node.id);"
+const replaceAllSafe = (label, from, to) => {
+  if (!source.includes(from)) return;
+  source = source.split(from).join(to);
+  changed = true;
+  console.log("[flow-inline-editor] " + label + " patched.");
+};
+
+replaceAllSafe(
+  "remove block-level special fallback",
+  "const itemIsSpecial = isSpecialChecklistItem(item.id) || isSpecialTaskBlock(node.id);",
+  "const itemIsSpecial = isSpecialChecklistItem(item.id);"
 );
 
 replaceOnce(
