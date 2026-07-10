@@ -36,8 +36,8 @@ all(
 
 s = s.replace(
   /const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v\d+";\s*const VOICE_AUDIO_CACHE_VERSION = "[^"]+";/,
-  `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v10";
-  const VOICE_AUDIO_CACHE_VERSION = "v10-chirp3-punctuation";`
+  `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v11";
+  const VOICE_AUDIO_CACHE_VERSION = "v11-chirp3-html-audio";`
 );
 
 all(
@@ -92,6 +92,52 @@ if (!s.includes('data-voice-profile-selector="chirp3"')) {
   changed = true;
 }
 
+if (!s.includes("const playVoiceBlob = async")) {
+  const marker = `  const loadVoiceBuffer = async (text: string) => {`;
+  const helper = `  const playVoiceBlob = async (blob: Blob) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const audio = new Audio(objectUrl);
+    audio.preload = "auto";
+    audio.volume = 1;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        audio.onended = () => resolve();
+        audio.onerror = () => reject(new Error("瀏覽器無法播放語音音檔。"));
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise.catch(reject);
+        }
+      });
+    } finally {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
+${marker}`;
+  if (!s.includes(marker)) throw new Error("[chirp3-front] loadVoiceBuffer marker missing");
+  s = s.replace(marker, helper);
+  changed = true;
+}
+
+all(
+`          const buffer = await loadVoiceBuffer(nextText);
+          await playVoiceBuffer(buffer);`,
+`          const blob = await fetchVoiceBlob(nextText);
+          if (!blob) throw new Error("語音音檔不存在。");
+          await playVoiceBlob(blob);`);
+
+all(
+`      const blob = await response.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      const decodedBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+      await playVoiceBuffer(decodedBuffer);`,
+`      const blob = await response.blob();
+      await playVoiceBlob(blob);`);
+
 all("忘記密碼？設定新密碼新密碼", "忘記密碼？設定新密碼");
 all("設定新密碼新密碼", "設定新密碼");
 all("本月 Google TTS 用量", "本月語音字元用量");
@@ -106,7 +152,7 @@ all("聲音由管理員統一設定；開啟語音助理時會盡量保持畫面
 all(`{ key: "status", label: "狀態", icon: BarChart2, color: "purple" }`, `{ key: "status", label: "現場", icon: BarChart2, color: "purple" }`);
 
 if (!s.includes("清除舊語音快取失敗")) {
-  const v = `  const VOICE_AUDIO_CACHE_VERSION = "v10-chirp3-punctuation";`;
+  const v = `  const VOICE_AUDIO_CACHE_VERSION = "v11-chirp3-html-audio";`;
   s = s.replace(v, `${v}
   useEffect(() => {
     if (typeof window === "undefined" || !("caches" in window)) return;
@@ -117,7 +163,8 @@ if (!s.includes("清除舊語音快取失敗")) {
 
 if (s.includes('.replace(/[，。！？、；：')) throw new Error("[chirp3-front] punctuation still removed");
 if (!s.includes('data-voice-profile-selector="chirp3"')) throw new Error("[chirp3-front] selector missing");
-if (!s.includes('VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v10"')) throw new Error("[chirp3-front] cache v10 missing");
+if (!s.includes('VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v11"')) throw new Error("[chirp3-front] cache v11 missing");
+if (!s.includes("const playVoiceBlob = async")) throw new Error("[chirp3-front] HTML audio player missing");
 
 fs.writeFileSync(file, s, "utf8");
 console.log(changed ? "[chirp3-front] applied and verified" : "[chirp3-front] already stable");
