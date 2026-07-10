@@ -3,20 +3,20 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PRIMARY_DEFAULT_LIMIT = 4_000_000;
-const BACKUP_DEFAULT_LIMIT = 4_000_000;
+const PROVIDER_FREE_TIER_LIMIT = 1_000_000;
 
 const DEFAULT_GLOBAL_VOICE_SETTINGS = {
-  voice_gender: "female",
+  voice_gender: "female" as "female" | "male",
+  voice_profile: "zephyr" as "zephyr" | "iapetus",
   speaking_rate: 0.92,
-  pitch: 1.5,
+  pitch: 0,
   volume_gain_db: 0,
-  cache_version: "v1",
+  cache_version: "chirp3-v3",
   updated_by: "",
   updated_at: ""
 };
 
-const normalizeInput = (value: unknown) => String(value || "").replace(/\s+/g, " ").trim();
+const normalizeInput = (value: unknown) => String(value ?? "").replace(/\s+/g, " ").trim();
 const normalizeName = (value: unknown) => normalizeInput(value).replace(/\s/g, "");
 
 const normalizeSupabaseUrl = (value: string | undefined) => {
@@ -31,9 +31,18 @@ const clampNumber = (value: unknown, fallback: number, min: number, max: number)
   return Math.min(max, Math.max(min, numeric));
 };
 
+const parseLimit = (value: string | undefined, fallback: number) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
+  return Math.min(PROVIDER_FREE_TIER_LIMIT, Math.floor(numeric));
+};
+
 const getSupabaseConfig = () => {
-  const supabaseUrl = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.TTS_USAGE_SUPABASE_URL);
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.TTS_USAGE_SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = normalizeSupabaseUrl(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.TTS_USAGE_SUPABASE_URL
+  );
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.TTS_USAGE_SUPABASE_SERVICE_ROLE_KEY;
 
   return { supabaseUrl, serviceRoleKey };
 };
@@ -44,7 +53,7 @@ const parseServiceAccountJson = (rawJson: string | undefined) => {
   try {
     const parsed = JSON.parse(rawJson);
     return {
-      clientEmail: parsed.client_email,
+      clientEmail: String(parsed.client_email || ""),
       privateKey: String(parsed.private_key || "").replace(/\\n/g, "\n")
     };
   } catch {
@@ -52,112 +61,116 @@ const parseServiceAccountJson = (rawJson: string | undefined) => {
   }
 };
 
-const getServiceAccount = (providerKey: string) => {
+const getServiceAccount = (providerKey: "primary" | "backup") => {
   const isBackup = providerKey === "backup";
   const rawJson = isBackup
     ? process.env.GOOGLE_TTS_BACKUP_SERVICE_ACCOUNT_JSON
-    : (process.env.GOOGLE_TTS_PRIMARY_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_TTS_SERVICE_ACCOUNT_JSON);
+    : process.env.GOOGLE_TTS_PRIMARY_SERVICE_ACCOUNT_JSON ||
+      process.env.GOOGLE_TTS_SERVICE_ACCOUNT_JSON;
 
   const parsed = parseServiceAccountJson(rawJson);
   if (parsed) return parsed;
 
-  if (!isBackup) {
-    return {
-      clientEmail: process.env.GOOGLE_TTS_CLIENT_EMAIL,
-      privateKey: String(process.env.GOOGLE_TTS_PRIVATE_KEY || "").replace(/\\n/g, "\n")
-    };
-  }
-
-  return {
-    clientEmail: process.env.GOOGLE_TTS_BACKUP_CLIENT_EMAIL,
-    privateKey: String(process.env.GOOGLE_TTS_BACKUP_PRIVATE_KEY || "").replace(/\\n/g, "\n")
-  };
+  return isBackup
+    ? {
+        clientEmail: String(process.env.GOOGLE_TTS_BACKUP_CLIENT_EMAIL || ""),
+        privateKey: String(process.env.GOOGLE_TTS_BACKUP_PRIVATE_KEY || "").replace(/\\n/g, "\n")
+      }
+    : {
+        clientEmail: String(process.env.GOOGLE_TTS_CLIENT_EMAIL || ""),
+        privateKey: String(process.env.GOOGLE_TTS_PRIVATE_KEY || "").replace(/\\n/g, "\n")
+      };
 };
 
-const hasProviderCredentials = (providerKey: string) => {
+const hasProviderCredentials = (providerKey: "primary" | "backup") => {
   const account = getServiceAccount(providerKey);
   return Boolean(account.clientEmail && account.privateKey);
 };
 
-const getPrimaryLimit = () => Number(process.env.GOOGLE_TTS_PRIMARY_CHAR_LIMIT || PRIMARY_DEFAULT_LIMIT);
-const getBackupLimit = () => Number(process.env.GOOGLE_TTS_BACKUP_CHAR_LIMIT || BACKUP_DEFAULT_LIMIT);
+const getPrimaryLimit = () =>
+  hasProviderCredentials("primary")
+    ? parseLimit(process.env.GOOGLE_TTS_PRIMARY_CHAR_LIMIT, PROVIDER_FREE_TIER_LIMIT)
+    : 0;
 
-const getTaipeiParts = () => {
+const getBackupLimit = () =>
+  hasProviderCredentials("backup")
+    ? parseLimit(process.env.GOOGLE_TTS_BACKUP_CHAR_LIMIT, PROVIDER_FREE_TIER_LIMIT)
+    : 0;
+
+const getMonthKey = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Taipei",
     year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
+    month: "2-digit"
   }).formatToParts(new Date());
 
-  const pick = (type: string) => Number(parts.find(part => part.type === type)?.value || 0);
-
-  return {
-    year: pick("year"),
-    month: pick("month")
-  };
-};
-
-const getMonthKey = () => {
-  const taipei = getTaipeiParts();
-  return `${taipei.year}-${String(taipei.month).padStart(2, "0")}`;
+  const year = parts.find(part => part.type === "year")?.value || "0000";
+  const month = parts.find(part => part.type === "month")?.value || "00";
+  return `${year}-${month}`;
 };
 
 const getDefaultUsageSnapshot = () => {
   const primaryLimit = getPrimaryLimit();
-  const backupLimit = hasProviderCredentials("backup") ? getBackupLimit() : 0;
+  const backupLimit = getBackupLimit();
   const totalLimit = primaryLimit + backupLimit;
 
   return {
     month: getMonthKey(),
     primary: { usedChars: 0, limitChars: primaryLimit, remainingChars: primaryLimit },
     backup: { usedChars: 0, limitChars: backupLimit, remainingChars: backupLimit },
-    total: { usedChars: 0, limitChars: totalLimit, remainingChars: totalLimit, usageRate: 0 }
+    total: {
+      usedChars: 0,
+      limitChars: totalLimit,
+      remainingChars: totalLimit,
+      usageRate: 0
+    }
   };
 };
 
-const getUsageSnapshot = async () => {
+const fetchUsage = async () => {
   const snapshot = getDefaultUsageSnapshot();
   const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
-
   if (!supabaseUrl || !serviceRoleKey) return snapshot;
 
-  const response = await fetch(`${supabaseUrl}/rest/v1/tts_usage_monthly_by_provider?month=eq.${snapshot.month}&select=*`, {
-    method: "GET",
-    headers: {
-      "apikey": serviceRoleKey,
-      "Authorization": `Bearer ${serviceRoleKey}`,
-      "Content-Type": "application/json"
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/tts_usage_monthly_by_provider?month=eq.${snapshot.month}&select=*`,
+    {
+      method: "GET",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json"
+      },
+      cache: "no-store"
     }
-  });
+  );
 
   if (!response.ok) return snapshot;
 
   const rows = await response.json().catch(() => []);
-  const primaryRow = Array.isArray(rows) ? rows.find((row: any) => row.provider_key === "primary") : null;
-  const backupRow = Array.isArray(rows) ? rows.find((row: any) => row.provider_key === "backup") : null;
+  const primaryRow = Array.isArray(rows)
+    ? rows.find((row: any) => row.provider_key === "primary")
+    : null;
+  const backupRow = Array.isArray(rows)
+    ? rows.find((row: any) => row.provider_key === "backup")
+    : null;
 
-  const primaryUsed = Number(primaryRow?.used_chars || 0);
-  const backupUsed = Number(backupRow?.used_chars || 0);
-  const primaryLimit = Number(primaryRow?.limit_chars || snapshot.primary.limitChars);
-  const backupLimit = Number(backupRow?.limit_chars || snapshot.backup.limitChars);
+  const primaryUsed = Math.max(0, Number(primaryRow?.used_chars || 0));
+  const backupUsed = Math.max(0, Number(backupRow?.used_chars || 0));
   const totalUsed = primaryUsed + backupUsed;
-  const totalLimit = primaryLimit + backupLimit;
+  const totalLimit = snapshot.total.limitChars;
 
   return {
     month: snapshot.month,
     primary: {
       usedChars: primaryUsed,
-      limitChars: primaryLimit,
-      remainingChars: Math.max(0, primaryLimit - primaryUsed)
+      limitChars: snapshot.primary.limitChars,
+      remainingChars: Math.max(0, snapshot.primary.limitChars - primaryUsed)
     },
     backup: {
       usedChars: backupUsed,
-      limitChars: backupLimit,
-      remainingChars: Math.max(0, backupLimit - backupUsed)
+      limitChars: snapshot.backup.limitChars,
+      remainingChars: Math.max(0, snapshot.backup.limitChars - backupUsed)
     },
     total: {
       usedChars: totalUsed,
@@ -168,56 +181,65 @@ const getUsageSnapshot = async () => {
   };
 };
 
-const normalizeSettingsRow = (row: any) => ({
-  voice_gender: row?.voice_gender === "male" ? "male" : "female",
-  speaking_rate: clampNumber(row?.speaking_rate, DEFAULT_GLOBAL_VOICE_SETTINGS.speaking_rate, 0.8, 1.1),
-  pitch: clampNumber(row?.pitch, row?.voice_gender === "male" ? -0.5 : DEFAULT_GLOBAL_VOICE_SETTINGS.pitch, -2, 8),
-  volume_gain_db: clampNumber(row?.volume_gain_db, DEFAULT_GLOBAL_VOICE_SETTINGS.volume_gain_db, -6, 3),
-  cache_version: String(row?.cache_version || DEFAULT_GLOBAL_VOICE_SETTINGS.cache_version),
-  updated_by: String(row?.updated_by || ""),
-  updated_at: String(row?.updated_at || "")
-});
+const normalizeSettingsRow = (row: any) => {
+  const voiceGender: "female" | "male" = row?.voice_gender === "male" ? "male" : "female";
 
-const getGlobalVoiceSettings = async () => {
-  const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
-
-  if (!supabaseUrl || !serviceRoleKey) return DEFAULT_GLOBAL_VOICE_SETTINGS;
-
-  const response = await fetch(`${supabaseUrl}/rest/v1/app_voice_settings?id=eq.global&select=*`, {
-    method: "GET",
-    headers: {
-      "apikey": serviceRoleKey,
-      "Authorization": `Bearer ${serviceRoleKey}`,
-      "Content-Type": "application/json"
-    }
-  });
-
-  if (!response.ok) return DEFAULT_GLOBAL_VOICE_SETTINGS;
-
-  const rows = await response.json().catch(() => []);
-  const row = Array.isArray(rows) ? rows[0] : null;
-
-  if (!row) return DEFAULT_GLOBAL_VOICE_SETTINGS;
-  return normalizeSettingsRow(row);
+  return {
+    voice_gender: voiceGender,
+    voice_profile: voiceGender === "male" ? "iapetus" : "zephyr",
+    speaking_rate: clampNumber(row?.speaking_rate, 0.92, 0.8, 1.1),
+    pitch: clampNumber(row?.pitch, 0, -2, 8),
+    volume_gain_db: clampNumber(row?.volume_gain_db, 0, -6, 3),
+    cache_version: String(row?.cache_version || "chirp3-v3"),
+    updated_by: String(row?.updated_by || ""),
+    updated_at: String(row?.updated_at || "")
+  };
 };
 
-const buildDiagnostics = () => {
+const fetchSettings = async () => {
+  const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
+  if (!supabaseUrl || !serviceRoleKey) return DEFAULT_GLOBAL_VOICE_SETTINGS;
+
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/app_voice_settings?id=eq.global&select=*`,
+    {
+      method: "GET",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json"
+      },
+      cache: "no-store"
+    }
+  );
+
+  if (!response.ok) return DEFAULT_GLOBAL_VOICE_SETTINGS;
+  const rows = await response.json().catch(() => []);
+  const row = Array.isArray(rows) ? rows[0] : null;
+  return row ? normalizeSettingsRow(row) : DEFAULT_GLOBAL_VOICE_SETTINGS;
+};
+
+const diagnostics = () => {
   const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
 
   return {
+    engine: "google-cloud-text-to-speech",
+    voiceFamily: "cmn-CN-Chirp3-HD",
+    speakingRateApplied: true,
+    pitchApplied: false,
+    volumeGainApplied: false,
     hasSupabaseUrl: Boolean(supabaseUrl),
     hasServiceRoleKey: Boolean(serviceRoleKey),
     hasGoogleTtsCredentials: hasProviderCredentials("primary"),
     hasBackupGoogleTtsCredentials: hasProviderCredentials("backup"),
     primaryCharLimit: getPrimaryLimit(),
-    backupCharLimit: hasProviderCredentials("backup") ? getBackupLimit() : 0
+    backupCharLimit: getBackupLimit()
   };
 };
 
 export async function GET() {
-  const settings = await getGlobalVoiceSettings();
-  const usage = await getUsageSnapshot();
-  const diagnostics = buildDiagnostics();
+  const settings = await fetchSettings();
+  const usage = await fetchUsage();
 
   return NextResponse.json({
     ok: true,
@@ -225,71 +247,67 @@ export async function GET() {
     settings,
     usage,
     monthlyCharLimit: usage.total.limitChars,
-    ...diagnostics,
-    diagnostics
+    diagnostics: diagnostics()
   });
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const adminName = normalizeName(body.adminName || "徐東立");
+    const adminName = normalizeName(body.adminName);
     const allowedAdminNames = new Set(["徐東立", "東立徐", "東立"]);
 
     if (!allowedAdminNames.has(adminName)) {
-      return NextResponse.json({
-        error: "只有徐東立可以調整全站語音設定。",
-        diagnostics: buildDiagnostics()
-      }, { status: 403 });
+      return NextResponse.json(
+        { error: "目前只有指定管理員可以調整全站語音設定。" },
+        { status: 403 }
+      );
     }
 
     const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
-
     if (!supabaseUrl || !serviceRoleKey) {
-      return NextResponse.json({
-        error: "缺少 Supabase URL 或 service_role key，無法儲存全站語音設定。",
-        diagnostics: buildDiagnostics()
-      }, { status: 500 });
+      return NextResponse.json(
+        { error: "缺少 Supabase URL 或 service role 設定。" },
+        { status: 500 }
+      );
     }
 
-    const incomingSettings = body.settings || {};
-    const voiceGender = incomingSettings.voice_gender === "male" ? "male" : "female";
-    const nextSettings = {
+    const incoming = body.settings || {};
+    const voiceGender: "female" | "male" = incoming.voice_gender === "male" ? "male" : "female";
+    const payload = {
       id: "global",
       voice_gender: voiceGender,
-      speaking_rate: clampNumber(incomingSettings.speaking_rate, 0.92, 0.8, 1.1),
-      pitch: clampNumber(incomingSettings.pitch, voiceGender === "male" ? -0.5 : 1.5, -2, 8),
-      volume_gain_db: clampNumber(incomingSettings.volume_gain_db, 0, -6, 3),
-      cache_version: `v${Date.now()}`,
-      updated_by: "徐東立",
+      speaking_rate: clampNumber(incoming.speaking_rate, 0.92, 0.8, 1.1),
+      pitch: clampNumber(incoming.pitch, 0, -2, 8),
+      volume_gain_db: clampNumber(incoming.volume_gain_db, 0, -6, 3),
+      cache_version: `chirp3-${Date.now()}`,
+      updated_by: adminName,
       updated_at: new Date().toISOString()
     };
 
     const response = await fetch(`${supabaseUrl}/rest/v1/app_voice_settings?on_conflict=id`, {
       method: "POST",
       headers: {
-        "apikey": serviceRoleKey,
-        "Authorization": `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
         "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates,return=representation"
+        Prefer: "resolution=merge-duplicates,return=representation"
       },
-      body: JSON.stringify(nextSettings)
+      body: JSON.stringify(payload),
+      cache: "no-store"
     });
 
     const data = await response.json().catch(() => null);
-
     if (!response.ok) {
-      return NextResponse.json({
-        error: data?.message || data?.error || "儲存全站語音設定失敗。",
-        detail: data,
-        diagnostics: buildDiagnostics()
-      }, { status: response.status || 500 });
+      return NextResponse.json(
+        { error: data?.message || data?.error || "儲存全站語音設定失敗。" },
+        { status: response.status || 500 }
+      );
     }
 
-    const savedRow = Array.isArray(data) ? data[0] : data;
-    const settings = normalizeSettingsRow(savedRow || nextSettings);
-    const usage = await getUsageSnapshot();
-    const diagnostics = buildDiagnostics();
+    const row = Array.isArray(data) ? data[0] : data;
+    const settings = normalizeSettingsRow(row || payload);
+    const usage = await fetchUsage();
 
     return NextResponse.json({
       ok: true,
@@ -297,11 +315,10 @@ export async function POST(request: NextRequest) {
       settings,
       usage,
       monthlyCharLimit: usage.total.limitChars,
-      ...diagnostics,
-      diagnostics
+      diagnostics: diagnostics()
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "儲存全站語音設定失敗。";
-    return NextResponse.json({ error: message, diagnostics: buildDiagnostics() }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
