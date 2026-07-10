@@ -1,1 +1,4 @@
-export { runtime, dynamic, GET, POST } from "../../voice-settings/route";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export { GET, POST } from "../../voice-settings/route";
