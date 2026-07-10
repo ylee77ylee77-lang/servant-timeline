@@ -30,6 +30,21 @@ const requiredReplaceAll = (source, from, to, label) => {
   return source.split(from).join(to);
 };
 
+const requiredReplaceRegex = (source, pattern, to, label) => {
+  if (source.includes(to)) {
+    console.log(`[final-chirp3-cleanup] ${label} already patched.`);
+    return source;
+  }
+
+  if (!pattern.test(source)) {
+    throw new Error(`[final-chirp3-cleanup] Required regex target missing: ${label}`);
+  }
+
+  changed = true;
+  console.log(`[final-chirp3-cleanup] ${label} patched.`);
+  return source.replace(pattern, to);
+};
+
 const assertContains = (source, expected, label) => {
   if (!source.includes(expected)) {
     throw new Error(`[final-chirp3-cleanup] Verification failed: ${label}`);
@@ -42,8 +57,10 @@ const assertNotContains = (source, unexpected, label) => {
   }
 };
 
-if (!fs.existsSync(pagePath)) {
-  throw new Error("[final-chirp3-cleanup] app/page.tsx not found.");
+for (const requiredPath of [pagePath, voiceApiPath, voiceSettingsApiPath, legacyVoiceSettingsApiPath]) {
+  if (!fs.existsSync(requiredPath)) {
+    throw new Error(`[final-chirp3-cleanup] Required file not found: ${requiredPath}`);
+  }
 }
 
 let page = fs.readFileSync(pagePath, "utf8");
@@ -52,19 +69,19 @@ page = requiredReplaceAll(
   page,
   `const cleanTextForTtsBilling = (value: any) => {
   return String(value || "")
-    .replace(/[\\u200B-\\u200D\\uFEFF]/g, "")
-    .replace(/[\\r\\n\\t]+/g, "")
-    .replace(/[\\s　]+/g, "")
-    .replace(/[，。！？、；：,.!?;:"“”'‘’「」『』（）()【】\\[\\]《》〈〉…—–_~～·・•]/g, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[\r\n\t]+/g, "")
+    .replace(/[\s　]+/g, "")
+    .replace(/[，。！？、；：,.!?;:"“”'‘’「」『』（）()【】\[\]《》〈〉…—–_~～·・•]/g, "")
     .replace(/[✅☑️✔️❌⭕⭐🌟✨🔥💡📌📍👉👈🙏🙌🎉🔔]/g, "")
     .trim();
 };`,
   `const cleanTextForTtsBilling = (value: any) => {
   return String(value || "")
-    .replace(/[\\u200B-\\u200D\\uFEFF]/g, "")
-    .replace(/\\r\\n?/g, "\\n")
-    .replace(/[\\t ]+/g, " ")
-    .replace(/\\n{3,}/g, "\\n\\n")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\t ]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 };`,
   "preserve punctuation and natural pauses"
@@ -155,33 +172,38 @@ page = optionalReplaceAll(page, "柔和度提示 warmth", "音量 volumeGainDb�
 page = optionalReplaceAll(page, "音高 pitch", "音高 pitch（目前不直接套用）", "pitch label legacy");
 page = optionalReplaceAll(page, "柔和度 volumeGainDb", "音量 volumeGainDb（目前不直接套用）", "volume label legacy");
 
-const reminderLabel = `          <div>
-             <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒設定</label>`;
-const voiceSelector = `          <div>
-             <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">語音選擇</label>
-             <div className="grid grid-cols-2 gap-2 mb-6">
-               {voiceProfileOptions.map(option => (
-                 <button
-                   key={option.value}
-                   type="button"
-                   onClick={() => updatePersonalSettings({ voiceProfile: option.value as "zephyr" | "iapetus" })}
-                   className={"p-3 rounded-2xl border text-left transition-all " + (personalSettings.voiceProfile === option.value ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent shadow-md shadow-[#F25D6B]/15" : "bg-white text-[#7B7B74] border-[#E6EAF0]")}
-                 >
-                   <div className="text-sm font-black">{personalSettings.voiceProfile === option.value ? "✓ " : ""}{option.label}</div>
-                   <div className="text-[10px] font-bold opacity-80 mt-1 leading-relaxed">{option.description}</div>
-                 </button>
-               ))}
-             </div>
-           </div>
+if (!page.includes('data-voice-profile-selector="chirp3"')) {
+  const voiceSelector = `          <div data-voice-profile-selector="chirp3">
+            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">語音選擇</label>
+            <div className="grid grid-cols-2 gap-2 mb-6">
+              {voiceProfileOptions.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => updatePersonalSettings({ voiceProfile: option.value as "zephyr" | "iapetus" })}
+                  className={"p-3 rounded-2xl border text-left transition-all " + (personalSettings.voiceProfile === option.value ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent shadow-md shadow-[#F25D6B]/15" : "bg-white text-[#7B7B74] border-[#E6EAF0]")}
+                >
+                  <div className="text-sm font-black">{personalSettings.voiceProfile === option.value ? "✓ " : ""}{option.label}</div>
+                  <div className="text-[10px] font-bold opacity-80 mt-1 leading-relaxed">{option.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
 
-${reminderLabel}`;
+          <div>
+            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒設定</label>`;
 
-if (!page.includes("語音選擇</label>")) {
-  page = requiredReplaceAll(page, reminderLabel, voiceSelector, "insert personal voice selector UI");
+  page = requiredReplaceRegex(
+    page,
+    /\s{10}<div>\s*<label className="block text-xs font-black text-\[#7B7B74\] mb-3 tracking-widest">提醒設定<\/label>/,
+    `\n${voiceSelector}`,
+    "insert personal voice selector UI"
+  );
 }
 
 const cacheVersionLine = `  const VOICE_AUDIO_CACHE_VERSION = "v10-chirp3-punctuation";`;
-const cacheCleanupEffect = `${cacheVersionLine}
+if (!page.includes("清除舊語音快取失敗")) {
+  const cacheCleanupEffect = `${cacheVersionLine}
 
   useEffect(() => {
     if (typeof window === "undefined" || !("caches" in window)) return;
@@ -193,7 +215,6 @@ const cacheCleanupEffect = `${cacheVersionLine}
     )).catch(err => console.warn("清除舊語音快取失敗:", err));
   }, []);`;
 
-if (!page.includes("清除舊語音快取失敗")) {
   page = requiredReplaceAll(page, cacheVersionLine, cacheCleanupEffect, "cleanup old browser voice caches");
 }
 
@@ -205,7 +226,8 @@ const legacyVoiceSettingsApi = fs.readFileSync(legacyVoiceSettingsApiPath, "utf8
 
 assertContains(page, `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v10";`, "browser cache v10");
 assertContains(page, `voiceProfile: "zephyr" as "zephyr" | "iapetus"`, "personal voice profile type");
-assertContains(page, `.replace(/\\r\\n?/g, "\\n")`, "punctuation-preserving text normalization");
+assertContains(page, 'data-voice-profile-selector="chirp3"', "personal Chirp voice selector UI");
+assertContains(page, `.replace(/\r\n?/g, "\n")`, "punctuation-preserving text normalization");
 assertNotContains(page, `.replace(/[，。！？、；：`, "frontend punctuation deletion removed");
 
 assertContains(voiceApi, `name: "cmn-CN-Chirp3-HD-Zephyr"`, "Zephyr voice configured");
