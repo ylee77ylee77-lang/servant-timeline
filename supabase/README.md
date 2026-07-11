@@ -3,6 +3,12 @@
 This directory contains the version-controlled database foundation for the
 Shekinah welcome-service app.
 
+The first migration also captures the existing production table and TTS
+function definitions with non-destructive `IF NOT EXISTS` / `CREATE OR REPLACE`
+statements. This allows a clean local Supabase database to rebuild the current
+schema before applying the new foundation, while leaving existing production
+rows untouched.
+
 ## Rollout boundary
 
 The foundation migration is additive and preserves all existing
@@ -54,4 +60,3 @@ grant execute on function public.reserve_tts_chars_v2(text, integer, integer, in
 That rollback reopens a known quota-abuse vulnerability and must not be the
 normal recovery path. Server-side calls using `service_role` continue to work
 after the restrictive migration.
-

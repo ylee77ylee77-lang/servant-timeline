@@ -18,6 +18,293 @@ alter default privileges for role postgres in schema public
 alter default privileges for role postgres in schema public
   revoke execute on functions from public, anon, authenticated;
 
+-- Capture the pre-migration production schema so a clean local database can
+-- be rebuilt from version control. IF NOT EXISTS makes this a no-op for the
+-- existing production tables and preserves every current row.
+create table if not exists public.timeline_nodes (
+  id text primary key,
+  time varchar,
+  title varchar,
+  assignee varchar,
+  location varchar,
+  details text,
+  service_type varchar default '主一堂',
+  voice_reminder_enabled boolean not null default true,
+  reminder_pre5_enabled boolean not null default true,
+  reminder_now_enabled boolean not null default true
+);
+
+create table if not exists public.checklist_items (
+  id text primary key,
+  node_id text references public.timeline_nodes(id) on delete cascade,
+  text varchar,
+  is_completed boolean default false,
+  completed_at varchar,
+  details text,
+  sort_order integer default 0
+);
+
+create table if not exists public.tts_usage_monthly (
+  month text primary key,
+  used_chars integer not null default 0,
+  limit_chars integer not null default 4000000,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.app_voice_settings (
+  id text primary key default 'global',
+  voice_gender text not null default 'female'
+    check (voice_gender = any (array['female'::text, 'male'::text])),
+  speaking_rate numeric not null default 0.92,
+  pitch numeric not null default 1.5,
+  volume_gain_db numeric not null default 0,
+  cache_version text not null default 'v1',
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.tts_usage_monthly_by_provider (
+  month text not null,
+  provider_key text not null
+    check (provider_key = any (array['primary'::text, 'backup'::text])),
+  used_chars integer not null default 0,
+  limit_chars integer not null default 4000000,
+  updated_at timestamptz not null default now(),
+  primary key (month, provider_key)
+);
+
+create table if not exists public.tts_audio_cache (
+  cache_key text primary key,
+  text_hash text not null,
+  cleaned_text text not null,
+  voice_name text not null,
+  voice_gender text not null,
+  speaking_rate numeric not null,
+  pitch numeric not null,
+  volume_gain_db numeric not null,
+  cache_version text not null,
+  provider_key text,
+  char_count integer not null default 0,
+  audio_base64 text not null,
+  audio_encoding text not null default 'MP3',
+  created_at timestamptz not null default now(),
+  last_accessed_at timestamptz not null default now(),
+  hit_count integer not null default 0
+);
+
+create index if not exists idx_tts_audio_cache_text_hash
+  on public.tts_audio_cache (text_hash);
+create index if not exists idx_tts_audio_cache_last_accessed_at
+  on public.tts_audio_cache (last_accessed_at);
+
+alter table public.tts_usage_monthly enable row level security;
+alter table public.app_voice_settings enable row level security;
+alter table public.tts_usage_monthly_by_provider enable row level security;
+alter table public.tts_audio_cache enable row level security;
+
+-- Legacy timeline access remains unchanged until the Auth-enabled frontend
+-- and strict legacy RLS cutover can be released together.
+grant all on table public.timeline_nodes, public.checklist_items
+to anon, authenticated, service_role;
+
+grant all on table
+  public.tts_usage_monthly,
+  public.app_voice_settings,
+  public.tts_usage_monthly_by_provider,
+  public.tts_audio_cache
+to service_role;
+
+create or replace function public.reserve_tts_chars(
+  p_month text,
+  p_chars integer,
+  p_limit integer default 4000000
+)
+returns table(allowed boolean, used_chars integer, remaining_chars integer)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_used integer;
+  v_limit integer;
+begin
+  if p_chars is null or p_chars <= 0 then
+    return query select true, 0, p_limit;
+    return;
+  end if;
+
+  insert into public.tts_usage_monthly(month, used_chars, limit_chars, updated_at)
+  values (p_month, 0, p_limit, now())
+  on conflict (month) do nothing;
+
+  update public.tts_usage_monthly
+  set
+    used_chars = public.tts_usage_monthly.used_chars + p_chars,
+    limit_chars = p_limit,
+    updated_at = now()
+  where
+    public.tts_usage_monthly.month = p_month
+    and public.tts_usage_monthly.used_chars + p_chars <= p_limit
+  returning public.tts_usage_monthly.used_chars, public.tts_usage_monthly.limit_chars
+  into v_used, v_limit;
+
+  if found then
+    return query select true, v_used, greatest(v_limit - v_used, 0);
+    return;
+  end if;
+
+  select t.used_chars, t.limit_chars
+  into v_used, v_limit
+  from public.tts_usage_monthly t
+  where t.month = p_month;
+
+  return query
+  select false,
+    coalesce(v_used, 0),
+    greatest(coalesce(v_limit, p_limit) - coalesce(v_used, 0), 0);
+end;
+$$;
+
+create or replace function public.reserve_tts_chars_v2(
+  p_month text,
+  p_chars integer,
+  p_primary_limit integer default 4000000,
+  p_backup_limit integer default 4000000
+)
+returns table(
+  allowed boolean,
+  provider_key text,
+  primary_used_chars integer,
+  primary_remaining_chars integer,
+  backup_used_chars integer,
+  backup_remaining_chars integer,
+  total_used_chars integer,
+  total_remaining_chars integer
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_primary_used integer := 0;
+  v_backup_used integer := 0;
+  v_provider text := '';
+begin
+  if p_chars is null or p_chars <= 0 then
+    return query
+    select
+      false,
+      ''::text,
+      0,
+      greatest(0, p_primary_limit),
+      0,
+      greatest(0, p_backup_limit),
+      0,
+      greatest(0, p_primary_limit + p_backup_limit);
+    return;
+  end if;
+
+  insert into public.tts_usage_monthly_by_provider(
+    month,
+    provider_key,
+    used_chars,
+    limit_chars,
+    updated_at
+  )
+  values
+    (p_month, 'primary', 0, p_primary_limit, now()),
+    (p_month, 'backup', 0, p_backup_limit, now())
+  on conflict (month, provider_key) do update
+    set limit_chars = excluded.limit_chars,
+        updated_at = public.tts_usage_monthly_by_provider.updated_at;
+
+  update public.tts_usage_monthly_by_provider
+  set used_chars = used_chars + p_chars,
+      limit_chars = p_primary_limit,
+      updated_at = now()
+  where month = p_month
+    and provider_key = 'primary'
+    and used_chars + p_chars <= p_primary_limit
+  returning used_chars into v_primary_used;
+
+  if found then
+    v_provider := 'primary';
+
+    select used_chars into v_backup_used
+    from public.tts_usage_monthly_by_provider
+    where month = p_month and provider_key = 'backup';
+
+    return query
+    select
+      true,
+      v_provider,
+      v_primary_used,
+      greatest(0, p_primary_limit - v_primary_used),
+      coalesce(v_backup_used, 0),
+      greatest(0, p_backup_limit - coalesce(v_backup_used, 0)),
+      v_primary_used + coalesce(v_backup_used, 0),
+      greatest(0, p_primary_limit + p_backup_limit - v_primary_used - coalesce(v_backup_used, 0));
+    return;
+  end if;
+
+  update public.tts_usage_monthly_by_provider
+  set used_chars = used_chars + p_chars,
+      limit_chars = p_backup_limit,
+      updated_at = now()
+  where month = p_month
+    and provider_key = 'backup'
+    and used_chars + p_chars <= p_backup_limit
+  returning used_chars into v_backup_used;
+
+  if found then
+    v_provider := 'backup';
+
+    select used_chars into v_primary_used
+    from public.tts_usage_monthly_by_provider
+    where month = p_month and provider_key = 'primary';
+
+    return query
+    select
+      true,
+      v_provider,
+      coalesce(v_primary_used, 0),
+      greatest(0, p_primary_limit - coalesce(v_primary_used, 0)),
+      v_backup_used,
+      greatest(0, p_backup_limit - v_backup_used),
+      coalesce(v_primary_used, 0) + v_backup_used,
+      greatest(0, p_primary_limit + p_backup_limit - coalesce(v_primary_used, 0) - v_backup_used);
+    return;
+  end if;
+
+  select used_chars into v_primary_used
+  from public.tts_usage_monthly_by_provider
+  where month = p_month and provider_key = 'primary';
+
+  select used_chars into v_backup_used
+  from public.tts_usage_monthly_by_provider
+  where month = p_month and provider_key = 'backup';
+
+  return query
+  select
+    false,
+    ''::text,
+    coalesce(v_primary_used, 0),
+    greatest(0, p_primary_limit - coalesce(v_primary_used, 0)),
+    coalesce(v_backup_used, 0),
+    greatest(0, p_backup_limit - coalesce(v_backup_used, 0)),
+    coalesce(v_primary_used, 0) + coalesce(v_backup_used, 0),
+    greatest(
+      0,
+      p_primary_limit + p_backup_limit - coalesce(v_primary_used, 0) - coalesce(v_backup_used, 0)
+    );
+end;
+$$;
+
+grant execute on function public.reserve_tts_chars(text, integer, integer)
+to public, anon, authenticated, service_role;
+grant execute on function public.reserve_tts_chars_v2(text, integer, integer, integer)
+to public, anon, authenticated, service_role;
+
 create type public.app_role as enum ('volunteer', 'coordinator', 'admin');
 create type public.service_status as enum ('draft', 'published', 'completed', 'cancelled');
 create type public.assignment_status as enum ('scheduled', 'confirmed', 'declined', 'completed', 'cancelled');
