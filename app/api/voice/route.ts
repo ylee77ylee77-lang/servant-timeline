@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 import { createHash, createSign } from "node:crypto";
+import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -702,42 +703,49 @@ const synthesizeChirpAudio = async (
   }
 };
 
-export async function GET() {
-  const settings = await getGlobalVoiceSettings();
-  const usageState = await getUsageState();
+export async function GET(request: NextRequest) {
+  try {
+    await requireActiveUser(request);
+    const settings = await getGlobalVoiceSettings();
+    const usageState = await getUsageState();
 
-  return NextResponse.json({
-    ok: true,
-    route: "/api/voice",
-    engine: "google-cloud-text-to-speech",
-    voiceFamily: "cmn-CN-Chirp3-HD",
-    voices: {
-      zephyr: VOICE_PROFILE_MAP.zephyr.name,
-      iapetus: VOICE_PROFILE_MAP.iapetus.name
-    },
-    capabilities: {
-      speakingRateApplied: true,
-      pitchApplied: false,
-      volumeGainApplied: false,
-      punctuationPreserved: true,
-      sharedAudioCache: true,
-      previewCache: true,
-      geminiTtsDisabled: true
-    },
-    currentGlobalVoiceSettings: settings,
-    hasGoogleTtsCredentials: hasProviderCredentials("primary"),
-    hasBackupGoogleTtsCredentials: hasProviderCredentials("backup"),
-    usageCounterHealthy: usageState.healthy,
-    usageCounterReason: usageState.reason,
-    primaryCharLimit: getPrimaryLimit(),
-    backupCharLimit: getBackupLimit(),
-    monthlyCharLimit: usageState.snapshot.total.limitChars,
-    usage: usageState.snapshot
-  });
+    return NextResponse.json({
+      ok: true,
+      route: "/api/voice",
+      engine: "google-cloud-text-to-speech",
+      voiceFamily: "cmn-CN-Chirp3-HD",
+      voices: {
+        zephyr: VOICE_PROFILE_MAP.zephyr.name,
+        iapetus: VOICE_PROFILE_MAP.iapetus.name
+      },
+      capabilities: {
+        speakingRateApplied: true,
+        pitchApplied: false,
+        volumeGainApplied: false,
+        punctuationPreserved: true,
+        sharedAudioCache: true,
+        previewCache: true,
+        geminiTtsDisabled: true
+      },
+      currentGlobalVoiceSettings: settings,
+      hasGoogleTtsCredentials: hasProviderCredentials("primary"),
+      hasBackupGoogleTtsCredentials: hasProviderCredentials("backup"),
+      usageCounterHealthy: usageState.healthy,
+      usageCounterReason: usageState.reason,
+      primaryCharLimit: getPrimaryLimit(),
+      backupCharLimit: getBackupLimit(),
+      monthlyCharLimit: usageState.snapshot.total.limitChars,
+      usage: usageState.snapshot
+    });
+  } catch (error) {
+    const authError = getAuthErrorResponse(error);
+    return NextResponse.json({ error: authError.message }, { status: authError.status });
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    await requireActiveUser(request);
     const body = await request.json().catch(() => ({}));
     const speechText = normalizeSpeechText(body.text);
     const isPreview = body.preview === true;
@@ -948,6 +956,10 @@ export async function POST(request: NextRequest) {
       }
     });
   } catch (error: unknown) {
+    const authError = getAuthErrorResponse(error);
+    if (authError.status === 401 || authError.status === 403) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
     const message = error instanceof Error ? error.message : "Google Cloud Chirp 3 HD 產生語音失敗。";
     console.error("Google Chirp 3 HD TTS unhandled error", { message });
     return NextResponse.json(

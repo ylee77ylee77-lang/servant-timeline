@@ -21,7 +21,9 @@ begin
       'service_check_ins',
       'check_in_station_confirmations',
       'activity_logs',
-      'post_service_reviews'
+      'post_service_reviews',
+      'timeline_nodes',
+      'checklist_items'
     )
     and not c.relrowsecurity;
 
@@ -64,6 +66,26 @@ begin
       and grantee = 'anon'
   ) then
     raise exception 'anon has a grant on a protected foundation table';
+  end if;
+
+  if has_table_privilege('anon', 'public.timeline_nodes', 'SELECT')
+     or has_table_privilege('anon', 'public.checklist_items', 'SELECT')
+     or has_table_privilege('anon', 'public.timeline_nodes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('anon', 'public.checklist_items', 'INSERT,UPDATE,DELETE') then
+    raise exception 'anon still has legacy timeline/checklist access';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.set_checklist_item_completion(text,boolean)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'authenticated',
+       'public.set_checklist_item_completion(text,boolean)',
+       'EXECUTE'
+     ) then
+    raise exception 'Checklist completion RPC privileges are incorrect';
   end if;
 end;
 $$;

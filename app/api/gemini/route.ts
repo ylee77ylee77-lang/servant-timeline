@@ -1,7 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { getAuthErrorResponse, requireCoordinator } from '@/lib/auth/require-admin';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    await requireCoordinator(req);
     const body = await req.json();
     const { prompt, systemInstruction, responseSchema } = body;
 
@@ -45,6 +47,10 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ text: text?.trim() });
   } catch (error: any) {
+    const authError = getAuthErrorResponse(error);
+    if (authError.status === 401 || authError.status === 403) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
     console.error("伺服器端 Gemini API 發生錯誤:", error);
     return NextResponse.json({ error: error.message || "伺服器內部錯誤" }, { status: 500 });
   }

@@ -15,12 +15,11 @@ The foundation migration is additive and preserves all existing
 `timeline_nodes` and `checklist_items` rows. It adds a nullable `service_id` to
 `timeline_nodes`; existing rows remain shared legacy timeline rows.
 
-The migration intentionally does **not** enable RLS on `timeline_nodes` or
-`checklist_items`. The production frontend still authenticates to PostgREST as
-`anon` and performs direct writes. Enabling strict RLS before the Auth-enabled
-frontend is deployed would break current production behavior. That cutover
-must be a separate reviewed migration released together with the frontend Auth
-change.
+The first migration intentionally leaves RLS off on `timeline_nodes` and
+`checklist_items`. The Auth cutover migration enables their RLS, removes all
+`anon` grants, permits active users to read, permits coordinators/admins to
+manage definitions, and exposes one narrow completion RPC for active users.
+Apply that migration only as part of the coordinated Auth frontend release.
 
 New foundation tables have RLS enabled immediately, have no `anon` access, and
 use explicit grants for `authenticated` and `service_role`.
@@ -34,6 +33,35 @@ use explicit grants for `authenticated` and `service_role`.
 5. Create the first Auth user, then grant `admin` only through a reviewed,
    server-side administrative operation. Never bootstrap an admin from
    user-editable metadata.
+
+## Auth cutover configuration
+
+The browser requires these public environment variable names:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (preferred), or the legacy
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Server-only account administration requires `SUPABASE_SERVICE_ROLE_KEY`. Never
+prefix that value with `NEXT_PUBLIC_`.
+
+After applying both migrations, create the first administrator once from a
+trusted terminal with temporary `BOOTSTRAP_ACCOUNT_CODE`, `BOOTSTRAP_PASSWORD`,
+and `BOOTSTRAP_DISPLAY_NAME` environment variables:
+
+```bash
+npm run bootstrap:admin
+```
+
+The script refuses to run when an administrator already exists and never logs
+credentials. Remove the temporary bootstrap values immediately afterward.
+
+Because the cutover migration also removes anonymous legacy access, use a
+reviewed maintenance window: prepare the frontend and environment variables,
+record/backup production row counts, apply the migrations, run the bootstrap
+once, release the Auth frontend, then immediately run the verification SQL and
+login smoke tests. Do not leave the migrated database serving the old anonymous
+frontend.
 
 Do not apply these migrations to production as part of a Vercel preview or
 application build.
@@ -60,3 +88,17 @@ grant execute on function public.reserve_tts_chars_v2(text, integer, integer, in
 That rollback reopens a known quota-abuse vulnerability and must not be the
 normal recovery path. Server-side calls using `service_role` continue to work
 after the restrictive migration.
+
+For an Auth-cutover emergency rollback, restore the previously deployed
+anonymous frontend first, then disable RLS and restore the legacy grants in one
+reviewed transaction. This temporarily reopens the known anonymous CRUD risk:
+
+```sql
+alter table public.timeline_nodes disable row level security;
+alter table public.checklist_items disable row level security;
+grant all on public.timeline_nodes, public.checklist_items to anon, authenticated;
+```
+
+Do not delete `profiles.account_code`, Auth users, or operational records during
+rollback. Prefer a forward fix whenever the authenticated frontend can still
+reach the database.
