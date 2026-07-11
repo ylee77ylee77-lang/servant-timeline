@@ -36,8 +36,8 @@ all(
 
 s = s.replace(
   /const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v\d+";\s*const VOICE_AUDIO_CACHE_VERSION = "[^"]+";/,
-  `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v11";
-  const VOICE_AUDIO_CACHE_VERSION = "v11-chirp3-html-audio";`
+  `const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v12";
+  const VOICE_AUDIO_CACHE_VERSION = "v12-chirp3-unlocked-audio";`
 );
 
 all(
@@ -92,21 +92,84 @@ if (!s.includes('data-voice-profile-selector="chirp3"')) {
   changed = true;
 }
 
-if (!s.includes("const playVoiceBlob = async")) {
-  const marker = `  const loadVoiceBuffer = async (text: string) => {`;
-  const helper = `  const playVoiceBlob = async (blob: Blob) => {
-    const objectUrl = URL.createObjectURL(blob);
-    const audio = new Audio(objectUrl);
-    audio.preload = "auto";
-    audio.volume = 1;
+all(
+`  const voiceAudioContextRef = useRef<any>(null);
+  const voiceBufferCacheRef = useRef<Map<string, any>>(new Map());`,
+`  const voiceAudioContextRef = useRef<any>(null);
+  const voiceHtmlAudioRef = useRef<HTMLAudioElement | null>(null);
+  const voiceHtmlAudioUnlockedRef = useRef(false);
+  const voiceBufferCacheRef = useRef<Map<string, any>>(new Map());`);
 
+const oldPlayerPattern = /  const playVoiceBlob = async \(blob: Blob\) => \{[\s\S]*?\n  \};\n\n  const loadVoiceBuffer = async/;
+const newPlayer = `  const getVoiceHtmlAudio = () => {
+    if (typeof window === "undefined") return null;
+    if (!voiceHtmlAudioRef.current) {
+      const audio = new Audio();
+      audio.preload = "auto";
+      audio.volume = 1;
+      audio.playsInline = true;
+      voiceHtmlAudioRef.current = audio;
+    }
+    return voiceHtmlAudioRef.current;
+  };
+
+  const unlockVoiceHtmlAudio = async () => {
+    const audio = getVoiceHtmlAudio();
+    if (!audio || voiceHtmlAudioUnlockedRef.current) return;
+    const silentWav = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAAAAAA==";
     try {
+      audio.src = silentWav;
+      audio.muted = true;
+      await audio.play();
+      audio.pause();
+      audio.currentTime = 0;
+      audio.muted = false;
+      voiceHtmlAudioUnlockedRef.current = true;
+      console.info("語音播放器已解鎖");
+    } catch (err) {
+      audio.muted = false;
+      console.warn("語音播放器尚未解鎖:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const unlock = () => { void unlockVoiceHtmlAudio(); };
+    document.addEventListener("pointerdown", unlock, { passive: true });
+    document.addEventListener("touchend", unlock, { passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", unlock);
+      document.removeEventListener("touchend", unlock);
+    };
+  }, []);
+
+  const playVoiceBlob = async (blob: Blob) => {
+    const audio = getVoiceHtmlAudio();
+    if (!audio) throw new Error("此裝置無法建立語音播放器。");
+    if (!blob || blob.size === 0) throw new Error("語音音檔內容為空。");
+
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      audio.pause();
+      audio.src = objectUrl;
+      audio.currentTime = 0;
+      audio.muted = false;
+      audio.volume = 1;
       await new Promise<void>((resolve, reject) => {
-        audio.onended = () => resolve();
-        audio.onerror = () => reject(new Error("瀏覽器無法播放語音音檔。"));
-        const playPromise = audio.play();
-        if (playPromise && typeof playPromise.catch === "function") {
-          playPromise.catch(reject);
+        const cleanup = () => {
+          audio.onended = null;
+          audio.onerror = null;
+          audio.onplaying = null;
+        };
+        audio.onended = () => { cleanup(); resolve(); };
+        audio.onerror = () => { cleanup(); reject(new Error("瀏覽器無法播放語音音檔。")); };
+        audio.onplaying = () => {
+          voiceHtmlAudioUnlockedRef.current = true;
+          console.info("語音開始播放", { bytes: blob.size, type: blob.type || "audio/mpeg" });
+        };
+        const p = audio.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(err => { cleanup(); reject(err); });
         }
       });
     } finally {
@@ -117,9 +180,15 @@ if (!s.includes("const playVoiceBlob = async")) {
     }
   };
 
-${marker}`;
-  if (!s.includes(marker)) throw new Error("[chirp3-front] loadVoiceBuffer marker missing");
-  s = s.replace(marker, helper);
+  const loadVoiceBuffer = async`;
+
+if (oldPlayerPattern.test(s)) {
+  s = s.replace(oldPlayerPattern, newPlayer);
+  changed = true;
+} else if (!s.includes("const unlockVoiceHtmlAudio = async")) {
+  const marker = `  const loadVoiceBuffer = async`;
+  if (!s.includes(marker)) throw new Error("[chirp3-front] audio insertion marker missing");
+  s = s.replace(marker, `${newPlayer}`);
   changed = true;
 }
 
@@ -138,6 +207,19 @@ all(
 `      const blob = await response.blob();
       await playVoiceBlob(blob);`);
 
+all(
+`      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
+      const response = await fetch("/api/voice", {`,
+`      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+      await unlockVoiceHtmlAudio();
+
+      const response = await fetch("/api/voice", {`);
+
 all("忘記密碼？設定新密碼新密碼", "忘記密碼？設定新密碼");
 all("設定新密碼新密碼", "設定新密碼");
 all("本月 Google TTS 用量", "本月語音字元用量");
@@ -152,7 +234,7 @@ all("聲音由管理員統一設定；開啟語音助理時會盡量保持畫面
 all(`{ key: "status", label: "狀態", icon: BarChart2, color: "purple" }`, `{ key: "status", label: "現場", icon: BarChart2, color: "purple" }`);
 
 if (!s.includes("清除舊語音快取失敗")) {
-  const v = `  const VOICE_AUDIO_CACHE_VERSION = "v11-chirp3-html-audio";`;
+  const v = `  const VOICE_AUDIO_CACHE_VERSION = "v12-chirp3-unlocked-audio";`;
   s = s.replace(v, `${v}
   useEffect(() => {
     if (typeof window === "undefined" || !("caches" in window)) return;
@@ -163,8 +245,9 @@ if (!s.includes("清除舊語音快取失敗")) {
 
 if (s.includes('.replace(/[，。！？、；：')) throw new Error("[chirp3-front] punctuation still removed");
 if (!s.includes('data-voice-profile-selector="chirp3"')) throw new Error("[chirp3-front] selector missing");
-if (!s.includes('VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v11"')) throw new Error("[chirp3-front] cache v11 missing");
-if (!s.includes("const playVoiceBlob = async")) throw new Error("[chirp3-front] HTML audio player missing");
+if (!s.includes('VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v12"')) throw new Error("[chirp3-front] cache v12 missing");
+if (!s.includes("const unlockVoiceHtmlAudio = async")) throw new Error("[chirp3-front] audio unlock missing");
+if (!s.includes("voiceHtmlAudioRef")) throw new Error("[chirp3-front] persistent audio ref missing");
 
 fs.writeFileSync(file, s, "utf8");
-console.log(changed ? "[chirp3-front] applied and verified" : "[chirp3-front] already stable");
+console.log(changed ? "[chirp3-front] unlocked audio applied and verified" : "[chirp3-front] already stable");
