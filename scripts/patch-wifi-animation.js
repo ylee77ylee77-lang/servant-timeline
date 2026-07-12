@@ -20,11 +20,11 @@ function patch(needle, replacement, label) {
 }
 
 patch(
-`  Loader2,
-  Eye,`,
+`  Loader2
+} from 'lucide-react';`,
 `  Loader2,
   RefreshCw,
-  Eye,`,
+} from 'lucide-react';`,
 "import RefreshCw icon"
 );
 
