@@ -66,8 +66,10 @@ export async function POST(request: NextRequest) {
 
     const { error: profileError } = await supabase
       .from("profiles")
-      .update({ account_code: accountCode, display_name: displayName, is_active: true })
-      .eq("id", createdUserId);
+      .upsert(
+        { id: createdUserId, account_code: accountCode, display_name: displayName, is_active: true },
+        { onConflict: "id" }
+      );
     if (profileError) throw profileError;
 
     const { error: deleteRolesError } = await supabase

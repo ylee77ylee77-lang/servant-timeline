@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -47,44 +48,81 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const authorizedUserIdRef = useRef<string | null>(null);
+  const authorizationRequestRef = useRef(0);
   const publicConfig = getPublicSupabaseConfig();
   const isConfigured = Boolean(publicConfig.url && publicConfig.publishableKey);
 
   const loadAuthorization = useCallback(async (nextSession: Session | null) => {
-    setSession(nextSession);
-    setDisplayName("");
-    setAccountCode("");
-    setRoles([]);
-    setIsActive(false);
+    const requestId = authorizationRequestRef.current + 1;
+    authorizationRequestRef.current = requestId;
 
-    if (!nextSession) return;
-
-    const supabase = getSupabaseBrowserClient();
-    const [{ data: profile, error: profileError }, { data: roleRows, error: roleError }] =
-      await Promise.all([
-        supabase
-          .from("profiles")
-          .select("display_name,account_code,is_active")
-          .eq("id", nextSession.user.id)
-          .maybeSingle(),
-        supabase.from("user_roles").select("role").eq("user_id", nextSession.user.id),
-      ]);
-
-    if (profileError || roleError || !profile) {
-      setErrorMessage("無法載入帳號權限，請稍後再試。");
+    if (!nextSession) {
+      authorizedUserIdRef.current = null;
+      setSession(null);
+      setDisplayName("");
+      setAccountCode("");
+      setRoles([]);
+      setIsActive(false);
+      setErrorMessage("");
+      setIsLoading(false);
       return;
     }
 
-    setDisplayName(String(profile.display_name || "同工"));
-    setAccountCode(String(profile.account_code || ""));
-    setRoles(
-      (roleRows ?? [])
-        .map((row) => row.role)
-        .filter((role): role is AppRole =>
-          ["volunteer", "coordinator", "admin"].includes(String(role))
-        )
-    );
-    setIsActive(Boolean(profile.is_active));
+    const isSameAuthorizedUser = authorizedUserIdRef.current === nextSession.user.id;
+    setSession(nextSession);
+
+    // Keep an already-authorized user's UI mounted while Supabase refreshes the
+    // session token. Clear stale authorization only when the signed-in user
+    // actually changes.
+    if (!isSameAuthorizedUser) {
+      setIsLoading(true);
+      setDisplayName("");
+      setAccountCode("");
+      setRoles([]);
+      setIsActive(false);
+    }
+
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const [{ data: profile, error: profileError }, { data: roleRows, error: roleError }] =
+        await Promise.all([
+          supabase
+            .from("profiles")
+            .select("display_name,account_code,is_active")
+            .eq("id", nextSession.user.id)
+            .maybeSingle(),
+          supabase.from("user_roles").select("role").eq("user_id", nextSession.user.id),
+        ]);
+
+      if (authorizationRequestRef.current !== requestId) return;
+
+      if (profileError || roleError || !profile) {
+        setErrorMessage("無法載入帳號權限，請稍後再試。");
+        return;
+      }
+
+      authorizedUserIdRef.current = nextSession.user.id;
+      setErrorMessage("");
+      setDisplayName(String(profile.display_name || "同工"));
+      setAccountCode(String(profile.account_code || ""));
+      setRoles(
+        (roleRows ?? [])
+          .map((row) => row.role)
+          .filter((role): role is AppRole =>
+            ["volunteer", "coordinator", "admin"].includes(String(role))
+          )
+      );
+      setIsActive(Boolean(profile.is_active));
+    } catch {
+      if (authorizationRequestRef.current === requestId) {
+        setErrorMessage("無法載入帳號權限，請稍後再試。");
+      }
+    } finally {
+      if (authorizationRequestRef.current === requestId) {
+        setIsLoading(false);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -95,16 +133,21 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     let mounted = true;
 
-    void supabase.auth.getSession().then(async ({ data }) => {
-      if (!mounted) return;
-      await loadAuthorization(data.session);
-      if (mounted) setIsLoading(false);
-    });
+    void supabase.auth.getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        void loadAuthorization(data.session);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setErrorMessage("無法確認登入狀態，請重新整理後再試。");
+        setIsLoading(false);
+      });
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       window.setTimeout(() => {
         if (!mounted) return;
-        void loadAuthorization(nextSession).finally(() => setIsLoading(false));
+        void loadAuthorization(nextSession);
       }, 0);
     });
 

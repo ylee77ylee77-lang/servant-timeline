@@ -66,6 +66,16 @@ frontend.
 Do not apply these migrations to production as part of a Vercel preview or
 application build.
 
+## Frontend integration status
+
+The schema is ready to persist check-ins and station confirmations, but the
+current frontend does not yet write to `service_check_ins` or
+`check_in_station_confirmations`. It keeps check-in and scanned-station state
+in browser memory, while the remembered display identity and phone suffix stay
+in local storage. Do not describe those operational records as persistent until
+the frontend is connected to provisioned `worship_services` and
+`service_stations` rows and the end-to-end flow is verified.
+
 ## Rollback notes
 
 Prefer a forward-fix migration. The new schema may contain Auth-linked or

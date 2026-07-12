@@ -271,6 +271,9 @@ const getDefaultUsageSnapshot = (): UsageSnapshot => {
   };
 };
 
+const isUsageRow = (value: unknown): value is { provider_key?: unknown; used_chars?: unknown } =>
+  typeof value === "object" && value !== null;
+
 const getUsageState = async (): Promise<{ snapshot: UsageSnapshot; healthy: boolean; reason: string }> => {
   const snapshot = getDefaultUsageSnapshot();
   const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
@@ -297,12 +300,12 @@ const getUsageState = async (): Promise<{ snapshot: UsageSnapshot; healthy: bool
       return { snapshot, healthy: false, reason: `usage_counter_http_${response.status}` };
     }
 
-    const rows = await response.json().catch(() => []);
+    const rows: unknown = await response.json().catch(() => []);
     const primaryRow = Array.isArray(rows)
-      ? rows.find((row: any) => row.provider_key === "primary")
+      ? rows.find((row) => isUsageRow(row) && row.provider_key === "primary")
       : null;
     const backupRow = Array.isArray(rows)
-      ? rows.find((row: any) => row.provider_key === "backup")
+      ? rows.find((row) => isUsageRow(row) && row.provider_key === "backup")
       : null;
 
     const primaryUsed = Math.max(0, Number(primaryRow?.used_chars || 0));

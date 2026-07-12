@@ -145,12 +145,12 @@ const fetchUsage = async () => {
 
   if (!response.ok) return snapshot;
 
-  const rows = await response.json().catch(() => []);
+  const rows: unknown = await response.json().catch(() => []);
   const primaryRow = Array.isArray(rows)
-    ? rows.find((row: any) => row.provider_key === "primary")
+    ? rows.find((row) => isUsageRow(row) && row.provider_key === "primary")
     : null;
   const backupRow = Array.isArray(rows)
-    ? rows.find((row: any) => row.provider_key === "backup")
+    ? rows.find((row) => isUsageRow(row) && row.provider_key === "backup")
     : null;
 
   const primaryUsed = Math.max(0, Number(primaryRow?.used_chars || 0));
@@ -179,7 +179,13 @@ const fetchUsage = async () => {
   };
 };
 
-const normalizeSettingsRow = (row: any) => {
+const isUsageRow = (value: unknown): value is { provider_key?: unknown; used_chars?: unknown } =>
+  typeof value === "object" && value !== null;
+
+const normalizeSettingsRow = (value: unknown) => {
+  const row = typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : {};
   const voiceGender: "female" | "male" = row?.voice_gender === "male" ? "male" : "female";
 
   return {
