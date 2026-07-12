@@ -87,6 +87,17 @@ begin
      ) then
     raise exception 'Checklist completion RPC privileges are incorrect';
   end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'check_in_station_confirmations'
+      and policyname = 'station_confirmations_insert_own'
+      and coalesce(with_check, '') like '%station_confirmed%'
+  ) then
+    raise exception 'station correction policy is missing station_confirmed support';
+  end if;
 end;
 $$;
 

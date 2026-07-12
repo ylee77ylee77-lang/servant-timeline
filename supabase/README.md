@@ -66,15 +66,24 @@ frontend.
 Do not apply these migrations to production as part of a Vercel preview or
 application build.
 
-## Frontend integration status
+## Persistent check-in rollout
 
-The schema is ready to persist check-ins and station confirmations, but the
-current frontend does not yet write to `service_check_ins` or
-`check_in_station_confirmations`. It keeps check-in and scanned-station state
-in browser memory, while the remembered display identity and phone suffix stay
-in local storage. Do not describe those operational records as persistent until
-the frontend is connected to provisioned `worship_services` and
-`service_stations` rows and the end-to-end flow is verified.
+Coordinators and administrators open a dated worship service from
+`/admin/services`, entering the real report and worship start times. This
+publishes the service and provisions its standard stations. Active users may
+then check in and confirm a station only for that published service and only
+when the request comes from the configured church network.
+
+The frontend restores the user's latest same-day record from
+`service_check_ins` and `check_in_station_confirmations`, so an Auth refresh or
+page reload no longer discards operational status. The remembered phone suffix
+remains local-only contact metadata and is not used for authorization.
+
+Rolling back only the persistent check-in policy should restore the prior
+`station_confirmations_insert_own` condition that accepts `checked_in` but not
+`station_confirmed`. This stops volunteer station corrections without deleting
+existing check-ins or confirmation history. Prefer a forward fix after any
+operational records have been created.
 
 ## Rollback notes
 

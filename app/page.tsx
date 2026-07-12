@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import { 
   Check, 
   Clock, 
@@ -32,6 +33,7 @@ import { BrowserQRCodeReader } from '@zxing/browser';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
+import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 
 // 第一階段 PWA 完成版：報到、堂次、QR Code 崗位確認、總招控場
 const { url: supabaseUrl, publishableKey: supabasePublishableKey } = getPublicSupabaseConfig();
@@ -127,27 +129,8 @@ export default function App() {
   const [detailModal, setDetailModal] = useState<{isOpen: boolean, title: string, details: string}>({isOpen: false, title: '', details: ''});
 
   const [currentService, setCurrentService] = useState(''); 
-  const serviceOptions = ['六晚崇', '主一堂', '主二堂'];
-
-  const stationOptionsByService: Record<string, string[]> = {
-    "六晚崇": [
-      "總招", "聖餐助手", "電梯專招", "手扶梯專招", "2樓外場專招", "2樓大堂專招",
-      "1A 區塊牧招", "1B 區塊牧招", "2A 區塊牧招", "2B 區塊牧招", "2C 區塊牧招",
-      "3A 區塊牧招", "3B 區塊牧招", "3C 區塊牧招", "4A 區塊牧招", "4B 區塊牧招", "4C 區塊牧招", "5 區塊牧招"
-    ],
-    "主一堂": [
-      "總招", "副總招", "聖餐助手", "電梯專招", "手扶梯專招", "2樓外場專招", "2樓大堂專招", "3樓大堂專招",
-      "1A 區塊牧招", "1B 區塊牧招", "2A 區塊牧招", "2B 區塊牧招", "2C 區塊牧招",
-      "3A 區塊牧招", "3B 區塊牧招", "3C 區塊牧招", "4A 區塊牧招", "4B 區塊牧招", "4C 區塊牧招",
-      "5 區塊牧招", "6 區塊牧招", "7A 區塊牧招", "7B 區塊牧招", "8 區塊牧招", "9A 區塊牧招"
-    ],
-    "主二堂": [
-      "總招", "副總招", "聖餐助手", "電梯專招", "手扶梯專招", "2樓外場專招", "2樓大堂專招", "3樓大堂專招",
-      "1A 區塊牧招", "1B 區塊牧招", "2A 區塊牧招", "2B 區塊牧招", "2C 區塊牧招",
-      "3A 區塊牧招", "3B 區塊牧招", "3C 區塊牧招", "4A 區塊牧招", "4B 區塊牧招", "4C 區塊牧招",
-      "5 區塊牧招", "6 區塊牧招", "7A 區塊牧招", "7B 區塊牧招", "8 區塊牧招", "9A 區塊牧招", "10 區塊牧招"
-    ]
-  };
+  const serviceOptions = [...SERVICE_TYPES];
+  const stationOptionsByService: Record<string, readonly string[]> = STATION_OPTIONS_BY_SERVICE;
 
   const stationQrCodeExamples = [
     { label: "主一堂 聖餐助手", value: "SHK|service=主一堂|station=聖餐助手|role=聖餐助手|tag=101C" },
@@ -189,6 +172,7 @@ export default function App() {
   const [wifiVerified, setWifiVerified] = useState(false);
   const [wifiChecking, setWifiChecking] = useState(false);
   const [wifiCheckMessage, setWifiCheckMessage] = useState("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
+  const [isCheckinSyncing, setIsCheckinSyncing] = useState(false);
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
   const [checkedInDay, setCheckedInDay] = useState<number | null>(null);
@@ -433,6 +417,38 @@ export default function App() {
       console.error("儲存報到身分失敗:", err);
     }
   }, [checkinProfile]);
+
+  const restorePersistentCheckin = useCallback(async () => {
+    try {
+      const response = await fetch("/api/check-in", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      const record = result?.checkIn;
+      if (!record?.id || !record?.serviceType) return;
+
+      const checkedInDate = new Date(record.checkedInAt);
+      setCheckedInAt(new Intl.DateTimeFormat("zh-TW", {
+        timeZone: "Asia/Taipei",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(checkedInDate));
+      setCheckedInDay(checkedInDate.getDay());
+      setCheckedInService(String(record.serviceType));
+      setCurrentService(String(record.serviceType));
+      setConfirmedStation(String(record.stationName || ""));
+      setCheckinStatus(record.stationName || record.status === "station_confirmed" ? "station_confirmed" : "checked_in");
+    } catch (error) {
+      console.warn("恢復持久報到紀錄失敗:", error);
+    }
+  }, [session.access_token]);
+
+  useEffect(() => {
+    void restorePersistentCheckin();
+  }, [restorePersistentCheckin]);
 
   const updatePersonalSettings = (patch: Partial<typeof personalSettings>) => {
     setPersonalSettings(prev => ({ ...prev, ...patch }));
@@ -2513,7 +2529,7 @@ export default function App() {
   }, [activeTab, hasCheckinProfile, checkinStatus, checkWifiConnection]);
 
 
-  const handleLocalCheckin = () => {
+  const handleLocalCheckin = async () => {
     if (!hasCheckinProfile) {
       setCustomAlert({ isOpen: true, message: "請先建立服事身分，再進行報到。" });
       return;
@@ -2525,15 +2541,51 @@ export default function App() {
     }
 
     const now = new Date();
-    const timeText = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const activeWindow = serviceTimeWindows.find((window) =>
+      window.day === now.getDay()
+      && currentMinutes >= timeTextToMinutes(window.start)
+      && currentMinutes <= timeTextToMinutes(window.end)
+    );
+    const serviceType = activeWindow?.service || currentService;
+    if (!isServiceType(serviceType)) {
+      setCustomAlert({ isOpen: true, message: "目前無法判斷服事堂次，請聯絡總招確認。" });
+      return;
+    }
 
-    // 第一階段 PWA：報到只代表「人已到場」；堂次與崗位以 QR 名牌為準。
-    setCheckedInAt(timeText);
-    setCheckedInDay(now.getDay());
-    setCheckedInService("");
-    setConfirmedStation("");
-    setCheckinStatus("checked_in");
-    triggerVibration([200, 100, 200]);
+    setIsCheckinSyncing(true);
+    try {
+      const response = await fetch("/api/check-in", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "check_in", serviceType }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "報到失敗，請稍後再試。");
+
+      const checkedInDate = new Date(result.checkIn.checked_in_at);
+      const timeText = new Intl.DateTimeFormat("zh-TW", {
+        timeZone: "Asia/Taipei",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(checkedInDate);
+      setCheckedInAt(timeText);
+      setCheckedInDay(checkedInDate.getDay());
+      setCheckedInService(serviceType);
+      setCurrentService(serviceType);
+      setConfirmedStation("");
+      setCheckinStatus(result.checkIn.status === "station_confirmed" ? "station_confirmed" : "checked_in");
+      triggerVibration([200, 100, 200]);
+    } catch (error) {
+      setCustomAlert({ isOpen: true, message: error instanceof Error ? error.message : "報到失敗，請稍後再試。" });
+      return;
+    } finally {
+      setIsCheckinSyncing(false);
+    }
 
     window.setTimeout(() => {
       checkinCompletedCardRef.current?.scrollIntoView({
@@ -2544,7 +2596,7 @@ export default function App() {
   };
 
   const handleCorrectCheckedInService = (newService: string) => {
-    if (!serviceOptions.includes(newService)) return;
+    if (!isServiceType(newService)) return;
 
     if (checkinStatus === "not_checked_in") {
       setCurrentService(newService);
@@ -2553,32 +2605,9 @@ export default function App() {
       return;
     }
 
-    if (checkinStatus === "station_confirmed") {
-      setCustomAlert({
-        isOpen: true,
-        message: "崗位已確認完成，堂次已和崗位綁定。若需要更正，請總招協助處理。"
-      });
-      return;
-    }
-
-    if (checkedInService === newService) {
-      setCustomAlert({ isOpen: true, message: `目前已是 ${newService}，不需要更正。` });
-      return;
-    }
-
-    const originalService = checkedInService || currentService || "待確認";
-
-    setCustomConfirm({
+    setCustomAlert({
       isOpen: true,
-      message: `您要將今日堂次從「${originalService}」更正為「${newService}」嗎？更正後，今日流程與提醒會切換為 ${newService}。`,
-      onConfirm: () => {
-        setCheckedInService(newService);
-        setCurrentService(newService);
-        hasManuallySwitchedRef.current = true;
-        setNewNode((prev) => ({ ...prev, service_type: newService }));
-        triggerVibration([120, 80, 120]);
-        setCustomAlert({ isOpen: true, message: `今日堂次已更正為 ${newService}。` });
-      }
+      message: "堂次已寫入報到紀錄並鎖定。若需要更正，請總招協助處理。"
     });
   };
 
@@ -2678,7 +2707,7 @@ export default function App() {
       const separator = "|";
       const [maybeService = "", maybeStation = ""] = value.split(separator).map(part => part.trim());
 
-      if (serviceOptions.includes(maybeService) && maybeStation) {
+      if (isServiceType(maybeService) && maybeStation) {
         return {
           service: maybeService,
           station: maybeStation,
@@ -2691,7 +2720,7 @@ export default function App() {
 
     const directService = checkedInService || currentService;
     const directOptions = getStationOptionsForService(directService);
-    const normalizeStationText = (text: string) => String(text || "").replace(/s/g, "").toLowerCase();
+    const normalizeStationText = (text: string) => String(text || "").replace(/\s/g, "").toLowerCase();
     const normalizedValue = normalizeStationText(value);
     const matchedStation = directOptions.find(option => {
       const normalizedOption = normalizeStationText(option);
@@ -2758,7 +2787,7 @@ export default function App() {
     setStationScannerMessage("可掃描崗位名牌上的 QR Code，或手動輸入崗位碼內容。");
   };
 
-  const confirmStationFromQrCode = (rawCode: string) => {
+  const confirmStationFromQrCode = (rawCode: string, source: "qr" | "manual" = "qr") => {
     const parsed = parseStationQrCode(rawCode);
 
     if (!parsed) {
@@ -2775,32 +2804,57 @@ export default function App() {
       return;
     }
 
-    const applyBadgeStation = () => {
-      if (badgeService && serviceOptions.includes(badgeService)) {
+    const applyBadgeStation = async () => {
+      if (!isServiceType(badgeService)) {
+        setStationScannerMessage("無法確認這張名牌的堂次。");
+        return;
+      }
+
+      setIsCheckinSyncing(true);
+      try {
+        const response = await fetch("/api/check-in", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "confirm_station",
+            serviceType: badgeService,
+            stationName: parsed.station,
+            source,
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || "崗位確認失敗。");
+
         setCheckedInService(badgeService);
         setCurrentService(badgeService);
         hasManuallySwitchedRef.current = true;
         setNewNode((prev) => ({ ...prev, service_type: badgeService }));
+        setAssignedStation(prev => prev || parsed.station);
+        setConfirmedStation(parsed.station);
+        setCheckinStatus("station_confirmed");
+        triggerVibration([200, 100, 200]);
+        handleCloseStationScanner();
+        setCustomAlert({
+          isOpen: true,
+          message: `崗位確認完成：${parsed.station}\n堂次：${badgeService}`
+        });
+      } catch (error) {
+        setStationScannerMessage(error instanceof Error ? error.message : "崗位確認失敗。");
+      } finally {
+        setIsCheckinSyncing(false);
       }
-
-      setAssignedStation(prev => prev || parsed.station);
-      setConfirmedStation(parsed.station);
-      setCheckinStatus("station_confirmed");
-      triggerVibration([200, 100, 200]);
-      handleCloseStationScanner();
-      setCustomAlert({
-        isOpen: true,
-        message: `崗位確認完成：${parsed.station}\n堂次：${badgeService || "今日堂次"}`
-      });
     };
 
     if (parsed.service && existingLockedService && parsed.service !== existingLockedService) {
       triggerVibration([80, 80, 80]);
       setCustomConfirm({
         isOpen: true,
-        message: `這張名牌屬於「${parsed.service}」，但您目前的報到紀錄是「${existingLockedService}」。\n\n可能是您提早到場報到，或剛剛報到堂次尚未更新。若這是總招發給您的名牌，請以名牌堂次為準。`,
-        confirmLabel: "確認名牌堂次",
-        onConfirm: applyBadgeStation
+        message: `這張名牌屬於「${parsed.service}」，但您的持久報到紀錄已鎖定為「${existingLockedService}」。請向總招確認是否拿錯名牌。`,
+        confirmLabel: "我知道了",
+        onConfirm: () => {}
       });
       return;
     }
@@ -2814,13 +2868,13 @@ export default function App() {
           isOpen: true,
           message: `報到時間與名牌堂次不一致。\n\n這張名牌顯示：${parsed.service}\n報到時間：${timeCheck.checkinLabel}\n系統判斷：${timeCheck.reason}\n\n請確認服事時段或名牌堂次是否正確。若這是總招發給您的名牌，請以名牌堂次完成確認。`,
           confirmLabel: `確認名牌堂次：${parsed.service}`,
-          onConfirm: applyBadgeStation
+          onConfirm: () => void applyBadgeStation()
         });
         return;
       }
     }
 
-    applyBadgeStation();
+    void applyBadgeStation();
   };
 
   const handleStartStationCameraScanner = async () => {
@@ -2863,7 +2917,7 @@ export default function App() {
 
             stationQrControlsRef.current = null;
             setStationCameraActive(false);
-            confirmStationFromQrCode(rawValue);
+            confirmStationFromQrCode(rawValue, "qr");
             return;
           }
         }
@@ -2906,7 +2960,7 @@ export default function App() {
     setStationScannerMessage("正在確認崗位...");
 
     window.setTimeout(() => {
-      confirmStationFromQrCode(manualCode);
+      confirmStationFromQrCode(manualCode, "manual");
     }, 0);
   };
 
@@ -2956,7 +3010,7 @@ export default function App() {
 
   const handleDemoStationConfirm = () => {
     const demoStation = assignedStation || (personalSettings.role === "牧招" ? "2C 區塊牧招" : personalSettings.role);
-    confirmStationFromQrCode(`SHK|service=${checkedInService || currentService}|station=${demoStation}|role=${inferRoleFromStation(demoStation)}`);
+    confirmStationFromQrCode(`SHK|service=${checkedInService || currentService}|station=${demoStation}|role=${inferRoleFromStation(demoStation)}`, "manual");
   };
 
   useEffect(() => {
@@ -3449,7 +3503,7 @@ export default function App() {
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
-    const todayService = stationReady ? (checkedInService || currentService || "待確認") : isCheckedIn ? "待名牌確認" : "待報到";
+    const todayService = isCheckedIn ? (checkedInService || currentService || "待確認") : "待報到";
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -3469,7 +3523,7 @@ export default function App() {
               </div>
               <h3 className="text-[18px] font-black text-[#1F2937] mb-2">第一次使用</h3>
               <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                請先建立您的服事身分。這一版先完成前端報到流程；報到只確認您已到場，堂次與崗位會在掃描總招發放的 QR 名牌時自動確認。
+                請先確認您的服事身分。報到會安全寫入今日場次；拿到名牌後，再掃描 QR Code 確認崗位。
               </p>
 
               <div className="space-y-3.5">
@@ -3605,8 +3659,8 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={handleLocalCheckin}
-                  disabled={!wifiVerified || isCheckedIn}
+                  onClick={() => void handleLocalCheckin()}
+                  disabled={!wifiVerified || isCheckedIn || isCheckinSyncing}
                   className={`min-w-[108px] px-5 rounded-[18px] text-sm font-black transition-all ${
                     isCheckedIn
                       ? "bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 cursor-default"
@@ -3615,7 +3669,7 @@ export default function App() {
                         : "bg-[#E6EAF0] text-[#9CA3AF] cursor-not-allowed"
                   }`}
                 >
-                  {isCheckedIn ? "已完成報到" : "立即報到"}
+                  {isCheckedIn ? "已完成報到" : isCheckinSyncing ? "同步中…" : "立即報到"}
                 </button>
               </div>
             </div>
@@ -3764,7 +3818,7 @@ export default function App() {
       return;
     }
 
-    confirmStationFromQrCode(`SHK|service=${checkedInService || currentService}|station=${assignedStation}|role=${inferRoleFromStation(assignedStation)}`);
+    confirmStationFromQrCode(`SHK|service=${checkedInService || currentService}|station=${assignedStation}|role=${inferRoleFromStation(assignedStation)}`, "manual");
   };
 
   const handleControlResetStation = () => {
@@ -4597,13 +4651,21 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2">
+            {canManageTimeline && (
+              <Link
+                href="/admin/services"
+                className="px-3 py-1.5 text-xs font-bold rounded-xl bg-white text-[#00A6A6] border border-[#00A6A6]/20"
+              >
+                場次管理
+              </Link>
+            )}
             {isCurrentUserAdmin && (
-              <a
+              <Link
                 href="/admin/users"
                 className="px-3 py-1.5 text-xs font-bold rounded-xl bg-white text-[#6D55A3] border border-[#6D55A3]/20"
               >
                 帳號管理
-              </a>
+              </Link>
             )}
             <button
               type="button"
