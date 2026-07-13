@@ -1,5 +1,8 @@
 -- Make station visibility explicit even though the referenced worship service
 -- is also protected by RLS. This keeps the boundary local to this policy.
+revoke update (display_name) on public.profiles from authenticated;
+drop policy if exists profiles_update_own_display_name on public.profiles;
+
 drop policy if exists service_stations_select on public.service_stations;
 create policy service_stations_select on public.service_stations
 for select to authenticated

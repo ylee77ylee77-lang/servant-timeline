@@ -100,6 +100,10 @@ timeline rows whose nullable `service_id` is still unset temporarily keep the
 active-user completion behavior so the existing site remains usable. Backfill
 those links before removing this compatibility condition in a later migration.
 
+Profile display names are admin-controlled attendance identities. Authenticated
+users have no direct `UPDATE` grant or own-profile update policy for that
+column; changes must go through a reviewed server-side admin operation.
+
 Regular TTS requests do not trust browser date state. The server requires a
 same-day published service and the caller's persistent check-in; TTS preview is
 admin-only. The in-memory request limiter remains best-effort in serverless

@@ -76,6 +76,22 @@ begin
     raise exception 'anon still has legacy timeline/checklist access';
   end if;
 
+  if has_column_privilege(
+       'authenticated',
+       'public.profiles',
+       'display_name',
+       'UPDATE'
+     )
+     or exists (
+       select 1
+       from pg_policies
+       where schemaname = 'public'
+         and tablename = 'profiles'
+         and policyname = 'profiles_update_own_display_name'
+     ) then
+    raise exception 'Authenticated users can still change admin-controlled display names';
+  end if;
+
   if has_function_privilege(
        'anon',
        'public.set_checklist_item_completion(text,boolean)',

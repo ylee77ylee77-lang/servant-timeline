@@ -799,7 +799,6 @@ to service_role;
 grant usage, select on sequence public.activity_logs_id_seq to service_role;
 
 grant select on public.profiles to authenticated;
-grant update (display_name) on public.profiles to authenticated;
 grant select on public.user_roles to authenticated;
 grant select, insert, update, delete on public.worship_services to authenticated;
 grant select, insert, update, delete on public.service_stations to authenticated;
@@ -816,11 +815,6 @@ using (
   id = (select auth.uid())
   or (select app_private.has_role('coordinator'::public.app_role, 'admin'::public.app_role))
 );
-
-create policy profiles_update_own_display_name on public.profiles
-for update to authenticated
-using (id = (select auth.uid()) and (select app_private.is_active_user()))
-with check (id = (select auth.uid()) and (select app_private.is_active_user()));
 
 create policy user_roles_select on public.user_roles
 for select to authenticated

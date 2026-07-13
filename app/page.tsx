@@ -38,6 +38,8 @@ import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/
 // 第一階段 PWA 完成版：報到、堂次、QR Code 崗位確認、總招控場
 const { url: supabaseUrl, publishableKey: supabasePublishableKey } = getPublicSupabaseConfig();
 const hasValidKeys = Boolean(supabaseUrl && supabasePublishableKey);
+const CHECKIN_PROFILE_STORAGE_PREFIX = "shekinah_checkin_profile_v2";
+const LEGACY_CHECKIN_PROFILE_STORAGE_KEY = "shekinah_checkin_profile_v1";
 
 // 使用原生 fetch 方法連線雲端 (維持原樣)
 const supabaseFetch = async (endpoint: string, method = 'GET', body: any = null) => {
@@ -154,7 +156,7 @@ export default function App() {
 
   // --- 報到 / 崗位 UI 狀態 ---
   // 報到顯示名稱由已驗證的 Supabase Auth 帳號提供；手機後四碼只作現場聯絡辨識。
-  const CHECKIN_PROFILE_STORAGE_KEY = "shekinah_checkin_profile_v1";
+  const checkinProfileStorageKey = `${CHECKIN_PROFILE_STORAGE_PREFIX}:${session.user.id}`;
 
   const [checkinProfile, setCheckinProfile] = useState({
     name: "",
@@ -365,6 +367,7 @@ export default function App() {
         setPersonalSettings(prev => ({
           ...prev,
           ...parsed,
+          name: authDisplayName,
           role: parsed.role === "總召"
             ? "總招"
             : parsed.role === "副總召"
@@ -378,7 +381,7 @@ export default function App() {
     } catch (err) {
       console.error("讀取個人提醒設定失敗:", err);
     }
-  }, []);
+  }, [authDisplayName]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -386,37 +389,41 @@ export default function App() {
     try {
       // Remove obsolete client-side identity credentials from older releases.
       window.localStorage.removeItem("shekinah_checkin_registry_v1");
-      const saved = window.localStorage.getItem(CHECKIN_PROFILE_STORAGE_KEY);
+      window.localStorage.removeItem(LEGACY_CHECKIN_PROFILE_STORAGE_KEY);
+      const saved = window.localStorage.getItem(checkinProfileStorageKey);
       if (!saved) return;
 
       const parsed = JSON.parse(saved);
+      const phoneLast4 = String(parsed.phoneLast4 || "").trim();
+      if (!/^\d{4}$/.test(phoneLast4)) {
+        window.localStorage.removeItem(checkinProfileStorageKey);
+        return;
+      }
+
       setCheckinProfile({
-        name: parsed.name || "",
-        phoneLast4: parsed.phoneLast4 || "",
+        name: authDisplayName,
+        phoneLast4,
         deviceRemembered: parsed.deviceRemembered === true
       });
-
-      if (parsed.name) {
-        setPersonalSettings(prev => ({
-          ...prev,
-          name: parsed.name
-        }));
-      }
+      setPersonalSettings(prev => ({ ...prev, name: authDisplayName }));
     } catch (err) {
       console.error("讀取報到身分失敗:", err);
     }
-  }, []);
+  }, [authDisplayName, checkinProfileStorageKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!checkinProfile.name || !checkinProfile.phoneLast4) return;
 
     try {
-      window.localStorage.setItem(CHECKIN_PROFILE_STORAGE_KEY, JSON.stringify(checkinProfile));
+      window.localStorage.setItem(checkinProfileStorageKey, JSON.stringify({
+        phoneLast4: checkinProfile.phoneLast4,
+        deviceRemembered: checkinProfile.deviceRemembered
+      }));
     } catch (err) {
       console.error("儲存報到身分失敗:", err);
     }
-  }, [checkinProfile]);
+  }, [checkinProfile, checkinProfileStorageKey]);
 
   const restorePersistentCheckin = useCallback(async () => {
     try {
@@ -2261,7 +2268,7 @@ export default function App() {
   }, [isVoiceEnabled, currentService]);
 
   const hasCheckinProfile = Boolean(checkinProfile.name && checkinProfile.phoneLast4);
-  const displayCheckinName = checkinProfile.name || personalSettings.name || "";
+  const displayCheckinName = authDisplayName;
   const isCurrentUserAdmin = isAdmin;
   const canManageTimeline = isCoordinator;
   const canUseQuestionAssistant = canManageTimeline;
@@ -2361,7 +2368,8 @@ export default function App() {
 
   const clearCheckinIdentity = () => {
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(CHECKIN_PROFILE_STORAGE_KEY);
+      window.localStorage.removeItem(checkinProfileStorageKey);
+      window.localStorage.removeItem(LEGACY_CHECKIN_PROFILE_STORAGE_KEY);
     }
 
     setCheckinProfile({
