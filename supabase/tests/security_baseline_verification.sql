@@ -1,5 +1,6 @@
 -- Run after applying the migrations to a local or preview database.
--- The script is read-only and raises an exception when an invariant fails.
+-- The script raises an exception when an invariant fails and rolls back its
+-- temporary TTS reservation before returning.
 
 do $$
 declare
@@ -169,6 +170,32 @@ begin
   end if;
 end;
 $$;
+
+begin;
+set local role service_role;
+
+do $$
+declare
+  reservation record;
+begin
+  select *
+  into reservation
+  from public.reserve_tts_chars_v2(
+    '__security_baseline_verification__',
+    1,
+    10,
+    10
+  );
+
+  if not reservation.allowed
+     or reservation.provider_key <> 'primary'
+     or reservation.primary_used_chars <> 1 then
+    raise exception 'TTS reservation RPC returned an unexpected result';
+  end if;
+end;
+$$;
+
+rollback;
 
 select
   (select count(*) from public.timeline_nodes) as timeline_node_count,
