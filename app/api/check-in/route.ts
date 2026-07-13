@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
       .select("id,service_id,status,checked_in_at")
       .eq("user_id", user.userId)
       .in("service_id", services.map((service) => service.id))
+      .in("status", ["checked_in", "station_confirmed"])
       .order("checked_in_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -111,6 +112,13 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (lookupError) throw lookupError;
 
+    if (existingCheckIn?.status === "cancelled") {
+      return NextResponse.json(
+        { error: "此報到已取消，請聯絡總招重新啟用。" },
+        { status: 409 }
+      );
+    }
+
     if (action === "check_in") {
       if (existingCheckIn) return NextResponse.json({ ok: true, checkIn: existingCheckIn });
       const { data, error } = await supabase
@@ -118,6 +126,24 @@ export async function POST(request: NextRequest) {
         .insert({ service_id: service.id, user_id: user.userId, status: "checked_in", check_in_source: "web" })
         .select("id,service_id,status,checked_in_at")
         .single();
+      if (error?.code === "23505") {
+        // Concurrent retries can both pass the lookup. Resolve the unique-key
+        // race by returning the row that won instead of surfacing a 500.
+        const { data: racedCheckIn, error: raceLookupError } = await supabase
+          .from("service_check_ins")
+          .select("id,service_id,status,checked_in_at")
+          .eq("service_id", service.id)
+          .eq("user_id", user.userId)
+          .maybeSingle();
+        if (raceLookupError) throw raceLookupError;
+        if (racedCheckIn?.status === "cancelled") {
+          return NextResponse.json(
+            { error: "此報到已取消，請聯絡總招重新啟用。" },
+            { status: 409 }
+          );
+        }
+        if (racedCheckIn) return NextResponse.json({ ok: true, checkIn: racedCheckIn });
+      }
       if (error) throw error;
       return NextResponse.json({ ok: true, checkIn: data }, { status: 201 });
     }
