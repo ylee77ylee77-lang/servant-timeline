@@ -126,9 +126,10 @@ begin
     raise exception 'Server-side check-ins lose their activity-log actor attribution';
   end if;
 
-  if activity_log_definition not like '%tg_table_name = ''worship_services'' and tg_op = ''DELETE''%'
-     or activity_log_definition not like '%resolved_service_id := null%' then
-    raise exception 'Deleted services can still violate the activity-log service FK';
+  if activity_log_definition not like '%not exists (%'
+     or activity_log_definition not like '%from public.worship_services ws%'
+     or activity_log_definition not like '%service_id_snapshot%' then
+    raise exception 'Cascading service deletes can still violate the activity-log service FK';
   end if;
 
   if has_column_privilege(
@@ -222,6 +223,7 @@ do $$
 declare
   reservation record;
   deleted_service_id constant uuid := '00000000-0000-4000-8000-000000000001';
+  deleted_station_id constant uuid := '00000000-0000-4000-8000-000000000002';
 begin
   select *
   into reservation
@@ -252,6 +254,16 @@ begin
     'draft'
   );
 
+  insert into public.service_stations (
+    id,
+    service_id,
+    name
+  ) values (
+    deleted_station_id,
+    deleted_service_id,
+    '__security_delete_station__'
+  );
+
   delete from public.worship_services where id = deleted_service_id;
 
   if not exists (
@@ -260,8 +272,20 @@ begin
     where event_type = 'worship_services.delete'
       and subject_id = deleted_service_id::text
       and service_id is null
+      and metadata ->> 'service_id_snapshot' = deleted_service_id::text
   ) then
     raise exception 'Deleting a service did not preserve a valid activity log';
+  end if;
+
+  if not exists (
+    select 1
+    from public.activity_logs
+    where event_type = 'service_stations.delete'
+      and subject_id = deleted_station_id::text
+      and service_id is null
+      and metadata ->> 'service_id_snapshot' = deleted_service_id::text
+  ) then
+    raise exception 'Cascading station deletion did not preserve a valid activity log';
   end if;
 end;
 $$;
