@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { isChurchNetworkRequest } from "@/lib/network/church-wifi";
 import { isServiceType, STATION_OPTIONS_BY_SERVICE } from "@/lib/services/catalog";
+import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
@@ -99,7 +100,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "今日場次尚未由總招開放，請聯絡總招。" }, { status: 409 });
     }
 
-    const supabase = getSupabaseUserClient(request);
+    // Authenticated clients have no direct INSERT grant on operational check-in
+    // tables. Only this network-gated server route may perform these writes.
+    const supabase = getSupabaseAdminClient();
     const { data: existingCheckIn, error: lookupError } = await supabase
       .from("service_check_ins")
       .select("id,service_id,status,checked_in_at")
