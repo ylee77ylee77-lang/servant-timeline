@@ -190,6 +190,18 @@ export async function POST(request: NextRequest) {
         })
         .select("id,station_name_snapshot,confirmed_at")
         .single();
+      if (error?.code === "23505") {
+        const { data: racedConfirmation, error: raceLookupError } = await supabase
+          .from("check_in_station_confirmations")
+          .select("id,station_name_snapshot,confirmed_at")
+          .eq("check_in_id", existingCheckIn.id)
+          .eq("station_id", station.id)
+          .maybeSingle();
+        if (raceLookupError) throw raceLookupError;
+        if (racedConfirmation) {
+          return NextResponse.json({ ok: true, confirmation: racedConfirmation });
+        }
+      }
       if (error) throw error;
       return NextResponse.json({ ok: true, confirmation: data }, { status: 201 });
     }
