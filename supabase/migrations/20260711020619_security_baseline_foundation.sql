@@ -582,11 +582,21 @@ set search_path = pg_catalog
 as $$
 declare
   row_data jsonb;
+  resolved_actor_user_id uuid;
   resolved_service_id uuid;
   resolved_subject_id text;
 begin
   row_data := case when tg_op = 'DELETE' then to_jsonb(old) else to_jsonb(new) end;
   resolved_subject_id := row_data ->> 'id';
+  resolved_actor_user_id := auth.uid();
+
+  -- Network-gated self check-ins are written with the server-only client, so
+  -- there is no user JWT inside the database request. Preserve attribution
+  -- from the server-validated row owner for these two operational tables.
+  if resolved_actor_user_id is null
+     and tg_table_name in ('service_check_ins', 'check_in_station_confirmations') then
+    resolved_actor_user_id := nullif(row_data ->> 'user_id', '')::uuid;
+  end if;
 
   if tg_table_name = 'worship_services' then
     resolved_service_id := nullif(resolved_subject_id, '')::uuid;
@@ -602,7 +612,7 @@ begin
     subject_id,
     metadata
   ) values (
-    auth.uid(),
+    resolved_actor_user_id,
     resolved_service_id,
     lower(tg_table_name || '.' || tg_op),
     tg_table_name,
@@ -804,8 +814,8 @@ grant select, insert, update, delete on public.worship_services to authenticated
 grant select, insert, update, delete on public.service_stations to authenticated;
 grant select, insert, update, delete on public.schedule_templates to authenticated;
 grant select, insert, update, delete on public.service_assignments to authenticated;
-grant select, insert, update, delete on public.service_check_ins to authenticated;
-grant select, insert, update, delete on public.check_in_station_confirmations to authenticated;
+grant select, update, delete on public.service_check_ins to authenticated;
+grant select, update, delete on public.check_in_station_confirmations to authenticated;
 grant select on public.activity_logs to authenticated;
 grant select, insert, update, delete on public.post_service_reviews to authenticated;
 
@@ -857,7 +867,10 @@ with check ((select app_private.has_role('coordinator'::public.app_role, 'admin'
 create policy service_assignments_select on public.service_assignments
 for select to authenticated
 using (
-  user_id = (select auth.uid())
+  (
+    user_id = (select auth.uid())
+    and (select app_private.is_active_user())
+  )
   or (select app_private.has_role('coordinator'::public.app_role, 'admin'::public.app_role))
 );
 
@@ -869,27 +882,12 @@ with check ((select app_private.has_role('coordinator'::public.app_role, 'admin'
 create policy service_check_ins_select on public.service_check_ins
 for select to authenticated
 using (
-  user_id = (select auth.uid())
+  (
+    user_id = (select auth.uid())
+    and (select app_private.is_active_user())
+  )
   or (select app_private.has_role('coordinator'::public.app_role, 'admin'::public.app_role))
 );
-
-create policy service_check_ins_insert_own on public.service_check_ins
-for insert to authenticated
-with check (
-  user_id = (select auth.uid())
-  and (select app_private.is_active_user())
-  and status = 'checked_in'
-  and exists (
-    select 1
-    from public.worship_services ws
-    where ws.id = service_check_ins.service_id
-      and ws.status = 'published'
-  )
-);
-
-create policy service_check_ins_insert_staff on public.service_check_ins
-for insert to authenticated
-with check ((select app_private.has_role('coordinator'::public.app_role, 'admin'::public.app_role)));
 
 create policy service_check_ins_manage on public.service_check_ins
 for update to authenticated
@@ -903,35 +901,12 @@ using ((select app_private.has_role('admin'::public.app_role)));
 create policy station_confirmations_select on public.check_in_station_confirmations
 for select to authenticated
 using (
-  user_id = (select auth.uid())
+  (
+    user_id = (select auth.uid())
+    and (select app_private.is_active_user())
+  )
   or (select app_private.has_role('coordinator'::public.app_role, 'admin'::public.app_role))
 );
-
-create policy station_confirmations_insert_own on public.check_in_station_confirmations
-for insert to authenticated
-with check (
-  user_id = (select auth.uid())
-  and (select app_private.is_active_user())
-  and exists (
-    select 1
-    from public.service_check_ins sci
-    where sci.id = check_in_station_confirmations.check_in_id
-      and sci.user_id = (select auth.uid())
-      and sci.service_id = check_in_station_confirmations.service_id
-      and sci.status = 'checked_in'
-  )
-  and exists (
-    select 1
-    from public.service_stations ss
-    where ss.id = check_in_station_confirmations.station_id
-      and ss.service_id = check_in_station_confirmations.service_id
-      and ss.is_active
-  )
-);
-
-create policy station_confirmations_insert_staff on public.check_in_station_confirmations
-for insert to authenticated
-with check ((select app_private.has_role('coordinator'::public.app_role, 'admin'::public.app_role)));
 
 create policy station_confirmations_manage on public.check_in_station_confirmations
 for update to authenticated
@@ -945,14 +920,20 @@ using ((select app_private.has_role('admin'::public.app_role)));
 create policy activity_logs_select on public.activity_logs
 for select to authenticated
 using (
-  actor_user_id = (select auth.uid())
+  (
+    actor_user_id = (select auth.uid())
+    and (select app_private.is_active_user())
+  )
   or (select app_private.has_role('coordinator'::public.app_role, 'admin'::public.app_role))
 );
 
 create policy post_service_reviews_select on public.post_service_reviews
 for select to authenticated
 using (
-  author_user_id = (select auth.uid())
+  (
+    author_user_id = (select auth.uid())
+    and (select app_private.is_active_user())
+  )
   or (select app_private.has_role('coordinator'::public.app_role, 'admin'::public.app_role))
 );
 
