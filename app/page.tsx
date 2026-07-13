@@ -5458,7 +5458,6 @@ export default function App() {
               key={srv}
               onClick={() => {
                 setCurrentService(srv);
-                setCheckedInService(srv);
                 hasManuallySwitchedRef.current = true;
                 setNewNode((prev) => ({ ...prev, service_type: srv }));
               }}
