@@ -51,7 +51,7 @@ export async function requireActiveUser(request: NextRequest): Promise<VerifiedU
 
   return {
     userId: userData.user.id,
-    displayName: String(profile.display_name || "管理員"),
+    displayName: String(profile.display_name || "同工"),
     roles: (roleRows ?? []).map((row) => String(row.role)),
   };
 }

@@ -10,11 +10,11 @@ export function getAllowedChurchIps() {
 }
 
 export function getRequestClientIp(request: NextRequest) {
-  const forwardedFor = request.headers.get("x-forwarded-for");
-  const rawIp = forwardedFor?.split(",")[0]?.trim()
-    || request.headers.get("x-real-ip")
-    || request.headers.get("cf-connecting-ip")
-    || request.headers.get("x-client-ip")
+  // Vercel overwrites x-forwarded-for at its edge to prevent client spoofing.
+  // Only accept a local proxy fallback outside Vercel-managed deployments.
+  const forwardedFor = request.headers.get("x-forwarded-for") || "";
+  const rawIp = forwardedFor.split(",")[0]?.trim()
+    || (process.env.VERCEL ? "" : request.headers.get("x-real-ip"))
     || "";
 
   return rawIp.trim().replace(/^::ffff:/, "").replace(/^\[|\]$/g, "");

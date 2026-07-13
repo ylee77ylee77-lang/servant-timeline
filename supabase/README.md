@@ -45,7 +45,7 @@ The browser requires these public environment variable names:
 Server-only account administration requires `SUPABASE_SERVICE_ROLE_KEY`. Never
 prefix that value with `NEXT_PUBLIC_`.
 
-After applying both migrations, create the first administrator once from a
+After applying the Auth and authorization migrations, create the first administrator once from a
 trusted terminal with temporary `BOOTSTRAP_ACCOUNT_CODE`, `BOOTSTRAP_PASSWORD`,
 and `BOOTSTRAP_DISPLAY_NAME` environment variables:
 
@@ -54,7 +54,9 @@ npm run bootstrap:admin
 ```
 
 The script refuses to run when an administrator already exists and never logs
-credentials. Remove the temporary bootstrap values immediately afterward.
+credentials. Its final profile-and-role claim is serialized by a database
+transaction lock, so concurrent bootstrap attempts cannot both grant admin.
+Remove the temporary bootstrap values immediately afterward.
 
 Because the cutover migration also removes anonymous legacy access, use a
 reviewed maintenance window: prepare the frontend and environment variables,
@@ -85,6 +87,25 @@ Rolling back only the persistent check-in policy should restore the prior
 existing check-ins or confirmation history. Prefer a forward fix after any
 operational records have been created.
 
+## Operational authorization hardening
+
+The hardening migration makes station visibility explicitly follow the parent
+service status. Active volunteers can read stations for published/completed
+services; coordinators and administrators retain access to drafts for planning.
+
+Checklist completion is authorized inside the privileged function: a volunteer
+must have their own same-day check-in for the published linked service.
+Coordinators and administrators may manage every service. Preserved production
+timeline rows whose nullable `service_id` is still unset temporarily keep the
+active-user completion behavior so the existing site remains usable. Backfill
+those links before removing this compatibility condition in a later migration.
+
+Regular TTS requests do not trust browser date state. The server requires a
+same-day published service and the caller's persistent check-in; TTS preview is
+admin-only. The in-memory request limiter remains best-effort in serverless
+environments, while the database-backed monthly character reservation remains
+the hard cost boundary.
+
 ## Rollback notes
 
 Prefer a forward-fix migration. The new schema may contain Auth-linked or
@@ -94,6 +115,12 @@ Before any new foundation data exists, rollback may remove the new triggers,
 tables, helper functions, types, indexes, and the nullable
 `timeline_nodes.service_id` column in reverse dependency order. Do not remove
 that column after it contains service links.
+
+For an authorization-hardening emergency, restore the preceding station policy
+and checklist function definitions with a reviewed forward migration. Do not
+drop `claim_first_admin` while the bootstrap script still depends on it. Any
+rollback that reopens volunteer access to draft stations or arbitrary checklist
+items weakens the approved security boundary and should be time-limited.
 
 The TTS permission rollback, if explicitly approved for an emergency, is:
 

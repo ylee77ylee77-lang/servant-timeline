@@ -5,6 +5,7 @@ do $$
 declare
   missing_rls text;
   public_tts_execute boolean;
+  checklist_completion_definition text;
 begin
   select string_agg(c.relname, ', ' order by c.relname)
   into missing_rls
@@ -86,6 +87,58 @@ begin
        'EXECUTE'
      ) then
     raise exception 'Checklist completion RPC privileges are incorrect';
+  end if;
+
+  select pg_get_functiondef(
+    'app_private.set_checklist_item_completion(text,boolean)'::regprocedure
+  ) into checklist_completion_definition;
+
+  if checklist_completion_definition not like '%service_check_ins%'
+     or checklist_completion_definition not like '%tn.service_id is null%'
+     or checklist_completion_definition not like '%Asia/Taipei%' then
+    raise exception 'Checklist completion RPC is missing its service authorization boundary';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'service_stations'
+      and policyname = 'service_stations_select'
+      and coalesce(qual, '') like '%published%'
+      and coalesce(qual, '') like '%completed%'
+  ) then
+    raise exception 'Station visibility policy is missing service status restrictions';
+  end if;
+
+  if has_function_privilege(
+       'anon',
+       'public.claim_first_admin(uuid,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'authenticated',
+       'public.claim_first_admin(uuid,text,text)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.claim_first_admin(uuid,text,text)',
+       'EXECUTE'
+     ) then
+    raise exception 'First-admin claim RPC privileges are incorrect';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = 'claim_first_admin'
+      and p.prosecdef
+      and p.proconfig @> array['search_path=pg_catalog']
+  ) then
+    raise exception 'First-admin claim RPC is not hardened';
   end if;
 
   if not exists (

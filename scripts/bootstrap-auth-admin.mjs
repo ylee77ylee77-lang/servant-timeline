@@ -47,26 +47,12 @@ try {
   if (createError || !data.user) throw createError || new Error("建立 Auth 使用者失敗。");
   createdUserId = data.user.id;
 
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .upsert(
-      { id: createdUserId, account_code: accountCode, display_name: displayName, is_active: true },
-      { onConflict: "id" }
-    );
-  if (profileError) throw profileError;
-
-  const { error: deleteRoleError } = await supabase
-    .from("user_roles")
-    .delete()
-    .eq("user_id", createdUserId);
-  if (deleteRoleError) throw deleteRoleError;
-
-  const { error: roleError } = await supabase.from("user_roles").insert({
-    user_id: createdUserId,
-    role: "admin",
-    granted_by: createdUserId,
+  const { error: claimError } = await supabase.rpc("claim_first_admin", {
+    p_user_id: createdUserId,
+    p_account_code: accountCode,
+    p_display_name: displayName,
   });
-  if (roleError) throw roleError;
+  if (claimError) throw claimError;
 
   console.log("首位管理員已建立。請立即清除 bootstrap 環境變數。");
 } catch (error) {
