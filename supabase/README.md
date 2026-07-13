@@ -36,6 +36,16 @@ use explicit grants for `authenticated` and `service_role`.
 
 ## Auth cutover configuration
 
+Before provisioning account codes, disable public email sign-ups in the hosted
+Supabase project's **Authentication > Sign In / Providers > Email** settings
+(turn off **Allow new users to sign up**). The repository's
+`[auth] enable_signup = false` and `[auth.email] enable_signup = false`
+settings apply to local Supabase only;
+hosted project configuration must be changed separately during the reviewed
+rollout. Keep sign-in enabled so administrators can provision accounts through
+the server-only user administration route. This prevents an unauthenticated
+visitor from claiming the deterministic internal email for an account code.
+
 The browser requires these public environment variable names:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
@@ -44,6 +54,11 @@ The browser requires these public environment variable names:
 
 Server-only account administration requires `SUPABASE_SERVICE_ROLE_KEY`. Never
 prefix that value with `NEXT_PUBLIC_`.
+
+Vercel overwrites the forwarded client IP used by the church-network check. A
+non-Vercel deployment fails closed by default. It may set
+`CHURCH_WIFI_TRUST_X_REAL_IP=true` only when a trusted reverse proxy strips any
+client-supplied `x-real-ip` header and writes the actual connection address.
 
 After applying the Auth and authorization migrations, create the first administrator once from a
 trusted terminal with temporary `BOOTSTRAP_ACCOUNT_CODE`, `BOOTSTRAP_PASSWORD`,
