@@ -214,25 +214,25 @@ begin
   values
     (p_month, 'primary', 0, p_primary_limit, now()),
     (p_month, 'backup', 0, p_backup_limit, now())
-  on conflict (month, provider_key) do update
+  on conflict on constraint tts_usage_monthly_by_provider_pkey do update
     set limit_chars = excluded.limit_chars,
         updated_at = public.tts_usage_monthly_by_provider.updated_at;
 
-  update public.tts_usage_monthly_by_provider
-  set used_chars = used_chars + p_chars,
+  update public.tts_usage_monthly_by_provider as usage
+  set used_chars = usage.used_chars + p_chars,
       limit_chars = p_primary_limit,
       updated_at = now()
-  where month = p_month
-    and provider_key = 'primary'
-    and used_chars + p_chars <= p_primary_limit
-  returning used_chars into v_primary_used;
+  where usage.month = p_month
+    and usage.provider_key = 'primary'
+    and usage.used_chars + p_chars <= p_primary_limit
+  returning usage.used_chars into v_primary_used;
 
   if found then
     v_provider := 'primary';
 
-    select used_chars into v_backup_used
-    from public.tts_usage_monthly_by_provider
-    where month = p_month and provider_key = 'backup';
+    select usage.used_chars into v_backup_used
+    from public.tts_usage_monthly_by_provider as usage
+    where usage.month = p_month and usage.provider_key = 'backup';
 
     return query
     select
@@ -247,21 +247,21 @@ begin
     return;
   end if;
 
-  update public.tts_usage_monthly_by_provider
-  set used_chars = used_chars + p_chars,
+  update public.tts_usage_monthly_by_provider as usage
+  set used_chars = usage.used_chars + p_chars,
       limit_chars = p_backup_limit,
       updated_at = now()
-  where month = p_month
-    and provider_key = 'backup'
-    and used_chars + p_chars <= p_backup_limit
-  returning used_chars into v_backup_used;
+  where usage.month = p_month
+    and usage.provider_key = 'backup'
+    and usage.used_chars + p_chars <= p_backup_limit
+  returning usage.used_chars into v_backup_used;
 
   if found then
     v_provider := 'backup';
 
-    select used_chars into v_primary_used
-    from public.tts_usage_monthly_by_provider
-    where month = p_month and provider_key = 'primary';
+    select usage.used_chars into v_primary_used
+    from public.tts_usage_monthly_by_provider as usage
+    where usage.month = p_month and usage.provider_key = 'primary';
 
     return query
     select
@@ -276,13 +276,13 @@ begin
     return;
   end if;
 
-  select used_chars into v_primary_used
-  from public.tts_usage_monthly_by_provider
-  where month = p_month and provider_key = 'primary';
+  select usage.used_chars into v_primary_used
+  from public.tts_usage_monthly_by_provider as usage
+  where usage.month = p_month and usage.provider_key = 'primary';
 
-  select used_chars into v_backup_used
-  from public.tts_usage_monthly_by_provider
-  where month = p_month and provider_key = 'backup';
+  select usage.used_chars into v_backup_used
+  from public.tts_usage_monthly_by_provider as usage
+  where usage.month = p_month and usage.provider_key = 'backup';
 
   return query
   select
