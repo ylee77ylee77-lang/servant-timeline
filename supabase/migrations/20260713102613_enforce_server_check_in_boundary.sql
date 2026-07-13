@@ -38,7 +38,9 @@ begin
     resolved_actor_user_id := nullif(row_data ->> 'user_id', '')::uuid;
   end if;
 
-  if tg_table_name = 'worship_services' then
+  if tg_table_name = 'worship_services' and tg_op = 'DELETE' then
+    resolved_service_id := null;
+  elsif tg_table_name = 'worship_services' then
     resolved_service_id := nullif(resolved_subject_id, '')::uuid;
   else
     resolved_service_id := nullif(row_data ->> 'service_id', '')::uuid;
