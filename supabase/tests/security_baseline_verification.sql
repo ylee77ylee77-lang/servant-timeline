@@ -126,6 +126,11 @@ begin
     raise exception 'Server-side check-ins lose their activity-log actor attribution';
   end if;
 
+  if activity_log_definition not like '%tg_table_name = ''worship_services'' and tg_op = ''DELETE''%'
+     or activity_log_definition not like '%resolved_service_id := null%' then
+    raise exception 'Deleted services can still violate the activity-log service FK';
+  end if;
+
   if has_column_privilege(
        'authenticated',
        'public.profiles',
@@ -216,6 +221,7 @@ set local role service_role;
 do $$
 declare
   reservation record;
+  deleted_service_id constant uuid := '00000000-0000-4000-8000-000000000001';
 begin
   select *
   into reservation
@@ -230,6 +236,32 @@ begin
      or reservation.provider_key <> 'primary'
      or reservation.primary_used_chars <> 1 then
     raise exception 'TTS reservation RPC returned an unexpected result';
+  end if;
+
+  insert into public.worship_services (
+    id,
+    service_date,
+    service_type,
+    starts_at,
+    status
+  ) values (
+    deleted_service_id,
+    date '2099-12-31',
+    '__security_delete_test__',
+    timestamptz '2099-12-31 01:00:00+00',
+    'draft'
+  );
+
+  delete from public.worship_services where id = deleted_service_id;
+
+  if not exists (
+    select 1
+    from public.activity_logs
+    where event_type = 'worship_services.delete'
+      and subject_id = deleted_service_id::text
+      and service_id is null
+  ) then
+    raise exception 'Deleting a service did not preserve a valid activity log';
   end if;
 end;
 $$;
