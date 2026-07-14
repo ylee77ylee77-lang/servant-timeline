@@ -1,9 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getAuthErrorResponse, requireCoordinator } from '@/lib/auth/require-admin';
+import { NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    await requireCoordinator(req);
     const body = await req.json();
     const { prompt, systemInstruction, responseSchema } = body;
 
@@ -18,11 +16,7 @@ export async function POST(req: NextRequest) {
     // 呼叫 Google 官方 API (正式環境使用)
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     
-    const payload: {
-      contents: Array<{ parts: Array<{ text: unknown }> }>;
-      systemInstruction: { parts: Array<{ text: unknown }> };
-      generationConfig?: { responseMimeType: string; responseSchema: unknown };
-    } = {
+    const payload: any = {
       contents: [{ parts: [{ text: prompt }] }],
       systemInstruction: { parts: [{ text: systemInstruction }] }
     };
@@ -50,13 +44,8 @@ export async function POST(req: NextRequest) {
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     return NextResponse.json({ text: text?.trim() });
-  } catch (error: unknown) {
-    const authError = getAuthErrorResponse(error);
-    if (authError.status === 401 || authError.status === 403) {
-      return NextResponse.json({ error: authError.message }, { status: authError.status });
-    }
+  } catch (error: any) {
     console.error("伺服器端 Gemini API 發生錯誤:", error);
-    const message = error instanceof Error ? error.message : "伺服器內部錯誤";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: error.message || "伺服器內部錯誤" }, { status: 500 });
   }
 }
