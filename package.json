@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "bootstrap:admin": "node scripts/bootstrap-auth-admin.mjs",
+    "prebuild": "node scripts/patch-station-update.js && node scripts/patch-wifi-animation.js && node scripts/patch-status-dashboard.js && node scripts/patch-checklist-sync.js && node scripts/patch-checklist-draft-workflow.js && node scripts/patch-checklist-flow-special-color.js && node scripts/patch-flow-direct-apply.js && node scripts/patch-flow-inline-editor-render.js && node scripts/patch-safe-undo-dedupe.js && node scripts/patch-manual-station-confirm.js && node scripts/patch-multiline-task-details.js && node scripts/patch-chirp3-frontend.js && node scripts/patch-chirp3-audio-typing.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
