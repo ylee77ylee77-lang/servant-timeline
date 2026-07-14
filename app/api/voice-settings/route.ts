@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthErrorResponse, requireActiveUser, requireAdmin } from "@/lib/auth/require-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,9 +16,6 @@ const DEFAULT_GLOBAL_VOICE_SETTINGS = {
   updated_by: "",
   updated_at: ""
 };
-
-const normalizeInput = (value: unknown) => String(value ?? "").replace(/\s+/g, " ").trim();
-const normalizeName = (value: unknown) => normalizeInput(value).replace(/\s/g, "");
 
 const normalizeSupabaseUrl = (value: string | undefined) => {
   const raw = String(value || "").trim();
@@ -147,12 +145,12 @@ const fetchUsage = async () => {
 
   if (!response.ok) return snapshot;
 
-  const rows = await response.json().catch(() => []);
+  const rows: unknown = await response.json().catch(() => []);
   const primaryRow = Array.isArray(rows)
-    ? rows.find((row: any) => row.provider_key === "primary")
+    ? rows.find((row) => isUsageRow(row) && row.provider_key === "primary")
     : null;
   const backupRow = Array.isArray(rows)
-    ? rows.find((row: any) => row.provider_key === "backup")
+    ? rows.find((row) => isUsageRow(row) && row.provider_key === "backup")
     : null;
 
   const primaryUsed = Math.max(0, Number(primaryRow?.used_chars || 0));
@@ -181,7 +179,13 @@ const fetchUsage = async () => {
   };
 };
 
-const normalizeSettingsRow = (row: any) => {
+const isUsageRow = (value: unknown): value is { provider_key?: unknown; used_chars?: unknown } =>
+  typeof value === "object" && value !== null;
+
+const normalizeSettingsRow = (value: unknown) => {
+  const row = typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : {};
   const voiceGender: "female" | "male" = row?.voice_gender === "male" ? "male" : "female";
 
   return {
@@ -237,32 +241,30 @@ const diagnostics = () => {
   };
 };
 
-export async function GET() {
-  const settings = await fetchSettings();
-  const usage = await fetchUsage();
+export async function GET(request: NextRequest) {
+  try {
+    await requireActiveUser(request);
+    const settings = await fetchSettings();
+    const usage = await fetchUsage();
 
-  return NextResponse.json({
-    ok: true,
-    route: "/api/voice-settings",
-    settings,
-    usage,
-    monthlyCharLimit: usage.total.limitChars,
-    diagnostics: diagnostics()
-  });
+    return NextResponse.json({
+      ok: true,
+      route: "/api/voice-settings",
+      settings,
+      usage,
+      monthlyCharLimit: usage.total.limitChars,
+      diagnostics: diagnostics()
+    });
+  } catch (error) {
+    const authError = getAuthErrorResponse(error);
+    return NextResponse.json({ error: authError.message }, { status: authError.status });
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const admin = await requireAdmin(request);
     const body = await request.json().catch(() => ({}));
-    const adminName = normalizeName(body.adminName);
-    const allowedAdminNames = new Set(["徐東立", "東立徐", "東立"]);
-
-    if (!allowedAdminNames.has(adminName)) {
-      return NextResponse.json(
-        { error: "目前只有指定管理員可以調整全站語音設定。" },
-        { status: 403 }
-      );
-    }
 
     const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
     if (!supabaseUrl || !serviceRoleKey) {
@@ -281,7 +283,7 @@ export async function POST(request: NextRequest) {
       pitch: clampNumber(incoming.pitch, 0, -2, 8),
       volume_gain_db: clampNumber(incoming.volume_gain_db, 0, -6, 3),
       cache_version: `chirp3-${Date.now()}`,
-      updated_by: adminName,
+      updated_by: admin.displayName,
       updated_at: new Date().toISOString()
     };
 
@@ -318,7 +320,7 @@ export async function POST(request: NextRequest) {
       diagnostics: diagnostics()
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "儲存全站語音設定失敗。";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const authError = getAuthErrorResponse(error);
+    return NextResponse.json({ error: authError.message }, { status: authError.status });
   }
 }

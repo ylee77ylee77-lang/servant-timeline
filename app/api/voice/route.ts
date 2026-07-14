@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 import { createHash, createSign } from "node:crypto";
+import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
+import { getRequestClientIp } from "@/lib/network/church-wifi";
+import { isServiceType, type ServiceType } from "@/lib/services/catalog";
+import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -252,6 +256,11 @@ const getMonthKey = () => {
   return `${taipei.year}-${String(taipei.month).padStart(2, "0")}`;
 };
 
+const getTaipeiDateKey = () => {
+  const taipei = getTaipeiParts();
+  return `${taipei.year}-${String(taipei.month).padStart(2, "0")}-${String(taipei.day).padStart(2, "0")}`;
+};
+
 const getDefaultUsageSnapshot = (): UsageSnapshot => {
   const primaryLimit = hasProviderCredentials("primary") ? getPrimaryLimit() : 0;
   const backupLimit = getBackupLimit();
@@ -269,6 +278,9 @@ const getDefaultUsageSnapshot = (): UsageSnapshot => {
     }
   };
 };
+
+const isUsageRow = (value: unknown): value is { provider_key?: unknown; used_chars?: unknown } =>
+  typeof value === "object" && value !== null;
 
 const getUsageState = async (): Promise<{ snapshot: UsageSnapshot; healthy: boolean; reason: string }> => {
   const snapshot = getDefaultUsageSnapshot();
@@ -296,12 +308,12 @@ const getUsageState = async (): Promise<{ snapshot: UsageSnapshot; healthy: bool
       return { snapshot, healthy: false, reason: `usage_counter_http_${response.status}` };
     }
 
-    const rows = await response.json().catch(() => []);
+    const rows: unknown = await response.json().catch(() => []);
     const primaryRow = Array.isArray(rows)
-      ? rows.find((row: any) => row.provider_key === "primary")
+      ? rows.find((row) => isUsageRow(row) && row.provider_key === "primary")
       : null;
     const backupRow = Array.isArray(rows)
-      ? rows.find((row: any) => row.provider_key === "backup")
+      ? rows.find((row) => isUsageRow(row) && row.provider_key === "backup")
       : null;
 
     const primaryUsed = Math.max(0, Number(primaryRow?.used_chars || 0));
@@ -593,8 +605,8 @@ const saveCachedAudioBase64 = async (payload: {
   });
 };
 
-const getServiceCloseMinutes = (serviceType: string) => {
-  const map: Record<string, number> = {
+const getServiceCloseMinutes = (serviceType: ServiceType) => {
+  const map: Record<ServiceType, number> = {
     "六晚崇": 21 * 60 + 45,
     "主一堂": 10 * 60 + 15,
     "主二堂": 12 * 60 + 45
@@ -603,21 +615,9 @@ const getServiceCloseMinutes = (serviceType: string) => {
   return map[serviceType] ?? null;
 };
 
-const getServiceBlockReason = (serviceType: string, checkinDay: unknown) => {
+const getServiceBlockReason = (serviceType: ServiceType) => {
   const taipei = getTaipeiParts();
-  const numericCheckinDay = Number(checkinDay || 0);
-
-  if (numericCheckinDay && numericCheckinDay !== taipei.day) {
-    return {
-      blocked: true,
-      reason: "service_date_expired",
-      message: "本場服事已不是今天，語音助理已關閉。"
-    };
-  }
-
   const closeMinutes = getServiceCloseMinutes(serviceType);
-  if (closeMinutes === null) return { blocked: false, reason: "", message: "" };
-
   const currentMinutes = taipei.hour * 60 + taipei.minute;
   if (currentMinutes >= closeMinutes) {
     return {
@@ -630,19 +630,36 @@ const getServiceBlockReason = (serviceType: string, checkinDay: unknown) => {
   return { blocked: false, reason: "", message: "" };
 };
 
-const getClientIp = (request: NextRequest) => {
-  const forwarded = request.headers.get("x-forwarded-for");
-  return (
-    forwarded?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    request.headers.get("cf-connecting-ip") ||
-    "unknown"
-  );
+const authorizeRegularVoice = async (
+  request: NextRequest,
+  userId: string,
+  serviceType: ServiceType
+) => {
+  const supabase = getSupabaseUserClient(request);
+  const { data: service, error: serviceError } = await supabase
+    .from("worship_services")
+    .select("id")
+    .eq("service_date", getTaipeiDateKey())
+    .eq("service_type", serviceType)
+    .eq("status", "published")
+    .maybeSingle();
+  if (serviceError) throw serviceError;
+  if (!service) return false;
+
+  const { data: checkIn, error: checkInError } = await supabase
+    .from("service_check_ins")
+    .select("id")
+    .eq("service_id", service.id)
+    .eq("user_id", userId)
+    .in("status", ["checked_in", "station_confirmed"])
+    .maybeSingle();
+  if (checkInError) throw checkInError;
+  return Boolean(checkIn);
 };
 
 const consumeRateLimit = (request: NextRequest, isPreview: boolean) => {
   const now = Date.now();
-  const key = `${getClientIp(request)}|${isPreview ? "preview" : "regular"}`;
+  const key = `${getRequestClientIp(request) || "unknown"}|${isPreview ? "preview" : "regular"}`;
   const limit = isPreview ? PREVIEW_REQUESTS_PER_WINDOW : REGULAR_REQUESTS_PER_WINDOW;
   const current = rateBuckets.get(key);
 
@@ -702,46 +719,67 @@ const synthesizeChirpAudio = async (
   }
 };
 
-export async function GET() {
-  const settings = await getGlobalVoiceSettings();
-  const usageState = await getUsageState();
+export async function GET(request: NextRequest) {
+  try {
+    await requireActiveUser(request);
+    const settings = await getGlobalVoiceSettings();
+    const usageState = await getUsageState();
 
-  return NextResponse.json({
-    ok: true,
-    route: "/api/voice",
-    engine: "google-cloud-text-to-speech",
-    voiceFamily: "cmn-CN-Chirp3-HD",
-    voices: {
-      zephyr: VOICE_PROFILE_MAP.zephyr.name,
-      iapetus: VOICE_PROFILE_MAP.iapetus.name
-    },
-    capabilities: {
-      speakingRateApplied: true,
-      pitchApplied: false,
-      volumeGainApplied: false,
-      punctuationPreserved: true,
-      sharedAudioCache: true,
-      previewCache: true,
-      geminiTtsDisabled: true
-    },
-    currentGlobalVoiceSettings: settings,
-    hasGoogleTtsCredentials: hasProviderCredentials("primary"),
-    hasBackupGoogleTtsCredentials: hasProviderCredentials("backup"),
-    usageCounterHealthy: usageState.healthy,
-    usageCounterReason: usageState.reason,
-    primaryCharLimit: getPrimaryLimit(),
-    backupCharLimit: getBackupLimit(),
-    monthlyCharLimit: usageState.snapshot.total.limitChars,
-    usage: usageState.snapshot
-  });
+    return NextResponse.json({
+      ok: true,
+      route: "/api/voice",
+      engine: "google-cloud-text-to-speech",
+      voiceFamily: "cmn-CN-Chirp3-HD",
+      voices: {
+        zephyr: VOICE_PROFILE_MAP.zephyr.name,
+        iapetus: VOICE_PROFILE_MAP.iapetus.name
+      },
+      capabilities: {
+        speakingRateApplied: true,
+        pitchApplied: false,
+        volumeGainApplied: false,
+        punctuationPreserved: true,
+        sharedAudioCache: true,
+        previewCache: true,
+        geminiTtsDisabled: true
+      },
+      currentGlobalVoiceSettings: settings,
+      hasGoogleTtsCredentials: hasProviderCredentials("primary"),
+      hasBackupGoogleTtsCredentials: hasProviderCredentials("backup"),
+      usageCounterHealthy: usageState.healthy,
+      usageCounterReason: usageState.reason,
+      primaryCharLimit: getPrimaryLimit(),
+      backupCharLimit: getBackupLimit(),
+      monthlyCharLimit: usageState.snapshot.total.limitChars,
+      usage: usageState.snapshot
+    });
+  } catch (error) {
+    const authError = getAuthErrorResponse(error);
+    return NextResponse.json({ error: authError.message }, { status: authError.status });
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await requireActiveUser(request);
     const body = await request.json().catch(() => ({}));
     const speechText = normalizeSpeechText(body.text);
     const isPreview = body.preview === true;
     const serviceType = normalizeInput(body.serviceType || body.currentService || "");
+
+    if (isPreview && !user.roles.includes("admin")) {
+      return NextResponse.json(
+        { error: "你沒有語音預覽權限。", fallbackToBrowser: false },
+        { status: 403 }
+      );
+    }
+
+    if (!isPreview && !isServiceType(serviceType)) {
+      return NextResponse.json(
+        { error: "缺少有效堂次，語音助理拒絕連線。", fallbackToBrowser: false },
+        { status: 400 }
+      );
+    }
 
     if (!speechText) {
       return NextResponse.json(
@@ -778,8 +816,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!isPreview && serviceType) {
-      const blockState = getServiceBlockReason(serviceType, body.checkinDay);
+    if (!isPreview && isServiceType(serviceType)) {
+      const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          {
+            error: "請先完成今日已開放場次的報到，再使用語音助理。",
+            fallbackToBrowser: false,
+            reason: "active_check_in_required"
+          },
+          { status: 403 }
+        );
+      }
+
+      const blockState = getServiceBlockReason(serviceType);
       if (blockState.blocked) {
         return NextResponse.json(
           {
@@ -948,6 +998,10 @@ export async function POST(request: NextRequest) {
       }
     });
   } catch (error: unknown) {
+    const authError = getAuthErrorResponse(error);
+    if (authError.status === 401 || authError.status === 403) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
     const message = error instanceof Error ? error.message : "Google Cloud Chirp 3 HD 產生語音失敗。";
     console.error("Google Chirp 3 HD TTS unhandled error", { message });
     return NextResponse.json(
