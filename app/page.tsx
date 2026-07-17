@@ -179,6 +179,7 @@ export default function App() {
   const [checkedInAt, setCheckedInAt] = useState("");
   const [checkedInDay, setCheckedInDay] = useState<number | null>(null);
   const [checkedInService, setCheckedInService] = useState("");
+  const [currentAssignmentId, setCurrentAssignmentId] = useState("");
   const [confirmedStation, setConfirmedStation] = useState("");
   const [stationScannerOpen, setStationScannerOpen] = useState(false);
   const [stationManualCode, setStationManualCode] = useState("");
@@ -445,6 +446,7 @@ export default function App() {
       }).format(checkedInDate));
       setCheckedInDay(checkedInDate.getDay());
       setCheckedInService(String(record.serviceType));
+      setCurrentAssignmentId(String(record.assignmentId || ""));
       setCurrentService(String(record.serviceType));
       setConfirmedStation(String(record.stationName || ""));
       setCheckinStatus(record.stationName || record.status === "station_confirmed" ? "station_confirmed" : "checked_in");
@@ -504,7 +506,7 @@ export default function App() {
 
 
   const serviceNodes = nodes.filter(n => n.service_type === currentService);
-  const filteredNodes = serviceNodes.filter(isNodeForCurrentPerson);
+  const filteredNodes = isCoordinator ? serviceNodes.filter(isNodeForCurrentPerson) : serviceNodes;
   const adminNodes = serviceNodes;
   const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
 
@@ -1862,6 +1864,23 @@ export default function App() {
   const fetchData = async (isBackgroundSync = false) => {
     try {
       if (!isBackgroundSync) setFetchError("");
+      if (!isCoordinator) {
+        const query = currentService ? `?serviceType=${encodeURIComponent(currentService)}` : "";
+        const response = await fetch(`/api/service-context${query}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || "無法載入個人服事任務。");
+        setNodes(Array.isArray(result.nodes) ? result.nodes : []);
+        setCurrentAssignmentId(String(result.assignment?.id || ""));
+        setAssignedStation(String(result.assignedStation || ""));
+        if (result.service?.service_type && result.service.service_type !== currentService) {
+          setCurrentService(String(result.service.service_type));
+        }
+        return;
+      }
+
       const nodesData = await supabaseFetch('timeline_nodes?order=time.asc');
       const checklistData = await supabaseFetch('checklist_items?order=sort_order.asc,id.asc');
 
@@ -2270,8 +2289,8 @@ export default function App() {
   const hasCheckinProfile = Boolean(checkinProfile.name && checkinProfile.phoneLast4);
   const displayCheckinName = authDisplayName;
   const isCurrentUserAdmin = isAdmin;
-  const canManageTimeline = isCoordinator;
-  const canUseQuestionAssistant = canManageTimeline;
+  const canManageTimeline = isAdmin;
+  const canUseQuestionAssistant = isCoordinator;
 
   useEffect(() => {
     setIsAdminUnlocked(canManageTimeline);
@@ -2560,6 +2579,10 @@ export default function App() {
       setCustomAlert({ isOpen: true, message: "目前無法判斷服事堂次，請聯絡總招確認。" });
       return;
     }
+    if (!currentAssignmentId) {
+      setCustomAlert({ isOpen: true, message: "目前沒有可用的服事分派，請聯絡帶領者／協調員。" });
+      return;
+    }
 
     setIsCheckinSyncing(true);
     try {
@@ -2569,7 +2592,7 @@ export default function App() {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ action: "check_in", serviceType }),
+        body: JSON.stringify({ action: "check_in", serviceType, assignmentId: currentAssignmentId }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "報到失敗，請稍後再試。");
@@ -2829,6 +2852,7 @@ export default function App() {
           body: JSON.stringify({
             action: "confirm_station",
             serviceType: badgeService,
+            assignmentId: currentAssignmentId,
             stationName: parsed.station,
             source,
           }),
@@ -3038,6 +3062,11 @@ export default function App() {
     const nodeToUpdate = nodes.find(n => n.id === nodeId);
     const itemToUpdate = nodeToUpdate?.checklist.find((c: any) => c.id === checkId);
     if (!itemToUpdate) return;
+    const assignmentId = String(nodeToUpdate?.assignment_id || currentAssignmentId || "");
+    if (!isAdmin && !assignmentId) {
+      setCustomAlert({ isOpen: true, message: "此任務尚未連結到你的服事分派。" });
+      return;
+    }
 
     const willBeCompleted = !itemToUpdate.is_completed;
     const now = new Date();
@@ -3058,10 +3087,23 @@ export default function App() {
 
     try {
       if (!hasValidKeys) return;
-      await supabaseFetch('rpc/set_checklist_item_completion', 'POST', {
-        p_item_id: checkId,
-        p_is_completed: willBeCompleted
-      });
+      if (isAdmin) {
+        await supabaseFetch('rpc/set_checklist_item_completion', 'POST', {
+          p_item_id: checkId,
+          p_is_completed: willBeCompleted
+        });
+      } else {
+        const response = await fetch("/api/checklist-state", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ assignmentId, itemId: checkId, isCompleted: willBeCompleted }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || "無法更新任務清單。");
+      }
       fetchData(true);
     } catch (error) {
       console.error("更新資料庫失敗:", error);

@@ -7,6 +7,7 @@ declare
   missing_rls text;
   public_tts_execute boolean;
   checklist_completion_definition text;
+  assignment_checklist_definition text;
   activity_log_definition text;
   active_guarded_policy_count integer;
 begin
@@ -26,6 +27,9 @@ begin
       'check_in_station_confirmations',
       'activity_logs',
       'post_service_reviews',
+      'service_coordinators',
+      'service_task_assignments',
+      'assignment_checklist_states',
       'timeline_nodes',
       'checklist_items'
     )
@@ -65,7 +69,10 @@ begin
         'service_check_ins',
         'check_in_station_confirmations',
         'activity_logs',
-        'post_service_reviews'
+        'post_service_reviews',
+        'service_coordinators',
+        'service_task_assignments',
+        'assignment_checklist_states'
       )
       and grantee = 'anon'
   ) then
@@ -108,13 +115,11 @@ begin
     and (tablename, policyname) in (
       ('service_assignments', 'service_assignments_select'),
       ('service_check_ins', 'service_check_ins_select'),
-      ('check_in_station_confirmations', 'station_confirmations_select'),
-      ('activity_logs', 'activity_logs_select'),
-      ('post_service_reviews', 'post_service_reviews_select')
+      ('check_in_station_confirmations', 'station_confirmations_select')
     )
     and coalesce(qual, '') like '%is_active_user%';
 
-  if active_guarded_policy_count <> 5 then
+  if active_guarded_policy_count <> 3 then
     raise exception 'An operational self-read policy is missing its active-user guard';
   end if;
 
@@ -161,14 +166,49 @@ begin
     raise exception 'Checklist completion RPC privileges are incorrect';
   end if;
 
+  if has_function_privilege(
+       'anon',
+       'public.set_assignment_checklist_state(uuid,text,boolean)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'authenticated',
+       'public.set_assignment_checklist_state(uuid,text,boolean)',
+       'EXECUTE'
+     ) then
+    raise exception 'Assignment checklist RPC privileges are incorrect';
+  end if;
+
   select pg_get_functiondef(
     'app_private.set_checklist_item_completion(text,boolean)'::regprocedure
   ) into checklist_completion_definition;
 
-  if checklist_completion_definition not like '%service_check_ins%'
-     or checklist_completion_definition not like '%tn.service_id is null%'
+  if checklist_completion_definition not like '%is_admin%'
      or checklist_completion_definition not like '%Asia/Taipei%' then
-    raise exception 'Checklist completion RPC is missing its service authorization boundary';
+    raise exception 'Legacy checklist completion RPC is not admin-only';
+  end if;
+
+  select pg_get_functiondef(
+    'app_private.set_assignment_checklist_state(uuid,text,boolean)'::regprocedure
+  ) into assignment_checklist_definition;
+
+  if assignment_checklist_definition not like '%service_task_assignments%'
+     or assignment_checklist_definition not like '%sa.user_id = auth.uid()%'
+     or assignment_checklist_definition not like '%can_coordinate_service%' then
+    raise exception 'Assignment checklist RPC is missing an assignment boundary';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'timeline_nodes'
+      and policyname = 'timeline_nodes_select_active'
+      and coalesce(qual, '') like '%service_task_assignments%'
+      and coalesce(qual, '') like '%sa.user_id%'
+      and coalesce(qual, '') like '%is_active_user%'
+  ) then
+    raise exception 'Timeline visibility is missing assignment-scoped task mapping';
   end if;
 
   if not exists (
