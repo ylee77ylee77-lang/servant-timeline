@@ -8,6 +8,8 @@ import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function taipeiDateKey() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Taipei",
@@ -45,7 +47,7 @@ export async function GET(request: NextRequest) {
 
     const { data: checkIn, error: checkInError } = await supabase
       .from("service_check_ins")
-      .select("id,service_id,status,checked_in_at")
+      .select("id,service_id,assignment_id,status,checked_in_at")
       .eq("user_id", user.userId)
       .in("service_id", services.map((service) => service.id))
       .in("status", ["checked_in", "station_confirmed"])
@@ -68,6 +70,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       checkIn: {
         id: checkIn.id,
+        assignmentId: checkIn.assignment_id,
         status: checkIn.status,
         checkedInAt: checkIn.checked_in_at,
         serviceDate: service?.service_date ?? taipeiDateKey(),
@@ -92,8 +95,12 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const action = String(body.action ?? "");
     const serviceType = String(body.serviceType ?? "").trim();
+    const assignmentId = String(body.assignmentId ?? "").trim();
     if (!isServiceType(serviceType)) {
       return NextResponse.json({ error: "堂次無效。" }, { status: 400 });
+    }
+    if (!UUID_PATTERN.test(assignmentId)) {
+      return NextResponse.json({ error: "請先確認本次服事分派。" }, { status: 400 });
     }
 
     const service = await findPublishedService(request, serviceType);
@@ -104,9 +111,22 @@ export async function POST(request: NextRequest) {
     // Authenticated clients have no direct INSERT grant on operational check-in
     // tables. Only this network-gated server route may perform these writes.
     const supabase = getSupabaseAdminClient();
+    const { data: assignment, error: assignmentError } = await supabase
+      .from("service_assignments")
+      .select("id,service_id,user_id,station_id,status")
+      .eq("id", assignmentId)
+      .eq("service_id", service.id)
+      .eq("user_id", user.userId)
+      .in("status", ["scheduled", "confirmed"])
+      .maybeSingle();
+    if (assignmentError) throw assignmentError;
+    if (!assignment) {
+      return NextResponse.json({ error: "你沒有此場次的有效服事分派。" }, { status: 403 });
+    }
+
     const { data: existingCheckIn, error: lookupError } = await supabase
       .from("service_check_ins")
-      .select("id,service_id,status,checked_in_at")
+      .select("id,service_id,assignment_id,status,checked_in_at")
       .eq("service_id", service.id)
       .eq("user_id", user.userId)
       .maybeSingle();
@@ -118,20 +138,26 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
+    if (existingCheckIn && existingCheckIn.assignment_id !== assignment.id) {
+      return NextResponse.json(
+        { error: "此場次已使用另一個服事分派完成報到，請聯絡帶領者／協調員。" },
+        { status: 409 }
+      );
+    }
 
     if (action === "check_in") {
       if (existingCheckIn) return NextResponse.json({ ok: true, checkIn: existingCheckIn });
       const { data, error } = await supabase
         .from("service_check_ins")
-        .insert({ service_id: service.id, user_id: user.userId, status: "checked_in", check_in_source: "web" })
-        .select("id,service_id,status,checked_in_at")
+        .insert({ service_id: service.id, user_id: user.userId, assignment_id: assignment.id, status: "checked_in", check_in_source: "web" })
+        .select("id,service_id,assignment_id,status,checked_in_at")
         .single();
       if (error?.code === "23505") {
         // Concurrent retries can both pass the lookup. Resolve the unique-key
         // race by returning the row that won instead of surfacing a 500.
         const { data: racedCheckIn, error: raceLookupError } = await supabase
           .from("service_check_ins")
-          .select("id,service_id,status,checked_in_at")
+          .select("id,service_id,assignment_id,status,checked_in_at")
           .eq("service_id", service.id)
           .eq("user_id", user.userId)
           .maybeSingle();
@@ -139,6 +165,12 @@ export async function POST(request: NextRequest) {
         if (racedCheckIn?.status === "cancelled") {
           return NextResponse.json(
             { error: "此報到已取消，請聯絡總招重新啟用。" },
+            { status: 409 }
+          );
+        }
+        if (racedCheckIn && racedCheckIn.assignment_id !== assignment.id) {
+          return NextResponse.json(
+            { error: "此場次已使用另一個服事分派完成報到，請聯絡帶領者／協調員。" },
             { status: 409 }
           );
         }
@@ -157,6 +189,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "崗位不在此堂次的有效清單中。" }, { status: 400 });
       }
       const source = body.source === "manual" ? "manual" : "qr";
+      if (!assignment.station_id) {
+        return NextResponse.json({ error: "帶領者／協調員尚未分派崗位。" }, { status: 409 });
+      }
       const { data: station, error: stationError } = await supabase
         .from("service_stations")
         .select("id,name")
@@ -166,6 +201,9 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
       if (stationError) throw stationError;
       if (!station) return NextResponse.json({ error: "此崗位尚未開放。" }, { status: 409 });
+      if (station.id !== assignment.station_id) {
+        return NextResponse.json({ error: "這不是分派給你的崗位，請確認名牌。" }, { status: 403 });
+      }
 
       const { data: existingConfirmation, error: existingError } = await supabase
         .from("check_in_station_confirmations")

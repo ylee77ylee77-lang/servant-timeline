@@ -77,7 +77,7 @@ export default function AdminUsersPage() {
           <label htmlFor="role" className="mt-5 block text-sm font-black text-[#1F2937]">角色</label>
           <select id="role" value={role} onChange={(event) => setRole(event.target.value as AppRole)} className="mt-2 w-full rounded-2xl border border-[#D9DEE7] bg-white px-4 py-3">
             <option value="volunteer">同工</option>
-            <option value="coordinator">總招／協調員</option>
+            <option value="coordinator">帶領者／協調員</option>
             <option value="admin">管理員</option>
           </select>
 

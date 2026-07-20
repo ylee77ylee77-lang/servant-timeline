@@ -67,8 +67,36 @@ export async function requireAdmin(request: NextRequest): Promise<VerifiedAdmin>
 export async function requireCoordinator(request: NextRequest): Promise<VerifiedUser> {
   const user = await requireActiveUser(request);
   if (!user.roles.some((role) => role === "coordinator" || role === "admin")) {
-    throw Object.assign(new Error("你沒有總招或管理員權限。"), { status: 403 });
+    throw Object.assign(new Error("你沒有帶領者／協調員或管理員權限。"), { status: 403 });
   }
+  return user;
+}
+
+export async function requireCoordinatorForService(
+  request: NextRequest,
+  serviceId: string
+): Promise<VerifiedUser> {
+  const user = await requireActiveUser(request);
+
+  if (user.roles.includes("admin")) return user;
+  if (!user.roles.includes("coordinator")) {
+    throw Object.assign(new Error("你沒有此場次的協調權限。"), { status: 403 });
+  }
+
+  const { data, error } = await getSupabaseAdminClient()
+    .from("service_coordinators")
+    .select("id")
+    .eq("service_id", serviceId)
+    .eq("user_id", user.userId)
+    .maybeSingle();
+
+  if (error) {
+    throw Object.assign(new Error("無法確認場次協調權限。"), { status: 500 });
+  }
+  if (!data) {
+    throw Object.assign(new Error("你沒有此場次的協調權限。"), { status: 403 });
+  }
+
   return user;
 }
 

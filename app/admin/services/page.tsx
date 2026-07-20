@@ -26,7 +26,7 @@ function taipeiDateToday() {
 }
 
 export default function ServiceAdminPage() {
-  const { session, isCoordinator } = useAuth();
+  const { session, isAdmin, isCoordinator } = useAuth();
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [serviceDate, setServiceDate] = useState(taipeiDateToday);
   const [serviceType, setServiceType] = useState<(typeof SERVICE_TYPES)[number]>("主一堂");
@@ -86,7 +86,7 @@ export default function ServiceAdminPage() {
     <main className="min-h-screen bg-[#FFF9F3] px-5 py-12 text-[#1F2937]">
       <div className="mx-auto max-w-2xl space-y-6">
         <Link href="/" className="text-sm font-black text-[#6D55A3]">← 回主畫面</Link>
-        <form onSubmit={submit} className="rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-xl shadow-[#6D55A3]/10">
+        {isAdmin ? <form onSubmit={submit} className="rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-xl shadow-[#6D55A3]/10">
           <div className="mb-6 flex items-center gap-3">
             <CalendarPlus className="h-7 w-7 text-[#6D55A3]" />
             <div><h1 className="text-2xl font-black">開放崇拜報到</h1><p className="text-sm font-medium text-[#7B7B74]">建立場次及標準崗位後，同工才能留下持久報到紀錄。</p></div>
@@ -100,10 +100,20 @@ export default function ServiceAdminPage() {
           <label className="mt-4 block text-sm font-black">地點<input required value={location} maxLength={120} onChange={(event) => setLocation(event.target.value)} className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3" /></label>
           {message && <p role="status" className="mt-4 text-sm font-bold text-[#6D55A3]">{message}</p>}
           <button disabled={isLoading} className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60">{isLoading && <Loader2 className="h-5 w-5 animate-spin" />}{isLoading ? "處理中" : "建立並開放場次"}</button>
-        </form>
+        </form> : (
+          <section className="rounded-[28px] border border-[#E6EAF0] bg-white p-6">
+            <h1 className="text-xl font-black">帶領者／協調員場次</h1>
+            <p className="mt-2 text-sm font-medium text-[#7B7B74]">你只能查看與協調管理員已授權的場次；新場次由管理員建立。</p>
+          </section>
+        )}
         <section className="rounded-[28px] border border-[#E6EAF0] bg-white p-6">
           <h2 className="text-lg font-black">最近場次</h2>
-          <div className="mt-4 space-y-2">{services.map((service) => <div key={service.id} className="rounded-2xl bg-[#FFF9F3] px-4 py-3 text-sm font-bold">{service.service_date}｜{service.service_type}｜{service.status}</div>)}</div>
+          <div className="mt-4 space-y-2">{services.map((service) => (
+            <Link key={service.id} href={`/admin/services/${service.id}`} className="block rounded-2xl bg-[#FFF9F3] px-4 py-3 text-sm font-bold hover:bg-[#F3EEFF]">
+              {service.service_date}｜{service.service_type}｜{service.status}
+              <span className="ml-2 text-[#6D55A3]">管理團隊 →</span>
+            </Link>
+          ))}</div>
         </section>
       </div>
     </main>

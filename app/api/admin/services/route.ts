@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthErrorResponse, requireCoordinator } from "@/lib/auth/require-admin";
+import { getAuthErrorResponse, requireAdmin, requireCoordinator } from "@/lib/auth/require-admin";
 import {
   inferStationRole,
   isServiceType,
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const coordinator = await requireCoordinator(request);
+    const admin = await requireAdmin(request);
     const body = await request.json().catch(() => ({}));
     const serviceDate = String(body.serviceDate ?? "").trim();
     const serviceType = String(body.serviceType ?? "").trim();
@@ -93,8 +93,8 @@ export async function POST(request: NextRequest) {
       report_at: reportAtIso,
       location,
       status: "published",
-      updated_by: coordinator.userId,
-      ...(existing ? {} : { created_by: coordinator.userId }),
+      updated_by: admin.userId,
+      ...(existing ? {} : { created_by: admin.userId }),
     };
 
     const serviceQuery = existing

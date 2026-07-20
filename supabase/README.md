@@ -125,6 +125,38 @@ admin-only. The in-memory request limiter remains best-effort in serverless
 environments, while the database-backed monthly character reservation remains
 the hard cost boundary.
 
+## Assignment-scoped access-control rollout
+
+The assignment-scope migrations preserve every existing timeline and checklist
+row. They add service coordinator grants, explicit task-to-assignment mappings,
+and per-assignment checklist state. Legacy timeline definitions remain in place,
+but volunteers can see them only after an administrator or an authorized
+coordinator maps the task to that volunteer's assignment. The legacy shared
+checklist completion RPC becomes admin-only; volunteer completion state is
+stored separately so one person's progress cannot overwrite another person's.
+
+Apply the two assignment-scope migrations together in a reviewed maintenance
+window. Before applying, back up the database and record row counts for
+`timeline_nodes`, `checklist_items`, `service_assignments`, and
+`service_check_ins`. The enforcement migration aborts if any existing check-in
+lacks an assignment, rather than guessing ownership. Resolve such records in a
+reviewed data migration before retrying.
+
+On a local or preview database, run both verification scripts:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f supabase/tests/security_baseline_verification.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f supabase/tests/assignment_scope_verification.sql
+```
+
+For rollout, grant service coordinators first, create or verify assignments,
+then map each operational timeline task to the relevant assignment. Smoke-test
+one volunteer, one coordinator, and one administrator before opening access.
+Keep `SUPABASE_SERVICE_ROLE_KEY` on the server only; browsers call the scoped
+API routes with their normal authenticated session.
+
 ## Rollback notes
 
 Prefer a forward-fix migration. The new schema may contain Auth-linked or
@@ -140,6 +172,15 @@ and checklist function definitions with a reviewed forward migration. Do not
 drop `claim_first_admin` while the bootstrap script still depends on it. Any
 rollback that reopens volunteer access to draft stations or arbitrary checklist
 items weakens the approved security boundary and should be time-limited.
+
+For an assignment-scope emergency, prefer a forward migration that disables the
+new coordination UI while retaining the restrictive RLS policies. Do not drop
+`service_coordinators`, `service_task_assignments`, or
+`assignment_checklist_states` after they contain operational data. A full policy
+rollback would reopen cross-assignment visibility and is therefore not a safe
+normal rollback. If application rollback is unavoidable, first deploy a version
+that tolerates the new schema and leaves volunteer writes disabled; preserve all
+new tables for later recovery.
 
 The TTS permission rollback, if explicitly approved for an emergency, is:
 
