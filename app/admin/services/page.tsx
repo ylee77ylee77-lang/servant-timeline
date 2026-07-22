@@ -109,9 +109,9 @@ export default function ServiceAdminPage() {
         <section className="rounded-[28px] border border-[#E6EAF0] bg-white p-6">
           <h2 className="text-lg font-black">最近場次</h2>
           <div className="mt-4 space-y-2">{services.map((service) => (
-            <Link key={service.id} href={`/admin/services/${service.id}`} className="block rounded-2xl bg-[#FFF9F3] px-4 py-3 text-sm font-bold hover:bg-[#F3EEFF]">
+            <Link key={service.id} href={isAdmin ? `/admin/services/${service.id}/schedule` : `/admin/services/${service.id}`} className="block rounded-2xl bg-[#FFF9F3] px-4 py-3 text-sm font-bold hover:bg-[#F3EEFF]">
               {service.service_date}｜{service.service_type}｜{service.status}
-              <span className="ml-2 text-[#6D55A3]">管理團隊 →</span>
+              <span className="ml-2 text-[#6D55A3]">{isAdmin ? "編輯本堂排程 →" : "管理團隊 →"}</span>
             </Link>
           ))}</div>
         </section>
