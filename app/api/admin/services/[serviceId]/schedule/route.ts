@@ -14,35 +14,34 @@ const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const EDITABLE_STATUSES = new Set(["draft", "published", "cancelled"]);
 type Context = { params: Promise<{ serviceId: string }> };
 
-type TimelineRow = {
-  id: string;
-  service_id: string | null;
-  source_template_node_id: string | null;
-  service_type: string;
-  time: string | null;
-  title: string | null;
-  assignee: string | null;
-  location: string | null;
-  details: string | null;
-  voice_reminder_enabled: boolean;
-  reminder_pre5_enabled: boolean;
-  reminder_now_enabled: boolean;
-  sort_order: number;
-  is_active: boolean;
-};
-
-function routeError(error: unknown) {
-  const status = typeof error === "object" && error && "status" in error
-    ? Number((error as { status?: unknown }).status) || 500
-    : 500;
-  const message = status < 500 && error instanceof Error
-    ? error.message
-    : "伺服器無法完成排程操作。";
-  return NextResponse.json({ error: message }, { status });
-}
+type AppError = Error & { status?: number; code?: string };
 
 function fail(message: string, status = 400): never {
   throw Object.assign(new Error(message), { status });
+}
+
+function routeError(error: unknown) {
+  const appError = error as AppError;
+  let status = Number(appError?.status) || 500;
+  let message = status < 500 && error instanceof Error
+    ? error.message
+    : "伺服器無法完成排程操作。";
+
+  if (appError?.code === "P0002") {
+    status = 404;
+    message = "找不到場次或任務。";
+  } else if (appError?.code === "23505") {
+    status = 409;
+    message = "資料已存在，請重新載入後再試。";
+  } else if (appError?.code === "23514") {
+    status = 409;
+    message = "此操作不符合場次狀態或已有執行紀錄。";
+  } else if (appError?.code === "42501") {
+    status = 403;
+    message = "你沒有執行此操作的權限。";
+  }
+
+  return NextResponse.json({ error: message }, { status });
 }
 
 async function serviceIdFrom(context: Context) {
@@ -86,101 +85,26 @@ async function fetchService(supabase: SupabaseClient, serviceId: string) {
   return data;
 }
 
+async function ensureEditableService(supabase: SupabaseClient, serviceId: string) {
+  const service = await fetchService(supabase, serviceId);
+  if (service.status === "completed") fail("已完成的場次不能再修改。", 409);
+  return service;
+}
+
 async function ensureServiceTaskSnapshot(
   supabase: SupabaseClient,
   serviceId: string,
-  sourceNodeId: string,
-  adminUserId: string
+  sourceNodeId: string
 ) {
-  const service = await fetchService(supabase, serviceId);
-  const { data: sourceData, error: sourceError } = await supabase
-    .from("timeline_nodes")
-    .select("id,service_id,source_template_node_id,service_type,time,title,assignee,location,details,voice_reminder_enabled,reminder_pre5_enabled,reminder_now_enabled,sort_order,is_active")
-    .eq("id", sourceNodeId)
-    .maybeSingle();
-  if (sourceError) throw sourceError;
-  const source = sourceData as TimelineRow | null;
-  if (!source) fail("找不到任務。", 404);
-  if (source.service_id) {
-    if (source.service_id !== serviceId) fail("任務不屬於此場次。", 400);
-    return source.id;
-  }
-  if (source.service_type !== service.service_type) fail("範本任務不屬於此堂次。", 400);
-
-  const { data: existing, error: existingError } = await supabase
-    .from("timeline_nodes")
-    .select("id")
-    .eq("service_id", serviceId)
-    .eq("source_template_node_id", source.id)
-    .maybeSingle();
-  if (existingError) throw existingError;
-  if (existing?.id) return String(existing.id);
-
-  const { data: sourceChecklist, error: checklistError } = await supabase
-    .from("checklist_items")
-    .select("id,text,details,sort_order,is_active")
-    .eq("node_id", source.id)
-    .order("sort_order")
-    .order("id");
-  if (checklistError) throw checklistError;
-
-  const activeChecklistIds = (sourceChecklist ?? [])
-    .filter((item) => item.is_active)
-    .map((item) => String(item.id));
-  if (activeChecklistIds.length) {
-    const { data: states, error: stateError } = await supabase
-      .from("assignment_checklist_states")
-      .select("id")
-      .eq("service_id", serviceId)
-      .in("checklist_item_id", activeChecklistIds)
-      .limit(1);
-    if (stateError) throw stateError;
-    if (states?.length) {
-      fail("此任務已有同工執行紀錄，為避免遺失進度，不能再從共用範本建立本堂副本。", 409);
-    }
-  }
-
-  const targetId = randomUUID();
-  const { error: insertError } = await supabase.from("timeline_nodes").insert({
-    id: targetId,
-    service_id: serviceId,
-    source_template_node_id: source.id,
-    service_type: service.service_type,
-    time: source.time,
-    title: source.title,
-    assignee: source.assignee,
-    location: source.location,
-    details: source.details,
-    voice_reminder_enabled: source.voice_reminder_enabled,
-    reminder_pre5_enabled: source.reminder_pre5_enabled,
-    reminder_now_enabled: source.reminder_now_enabled,
-    sort_order: source.sort_order,
-    is_active: source.is_active,
+  const { data, error } = await supabase.rpc("ensure_service_task_snapshot", {
+    p_service_id: serviceId,
+    p_source_node_id: sourceNodeId,
   });
-  if (insertError) throw insertError;
-
-  const copiedChecklist = (sourceChecklist ?? []).map((item) => ({
-    id: randomUUID(),
-    node_id: targetId,
-    source_template_item_id: item.id,
-    text: item.text,
-    details: item.details,
-    sort_order: item.sort_order,
-    is_active: item.is_active,
-    is_completed: false,
-    completed_at: null,
-  }));
-  if (copiedChecklist.length) {
-    const { error } = await supabase.from("checklist_items").insert(copiedChecklist);
-    if (error) throw error;
+  if (error) throw error;
+  const targetId = String(data ?? "");
+  if (!targetId || targetId.length > 160) {
+    throw new Error("Snapshot RPC returned an invalid timeline node id");
   }
-
-  const { error: mappingError } = await supabase
-    .from("service_task_assignments")
-    .update({ timeline_node_id: targetId, created_by: adminUserId })
-    .eq("service_id", serviceId)
-    .eq("timeline_node_id", source.id);
-  if (mappingError) throw mappingError;
   return targetId;
 }
 
@@ -204,7 +128,7 @@ async function resolveChecklistTarget(
     .eq("source_template_item_id", sourceItemId)
     .maybeSingle();
   if (snapshotError) throw snapshotError;
-  if (!snapshot?.id) fail("清單項目不屬於此任務。", 400);
+  if (!snapshot?.id) fail("清單項目不屬於此任務。");
   return String(snapshot.id);
 }
 
@@ -264,7 +188,7 @@ export async function GET(request: NextRequest, context: Context) {
       service,
       tasks,
       requiredItems: (requiredItems ?? []).filter((item) => item.is_active),
-      canEdit: actor.roles.includes("admin"),
+      canEdit: actor.roles.includes("admin") && service.status !== "completed",
     });
   } catch (error) {
     return routeError(error);
@@ -278,10 +202,9 @@ export async function POST(request: NextRequest, context: Context) {
     const body = await request.json().catch(() => ({}));
     const action = String(body.action ?? "");
     const supabase = getSupabaseUserClient(request);
+    const service = await ensureEditableService(supabase, serviceId);
 
     if (action === "update_service") {
-      const service = await fetchService(supabase, serviceId);
-      if (service.status === "completed") fail("已完成的場次不能修改。", 409);
       const serviceDate = String(body.serviceDate ?? "").trim();
       const startsAt = String(body.startsAt ?? "").trim();
       const reportAt = String(body.reportAt ?? "").trim();
@@ -336,20 +259,18 @@ export async function POST(request: NextRequest, context: Context) {
     }
 
     if (action === "save_task") {
-      const service = await fetchService(supabase, serviceId);
-      if (service.status === "completed") fail("已完成的場次不能修改任務。", 409);
       const sourceNodeId = optionalNodeId(body.id);
-      const time = String(body.time ?? "").trim();
+      const taskTime = String(body.time ?? "").trim();
       const title = cleanText(body.title, 200);
       const assignee = cleanText(body.assignee, 100);
       const location = cleanText(body.location, 120);
       const details = cleanText(body.details, 2000);
       const sortOrder = Number(body.sort_order ?? 0);
-      if (!TIME_PATTERN.test(time) || !title || !Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) {
+      if (!TIME_PATTERN.test(taskTime) || !title || !Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) {
         fail("任務時間、名稱或排序無效。");
       }
       const payload = {
-        time,
+        time: taskTime,
         title,
         assignee: assignee || null,
         location: location || null,
@@ -362,11 +283,10 @@ export async function POST(request: NextRequest, context: Context) {
       };
 
       if (!sourceNodeId) {
-        const id = randomUUID();
         const { data, error } = await supabase
           .from("timeline_nodes")
           .insert({
-            id,
+            id: randomUUID(),
             service_id: serviceId,
             source_template_node_id: null,
             service_type: service.service_type,
@@ -378,7 +298,7 @@ export async function POST(request: NextRequest, context: Context) {
         return NextResponse.json({ task: data, message: "已新增本堂任務。" }, { status: 201 });
       }
 
-      const targetId = await ensureServiceTaskSnapshot(supabase, serviceId, sourceNodeId, admin.userId);
+      const targetId = await ensureServiceTaskSnapshot(supabase, serviceId, sourceNodeId);
       const { data, error } = await supabase
         .from("timeline_nodes")
         .update(payload)
@@ -394,7 +314,7 @@ export async function POST(request: NextRequest, context: Context) {
     if (action === "delete_task") {
       const sourceNodeId = optionalNodeId(body.id);
       if (!sourceNodeId) fail("任務識別資料無效。");
-      const targetId = await ensureServiceTaskSnapshot(supabase, serviceId, sourceNodeId, admin.userId);
+      const targetId = await ensureServiceTaskSnapshot(supabase, serviceId, sourceNodeId);
       const { error } = await supabase
         .from("timeline_nodes")
         .update({ is_active: false })
@@ -413,7 +333,7 @@ export async function POST(request: NextRequest, context: Context) {
       if (!taskId || !text || !Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) {
         fail("清單項目資料無效。");
       }
-      const targetNodeId = await ensureServiceTaskSnapshot(supabase, serviceId, taskId, admin.userId);
+      const targetNodeId = await ensureServiceTaskSnapshot(supabase, serviceId, taskId);
       if (!sourceItemId) {
         const { data, error } = await supabase
           .from("checklist_items")
@@ -450,7 +370,7 @@ export async function POST(request: NextRequest, context: Context) {
       const taskId = optionalNodeId(body.taskId);
       const sourceItemId = optionalNodeId(body.id);
       if (!taskId || !sourceItemId) fail("清單識別資料無效。");
-      const targetNodeId = await ensureServiceTaskSnapshot(supabase, serviceId, taskId, admin.userId);
+      const targetNodeId = await ensureServiceTaskSnapshot(supabase, serviceId, taskId);
       const targetItemId = await resolveChecklistTarget(supabase, targetNodeId, sourceItemId);
       const { error } = await supabase
         .from("checklist_items")
@@ -486,7 +406,10 @@ export async function POST(request: NextRequest, context: Context) {
       const { data, error } = await query.select("id").maybeSingle();
       if (error) throw error;
       if (!data) fail("找不到可更新的必備物品。", 404);
-      return NextResponse.json({ requiredItem: data, message: id ? "已更新必備物品。" : "已新增必備物品。" }, { status: id ? 200 : 201 });
+      return NextResponse.json({
+        requiredItem: data,
+        message: id ? "已更新必備物品。" : "已新增必備物品。",
+      }, { status: id ? 200 : 201 });
     }
 
     if (action === "delete_required_item") {
