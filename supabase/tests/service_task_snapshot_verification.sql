@@ -11,7 +11,8 @@ insert into public.user_roles(user_id,role,granted_by) values
 ('71111111-1111-4111-8111-111111111111','admin','71111111-1111-4111-8111-111111111111'),
 ('72222222-2222-4222-8222-222222222222','coordinator','71111111-1111-4111-8111-111111111111');
 insert into public.worship_services(id,service_date,service_type,starts_at,report_at,location,status,created_by,updated_by) values
-('7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','2099-01-04','主一堂','2099-01-04 09:00+08','2099-01-04 08:20+08','夏凱納靈糧堂','draft','71111111-1111-4111-8111-111111111111','71111111-1111-4111-8111-111111111111');
+('7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','2099-01-04','主一堂','2099-01-04 09:00+08','2099-01-04 08:20+08','夏凱納靈糧堂','draft','71111111-1111-4111-8111-111111111111','71111111-1111-4111-8111-111111111111'),
+('7ddddddd-dddd-4ddd-8ddd-dddddddddddd','2099-01-18','主一堂','2099-01-18 09:00+08','2099-01-18 08:20+08','夏凱納靈糧堂','draft','71111111-1111-4111-8111-111111111111','71111111-1111-4111-8111-111111111111');
 insert into public.service_stations(id,service_id,name,role_label) values ('7bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','2樓大堂專招','專招');
 insert into public.service_assignments(id,service_id,user_id,station_id,role_label,status,created_by) values ('7ccccccc-cccc-4ccc-8ccc-cccccccccccc','7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','73333333-3333-4333-8333-333333333333','7bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','專招','scheduled','71111111-1111-4111-8111-111111111111');
 insert into public.service_coordinators(service_id,user_id,granted_by) values ('7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','72222222-2222-4222-8222-222222222222','71111111-1111-4111-8111-111111111111');
@@ -28,6 +29,19 @@ do $$ declare affected integer; begin update public.timeline_nodes set title='mu
 do $$ declare affected integer; begin update public.service_assignments set role_label='must fail' where id='7ccccccc-cccc-4ccc-8ccc-cccccccccccc'; get diagnostics affected=row_count; perform pg_temp.assert_true(affected=0,'coordinator changed assignment'); end $$;
 
 select set_config('request.jwt.claim.sub','71111111-1111-4111-8111-111111111111',true);
+select public.ensure_service_task_snapshot('7ddddddd-dddd-4ddd-8ddd-dddddddddddd','__schedule_template__') as atomic_snapshot_id \gset
+select pg_temp.assert_true((select service_id='7ddddddd-dddd-4ddd-8ddd-dddddddddddd' from public.timeline_nodes where id=:'atomic_snapshot_id'),'atomic snapshot node missing');
+select pg_temp.assert_true((select count(*)=1 from public.checklist_items where node_id=:'atomic_snapshot_id' and source_template_item_id='__schedule_template_item__'),'atomic snapshot checklist missing');
+select pg_temp.assert_true(public.ensure_service_task_snapshot('7ddddddd-dddd-4ddd-8ddd-dddddddddddd','__schedule_template__')=:'atomic_snapshot_id','snapshot RPC is not idempotent');
+
+update public.worship_services set status='completed' where id='7ddddddd-dddd-4ddd-8ddd-dddddddddddd';
+do $$ begin
+  perform public.ensure_service_task_snapshot('7ddddddd-dddd-4ddd-8ddd-dddddddddddd','__schedule_template__');
+  raise exception 'completed service snapshot unexpectedly succeeded';
+exception
+  when sqlstate '23514' then null;
+end $$;
+
 select public.copy_worship_service_schedule('7aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','2099-01-11','2099-01-11 09:00+08','2099-01-11 08:20+08','夏凱納靈糧堂','verification','draft',true) as copied_service_id \gset
 select pg_temp.assert_true((select count(*)=1 from public.timeline_nodes where service_id=:'copied_service_id' and is_active),'resolved task copy failed');
 select pg_temp.assert_true((select count(*)=1 from public.service_required_items where service_id=:'copied_service_id'),'required item copy failed');
