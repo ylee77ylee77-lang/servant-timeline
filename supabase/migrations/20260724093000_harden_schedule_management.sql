@@ -65,7 +65,7 @@ begin
     return v_source.id;
   end if;
 
-  if v_source.service_type::text <> v_service_type then
+  if v_source.service_type::text is distinct from v_service_type then
     raise exception 'Template service type mismatch' using errcode = '23514';
   end if;
 
