@@ -79,19 +79,42 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Run database verification scripts
+        id: database_tests
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
+          : > database-tests.log
           mapfile -t test_files < <(find supabase/tests -type f -name '*.sql' | sort)
           if (( ${#test_files[@]} == 0 )); then
-            echo "No database verification scripts found." >&2
-            exit 1
+            echo "No database verification scripts found." | tee -a database-tests.log
+            exit_code=1
+          else
+            exit_code=0
+            for test_file in "${test_files[@]}"; do
+              echo "===== ${test_file} =====" | tee -a database-tests.log
+              psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f "$test_file" 2>&1 | tee -a database-tests.log
+              command_status=${PIPESTATUS[0]}
+              if (( command_status != 0 )); then
+                exit_code=${command_status}
+                break
+              fi
+            done
           fi
-          for test_file in "${test_files[@]}"; do
-            echo "::group::${test_file}"
-            psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f "$test_file"
-            echo "::endgroup::"
-          done
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload database test diagnostics
+        if: steps.database_tests.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-test-diagnostics
+          path: database-tests.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail when database verification failed
+        if: steps.database_tests.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Run lint
         run: npm run lint
