@@ -38,8 +38,8 @@ jobs:
           version: 2.101.0
           github-token: ${{ github.token }}
 
-      - name: Start isolated local database and apply migrations
-        run: supabase db start
+      - name: Start isolated local Supabase and apply migrations
+        run: supabase start
 
       - name: Export ephemeral local Supabase settings
         shell: bash
