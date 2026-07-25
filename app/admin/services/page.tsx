@@ -49,7 +49,10 @@ export default function ServiceAdminPage() {
 
   useEffect(() => {
     if (!isCoordinator) return;
-    void loadServices();
+    const timeoutId = window.setTimeout(() => {
+      void loadServices();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [isCoordinator, loadServices]);
 
   const submit = async (event: FormEvent) => {
