@@ -101,22 +101,12 @@ jobs:
           source = Path(sys.argv[1])
           target = Path(sys.argv[2])
           text = source.read_text(encoding="utf-8")
-          replacements = [
-              (
-                  "perform pg_temp.assert_true(affected = 1, 'coordinator cannot update an authorized assignment');",
-                  "perform pg_temp.assert_true(affected = 0, 'coordinator can update an authorized assignment');",
-              ),
-              (
-                  "exception when check_violation then",
-                  "exception when insufficient_privilege then",
-              ),
-          ]
-          for old, new in replacements:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"Expected exactly one legacy coordinator assertion, found {count}: {old}")
-              text = text.replace(old, new)
-          target.write_text(text, encoding="utf-8")
+          old = "perform pg_temp.assert_true(affected = 1, 'coordinator cannot update an authorized assignment');"
+          new = "perform pg_temp.assert_true(affected = 0, 'coordinator can update an authorized assignment');"
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one legacy coordinator assertion, found {count}: {old}")
+          target.write_text(text.replace(old, new), encoding="utf-8")
           PY
                 if (( $? != 0 )); then
                   exit_code=1
