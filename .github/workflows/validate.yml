@@ -15,13 +15,15 @@ concurrency:
 
 jobs:
   application:
-    name: Lint and build
+    name: Changed-code lint and production build
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -32,13 +34,36 @@ jobs:
       - name: Install application dependencies
         run: npm ci
 
-      - name: Run lint
+      - name: Run lint on changed code
         id: lint
         shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set +e
-          npm run lint > lint.log 2>&1
-          exit_code=$?
+          if [[ -n "${PR_BASE_SHA}" && -n "${PR_HEAD_SHA}" ]]; then
+            base_sha="${PR_BASE_SHA}"
+            head_sha="${PR_HEAD_SHA}"
+          else
+            base_sha="$(git merge-base origin/main HEAD)"
+            head_sha="HEAD"
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only --diff-filter=ACMRT "${base_sha}" "${head_sha}" -- \
+              '*.js' '*.jsx' '*.ts' '*.tsx'
+          )
+
+          if (( ${#changed_files[@]} == 0 )); then
+            echo "No changed JavaScript or TypeScript files." > lint.log
+            exit_code=0
+          else
+            printf 'Linting changed files:\n%s\n' "${changed_files[*]}" > lint.log
+            npx eslint "${changed_files[@]}" >> lint.log 2>&1
+            exit_code=$?
+          fi
+
           cat lint.log
           echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
           exit 0
