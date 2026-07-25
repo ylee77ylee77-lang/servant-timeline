@@ -48,7 +48,13 @@ export default function ServiceSchedulePage() {
     finally { setLoading(false); }
   }, [headers, serviceId]);
 
-  useEffect(() => { if (isCoordinator) void load(); }, [isCoordinator, load]);
+  useEffect(() => {
+    if (!isCoordinator) return;
+    const timeoutId = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [isCoordinator, load]);
 
   const post = async (payload: Record<string, unknown>) => {
     setSaving(true); setMessage("");
