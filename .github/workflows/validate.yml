@@ -14,10 +14,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Build and database tests
+  application:
+    name: Lint and build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -31,6 +31,42 @@ jobs:
 
       - name: Install application dependencies
         run: npm ci
+
+      - name: Run lint
+        id: lint
+        shell: bash
+        run: |
+          set +e
+          npm run lint > lint.log 2>&1
+          exit_code=$?
+          cat lint.log
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload lint diagnostics
+        if: steps.lint.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-diagnostics
+          path: lint.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail when lint failed
+        if: steps.lint.outputs.exit_code != '0'
+        run: exit 1
+
+      - name: Run production build
+        run: npm run build
+
+  database:
+    name: Database migrations and authorization tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v2
@@ -65,18 +101,12 @@ jobs:
         if: steps.supabase_start.outputs.exit_code != '0'
         run: exit 1
 
-      - name: Export ephemeral local Supabase settings
+      - name: Export ephemeral local database URL
         shell: bash
         run: |
           set -euo pipefail
           eval "$(supabase status -o env)"
-          {
-            echo "NEXT_PUBLIC_SUPABASE_URL=${API_URL}"
-            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY}"
-            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${ANON_KEY}"
-            echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
-            echo "DATABASE_URL=${DB_URL}"
-          } >> "$GITHUB_ENV"
+          echo "DATABASE_URL=${DB_URL}" >> "$GITHUB_ENV"
 
       - name: Run database verification scripts
         id: database_tests
@@ -138,12 +168,6 @@ jobs:
       - name: Fail when database verification failed
         if: steps.database_tests.outputs.exit_code != '0'
         run: exit 1
-
-      - name: Run lint
-        run: npm run lint
-
-      - name: Run production build
-        run: npm run build
 
       - name: Stop local Supabase
         if: always()
