@@ -38,6 +38,9 @@ jobs:
           version: 2.101.0
           github-token: ${{ github.token }}
 
+      - name: Normalize local Supabase config for stable CLI
+        run: sed -i 's/^\[local_smtp\]$/[inbucket]/' supabase/config.toml
+
       - name: Start isolated local Supabase and apply migrations
         id: supabase_start
         shell: bash
