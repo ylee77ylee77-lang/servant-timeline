@@ -39,7 +39,28 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Start isolated local Supabase and apply migrations
-        run: supabase start
+        id: supabase_start
+        shell: bash
+        run: |
+          set +e
+          supabase start > supabase-start.log 2>&1
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          tail -n 120 supabase-start.log
+          exit 0
+
+      - name: Upload Supabase startup diagnostics
+        if: steps.supabase_start.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-start-diagnostics
+          path: supabase-start.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail when local Supabase did not start
+        if: steps.supabase_start.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Export ephemeral local Supabase settings
         shell: bash
@@ -77,4 +98,4 @@ jobs:
 
       - name: Stop local Supabase
         if: always()
-        run: supabase stop --no-backup
+        run: supabase stop --no-backup || true
