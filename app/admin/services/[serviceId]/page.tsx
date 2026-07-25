@@ -52,7 +52,11 @@ export default function ServiceCoordinationPage() {
   }, [headers, serviceId]);
 
   useEffect(() => {
-    if (isCoordinator) void load();
+    if (!isCoordinator) return;
+    const timeoutId = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [isCoordinator, load]);
 
   const postAction = async (payload: Record<string, unknown>) => {
