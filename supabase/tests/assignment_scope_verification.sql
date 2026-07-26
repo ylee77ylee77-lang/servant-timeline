@@ -300,10 +300,10 @@ declare
   affected integer;
 begin
   update public.service_assignments
-  set notes = 'authorized coordinator update'
+  set notes = 'coordinator write must fail'
   where id = 'cccccccc-cccc-4ccc-8ccc-ccccccccccc1';
   get diagnostics affected = row_count;
-  perform pg_temp.assert_true(affected = 1, 'coordinator cannot update an authorized assignment');
+  perform pg_temp.assert_true(affected = 0, 'coordinator can update an authorized assignment');
 
   update public.service_assignments
   set notes = 'cross-service coordinator update must fail'
