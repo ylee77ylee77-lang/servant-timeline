@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const CREATE_STATUSES = new Set(["draft", "published"]);
 
 function isRealDate(value: string) {
   if (!DATE_PATTERN.test(value)) return false;
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
     await requireCoordinator(request);
     const { data, error } = await getSupabaseUserClient(request)
       .from("worship_services")
-      .select("id,service_date,service_type,starts_at,report_at,location,status")
+      .select("id,service_date,service_type,starts_at,report_at,location,status,notes")
       .order("service_date", { ascending: false })
       .order("starts_at", { ascending: false })
       .limit(30);
@@ -53,6 +54,8 @@ export async function POST(request: NextRequest) {
     const startsAt = String(body.startsAt ?? "").trim();
     const reportAt = String(body.reportAt ?? "").trim();
     const location = String(body.location ?? "夏凱納靈糧堂").normalize("NFKC").trim();
+    const notes = String(body.notes ?? "").trim();
+    const status = String(body.status ?? "published");
 
     if (!isRealDate(serviceDate) || !isServiceType(serviceType)) {
       return NextResponse.json({ error: "場次日期或堂次無效。" }, { status: 400 });
@@ -64,8 +67,8 @@ export async function POST(request: NextRequest) {
     if (!TIME_PATTERN.test(startsAt) || !TIME_PATTERN.test(reportAt)) {
       return NextResponse.json({ error: "報到及開始時間格式無效。" }, { status: 400 });
     }
-    if (!location || location.length > 120) {
-      return NextResponse.json({ error: "地點需為 1–120 字元。" }, { status: 400 });
+    if (!location || location.length > 120 || notes.length > 2000 || !CREATE_STATUSES.has(status)) {
+      return NextResponse.json({ error: "地點、備註或場次狀態無效。" }, { status: 400 });
     }
 
     const startsAtIso = `${serviceDate}T${startsAt}:00+08:00`;
@@ -83,7 +86,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     if (lookupError) throw lookupError;
     if (existing && ["completed", "cancelled"].includes(String(existing.status))) {
-      return NextResponse.json({ error: "已完成或取消的場次不能重新開放。" }, { status: 409 });
+      return NextResponse.json({ error: "已完成或取消的場次不能重新建立。" }, { status: 409 });
     }
 
     const servicePayload = {
@@ -92,7 +95,8 @@ export async function POST(request: NextRequest) {
       starts_at: startsAtIso,
       report_at: reportAtIso,
       location,
-      status: "published",
+      notes: notes || null,
+      status,
       updated_by: admin.userId,
       ...(existing ? {} : { created_by: admin.userId }),
     };
@@ -101,7 +105,7 @@ export async function POST(request: NextRequest) {
       ? supabase.from("worship_services").update(servicePayload).eq("id", existing.id)
       : supabase.from("worship_services").insert(servicePayload);
     const { data: serviceRows, error: serviceError } = await serviceQuery
-      .select("id,service_date,service_type,starts_at,report_at,location,status");
+      .select("id,service_date,service_type,starts_at,report_at,location,status,notes");
     if (serviceError || !serviceRows?.[0]) throw serviceError || new Error("Service write failed");
 
     const service = serviceRows[0];

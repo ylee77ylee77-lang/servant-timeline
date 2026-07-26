@@ -1,0 +1,176 @@
+name: Validate application and database
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    name: Changed-code lint and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install application dependencies
+        run: npm ci
+
+      - name: Run lint on changed code
+        id: lint
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set +e
+          if [[ -n "${PR_BASE_SHA}" && -n "${PR_HEAD_SHA}" ]]; then
+            base_sha="${PR_BASE_SHA}"
+            head_sha="${PR_HEAD_SHA}"
+          else
+            base_sha="$(git merge-base origin/main HEAD)"
+            head_sha="HEAD"
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only --diff-filter=ACMRT "${base_sha}" "${head_sha}" -- \
+              '*.js' '*.jsx' '*.ts' '*.tsx'
+          )
+
+          if (( ${#changed_files[@]} == 0 )); then
+            echo "No changed JavaScript or TypeScript files." > lint.log
+            exit_code=0
+          else
+            printf 'Linting changed files:\n%s\n' "${changed_files[*]}" > lint.log
+            npx eslint "${changed_files[@]}" >> lint.log 2>&1
+            exit_code=$?
+          fi
+
+          cat lint.log
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload lint diagnostics
+        if: steps.lint.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-diagnostics
+          path: lint.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail when lint failed
+        if: steps.lint.outputs.exit_code != '0'
+        run: exit 1
+
+      - name: Run production build
+        run: npm run build
+
+  database:
+    name: Database migrations and authorization tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v2
+        with:
+          version: 2.101.0
+          github-token: ${{ github.token }}
+
+      - name: Normalize local Supabase config for stable CLI
+        run: sed -i 's/^\[local_smtp\]$/[inbucket]/' supabase/config.toml
+
+      - name: Start isolated local Supabase and apply migrations
+        id: supabase_start
+        shell: bash
+        run: |
+          set +e
+          supabase start > supabase-start.log 2>&1
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          tail -n 120 supabase-start.log
+          exit 0
+
+      - name: Upload Supabase startup diagnostics
+        if: steps.supabase_start.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-start-diagnostics
+          path: supabase-start.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail when local Supabase did not start
+        if: steps.supabase_start.outputs.exit_code != '0'
+        run: exit 1
+
+      - name: Export ephemeral local database URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env)"
+          echo "DATABASE_URL=${DB_URL}" >> "$GITHUB_ENV"
+
+      - name: Run database verification scripts
+        id: database_tests
+        shell: bash
+        run: |
+          set +e
+          : > database-tests.log
+          mapfile -t test_files < <(find supabase/tests -type f -name '*.sql' | sort)
+          if (( ${#test_files[@]} == 0 )); then
+            echo "No database verification scripts found." | tee -a database-tests.log
+            exit_code=1
+          else
+            exit_code=0
+            for test_file in "${test_files[@]}"; do
+              echo "===== ${test_file} =====" | tee -a database-tests.log
+              psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -f "$test_file" 2>&1 | tee -a database-tests.log
+              command_status=${PIPESTATUS[0]}
+              if (( command_status != 0 )); then
+                exit_code=${command_status}
+                break
+              fi
+            done
+          fi
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload database test diagnostics
+        if: steps.database_tests.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-test-diagnostics
+          path: database-tests.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail when database verification failed
+        if: steps.database_tests.outputs.exit_code != '0'
+        run: exit 1
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup || true
