@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect, react-hooks/preserve-manual-memoization, react-hooks/exhaustive-deps, react-hooks/purity, react-hooks/immutability -- Existing single-file operational UI carries this legacy lint debt; new dashboard logic lives in isolated, lint-clean modules. */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
@@ -28,9 +29,11 @@ import {
   MicOff,
   Loader2,
   RefreshCw,
+  House,
 } from 'lucide-react';
 import { BrowserQRCodeReader } from '@zxing/browser';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { MyServiceDashboard } from '@/components/service/MyServiceDashboard';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
@@ -98,6 +101,38 @@ const DEFAULT_TTS_USAGE = {
 
 const formatNumber = (value: any) => Number(value || 0).toLocaleString("zh-TW");
 
+type MyServiceContext = {
+  assignment: {
+    id: string;
+    role_label: string;
+    report_at: string | null;
+    report_location: string | null;
+    ministry_group: string | null;
+    status: string;
+  } | null;
+  service: {
+    id: string;
+    service_date: string;
+    service_type: string;
+    starts_at: string;
+    report_at: string | null;
+    location: string | null;
+    status: string;
+  } | null;
+  assignedStation: string;
+  checkIn: {
+    status: string;
+    checked_in_at: string;
+  } | null;
+};
+
+const EMPTY_MY_SERVICE_CONTEXT: MyServiceContext = {
+  assignment: null,
+  service: null,
+  assignedStation: "",
+  checkIn: null,
+};
+
 const toFixedVoiceNumber = (value: any, fallback: number) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -117,7 +152,10 @@ export default function App() {
   const [nodes, setNodes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
-  const [activeTab, setActiveTab] = useState('checkin');
+  const [activeTab, setActiveTab] = useState('service');
+  const [myServiceContext, setMyServiceContext] = useState<MyServiceContext>(
+    EMPTY_MY_SERVICE_CONTEXT
+  );
   const [currentTime, setCurrentTime] = useState("");
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const activeNodeRef = useRef<HTMLDivElement>(null);
@@ -1864,17 +1902,25 @@ export default function App() {
   const fetchData = async (isBackgroundSync = false) => {
     try {
       if (!isBackgroundSync) setFetchError("");
+      const response = await fetch("/api/service-context", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "無法載入個人服事任務。");
+
+      const nextMyServiceContext: MyServiceContext = {
+        assignment: result.assignment ?? null,
+        service: result.service ?? null,
+        assignedStation: String(result.assignedStation || ""),
+        checkIn: result.checkIn ?? null,
+      };
+      setMyServiceContext(nextMyServiceContext);
+      setCurrentAssignmentId(String(result.assignment?.id || ""));
+      setAssignedStation(nextMyServiceContext.assignedStation);
+
       if (!isCoordinator) {
-        const query = currentService ? `?serviceType=${encodeURIComponent(currentService)}` : "";
-        const response = await fetch(`/api/service-context${query}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          cache: "no-store",
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.error || "無法載入個人服事任務。");
         setNodes(Array.isArray(result.nodes) ? result.nodes : []);
-        setCurrentAssignmentId(String(result.assignment?.id || ""));
-        setAssignedStation(String(result.assignedStation || ""));
         if (result.service?.service_type && result.service.service_type !== currentService) {
           setCurrentService(String(result.service.service_type));
         }
@@ -2609,7 +2655,20 @@ export default function App() {
       setCheckedInService(serviceType);
       setCurrentService(serviceType);
       setConfirmedStation("");
-      setCheckinStatus(result.checkIn.status === "station_confirmed" ? "station_confirmed" : "checked_in");
+      const nextCheckinStatus =
+        result.checkIn.status === "station_confirmed" ? "station_confirmed" : "checked_in";
+      setCheckinStatus(nextCheckinStatus);
+      setMyServiceContext((previous) =>
+        previous.assignment?.id === currentAssignmentId
+          ? {
+              ...previous,
+              checkIn: {
+                status: nextCheckinStatus,
+                checked_in_at: result.checkIn.checked_in_at,
+              },
+            }
+          : previous
+      );
       triggerVibration([200, 100, 200]);
     } catch (error) {
       setCustomAlert({ isOpen: true, message: error instanceof Error ? error.message : "報到失敗，請稍後再試。" });
@@ -2867,6 +2926,18 @@ export default function App() {
         setAssignedStation(prev => prev || parsed.station);
         setConfirmedStation(parsed.station);
         setCheckinStatus("station_confirmed");
+        setMyServiceContext((previous) =>
+          previous.assignment?.id === currentAssignmentId
+            ? {
+                ...previous,
+                assignedStation: previous.assignedStation || parsed.station,
+                checkIn: {
+                  status: "station_confirmed",
+                  checked_in_at: previous.checkIn?.checked_in_at || new Date().toISOString(),
+                },
+              }
+            : previous
+        );
         triggerVibration([200, 100, 200]);
         handleCloseStationScanner();
         setCustomAlert({
@@ -5438,7 +5509,7 @@ export default function App() {
     </div>
   </div>
 
-  {activeTab !== "checkin" && (
+  {activeTab !== "checkin" && activeTab !== "service" && (
     <>
       {/* 第二層：狀態與語音控制 */}
       <div className={`grid gap-2 mt-5 ${canUseQuestionAssistant ? "grid-cols-3" : "grid-cols-2"}`}>
@@ -5529,6 +5600,16 @@ export default function App() {
               重新連線
             </button>
           </div>
+        ) : activeTab === 'service' ? (
+          <MyServiceDashboard
+            displayName={authDisplayName}
+            isLoading={isLoading}
+            service={myServiceContext.service}
+            assignment={myServiceContext.assignment}
+            assignedStation={myServiceContext.assignedStation}
+            checkIn={myServiceContext.checkIn}
+            onNavigate={setActiveTab}
+          />
         ) : activeTab === 'checkin' ? (
           renderCheckinView()
         ) : activeTab === 'timeline' ? (
@@ -5708,6 +5789,7 @@ export default function App() {
         {/* 底部功能導覽列：保留原品牌配色與圓角風格，改為新現場流程架構 */}
         <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around gap-1 px-2 py-1.5 bg-white/90 backdrop-blur-xl border-t border-[#E6EAF0] shadow-[0_-8px_28px_rgba(0,0,0,0.025)] pb-safe rounded-t-[22px] sm:rounded-t-[22px] sm:w-[420px] sm:mx-auto">
           {[
+            { key: "service", label: "服事", icon: House, color: "purple" },
             { key: "checkin", label: "報到", icon: Check, color: "rose" },
             { key: "timeline", label: "流程", icon: ListTodo, color: "rose" },
             { key: "status", label: "現場", icon: BarChart2, color: "purple" },
@@ -5728,12 +5810,12 @@ export default function App() {
                 onClick={() => {
                   setActiveTab(item.key);
                 }}
-                className={`flex flex-1 min-w-0 flex-col items-center justify-center gap-0.5 transition-all duration-300 px-1.5 py-1 rounded-xl ${
+                className={`flex min-h-[44px] flex-1 min-w-0 flex-col items-center justify-center gap-0.5 transition-all duration-300 px-1.5 py-1 rounded-xl ${
                   active ? activeClass : "text-[#7B7B74] hover:bg-[#F3EEFF]"
                 }`}
               >
                 <NavIcon className="w-4 h-4" strokeWidth={active ? 2.5 : 2} />
-                <span className="text-[9px] font-black tracking-widest whitespace-nowrap">{item.label}</span>
+                <span className="text-[10px] font-black tracking-wider whitespace-nowrap">{item.label}</span>
               </button>
             );
           })}
