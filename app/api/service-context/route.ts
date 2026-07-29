@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseUserClient(request);
     const { data: assignments, error: assignmentError } = await supabase
       .from("service_assignments")
-      .select("id,service_id,station_id,role_label,report_at,report_location,status")
+      .select("id,service_id,station_id,role_label,report_at,report_location,ministry_group,status")
       .eq("user_id", user.userId)
       .in("status", ["scheduled", "confirmed", "completed"]);
     if (assignmentError) throw assignmentError;
@@ -68,10 +68,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ assignment: null, service: null, nodes: [] });
     }
 
-    const assignment = assignments.find((item) => item.service_id === service.id) ?? null;
-    if (!assignment) {
+    const selectedAssignment = assignments.find((item) => item.service_id === service.id) ?? null;
+    if (!selectedAssignment) {
       return NextResponse.json({ assignment: null, service: null, nodes: [] });
     }
+    const assignment = {
+      ...selectedAssignment,
+      ministry_group: selectedAssignment.ministry_group || user.ministryGroup || null,
+    };
+
+    const { data: checkIn, error: checkInError } = await supabase
+      .from("service_check_ins")
+      .select("status,checked_in_at")
+      .eq("service_id", service.id)
+      .eq("assignment_id", assignment.id)
+      .eq("user_id", user.userId)
+      .in("status", ["checked_in", "station_confirmed"])
+      .maybeSingle();
+    if (checkInError) throw checkInError;
 
     let assignedStation = "";
     if (assignment.station_id) {
@@ -98,6 +112,7 @@ export async function GET(request: NextRequest) {
         assignment,
         service,
         assignedStation,
+        checkIn,
         nodes: [],
       });
     }
@@ -127,7 +142,7 @@ export async function GET(request: NextRequest) {
         }),
     }));
 
-    return NextResponse.json({ assignment, service, assignedStation, nodes: formattedNodes });
+    return NextResponse.json({ assignment, service, assignedStation, checkIn, nodes: formattedNodes });
   } catch (error) {
     const authError = getAuthErrorResponse(error);
     return NextResponse.json({ error: authError.message }, { status: authError.status });

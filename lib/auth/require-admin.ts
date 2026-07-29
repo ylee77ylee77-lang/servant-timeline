@@ -10,6 +10,7 @@ export type VerifiedAdmin = {
 
 export type VerifiedUser = VerifiedAdmin & {
   roles: string[];
+  ministryGroup: string;
 };
 
 export async function requireActiveUser(request: NextRequest): Promise<VerifiedUser> {
@@ -32,7 +33,7 @@ export async function requireActiveUser(request: NextRequest): Promise<VerifiedU
     await Promise.all([
       supabase
         .from("profiles")
-        .select("display_name,is_active")
+        .select("display_name,ministry_group,is_active")
         .eq("id", userData.user.id)
         .maybeSingle(),
       supabase
@@ -52,6 +53,7 @@ export async function requireActiveUser(request: NextRequest): Promise<VerifiedU
   return {
     userId: userData.user.id,
     displayName: String(profile.display_name || "同工"),
+    ministryGroup: String(profile.ministry_group || ""),
     roles: (roleRows ?? []).map((row) => String(row.role)),
   };
 }
