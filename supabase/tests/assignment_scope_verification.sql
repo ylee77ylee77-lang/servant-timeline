@@ -144,6 +144,62 @@ insert into public.service_check_ins (
     'web'
   );
 
+select pg_temp.assert_true(
+  (
+    select checked_in_at is not null and check_in_source = 'web'
+    from public.service_check_ins
+    where id = 'dddddddd-dddd-4ddd-8ddd-ddddddddddd1'
+  ),
+  'check-in time or source audit field was not recorded'
+);
+
+select pg_temp.assert_true(
+  exists (
+    select 1
+    from public.activity_logs
+    where event_type = 'service_check_ins.insert'
+      and subject_id = 'dddddddd-dddd-4ddd-8ddd-ddddddddddd1'
+      and actor_user_id = '11111111-1111-4111-8111-111111111111'
+      and service_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'
+      and occurred_at is not null
+  ),
+  'check-in activity audit was not attributed safely'
+);
+
+do $$
+begin
+  begin
+    insert into public.service_check_ins (
+      service_id, user_id, assignment_id, status, check_in_source
+    ) values (
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+      '11111111-1111-4111-8111-111111111111',
+      'cccccccc-cccc-4ccc-8ccc-ccccccccccc1',
+      'checked_in',
+      'web'
+    );
+    raise exception 'duplicate same-service check-in unexpectedly succeeded';
+  exception when unique_violation then
+    null;
+  end;
+
+  begin
+    insert into public.service_check_ins (
+      service_id, user_id, assignment_id, status, check_in_source
+    ) values (
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+      '11111111-1111-4111-8111-111111111111',
+      'cccccccc-cccc-4ccc-8ccc-ccccccccccc2',
+      'checked_in',
+      'web'
+    );
+    raise exception 'forged cross-user assignment check-in unexpectedly succeeded';
+  exception when sqlstate '42501' then
+    null;
+  end;
+end;
+$$;
+
 insert into public.check_in_station_confirmations (
   id, check_in_id, service_id, user_id, station_id, station_name_snapshot
 ) values
