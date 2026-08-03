@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { isChurchNetworkRequest } from "@/lib/network/church-wifi";
 import { isServiceType, STATION_OPTIONS_BY_SERVICE } from "@/lib/services/catalog";
+import { isUuid } from "@/lib/services/check-in";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function taipeiDateKey() {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -43,7 +42,27 @@ export async function GET(request: NextRequest) {
       .eq("service_date", taipeiDateKey())
       .in("status", ["published", "completed"]);
     if (serviceError) throw serviceError;
-    if (!services?.length) return NextResponse.json({ checkIn: null });
+    if (!services?.length) {
+      return NextResponse.json({ checkIn: null, eligibleServices: [] });
+    }
+
+    const publishedServices = services.filter((service) => service.status === "published");
+    const { data: assignments, error: assignmentError } = publishedServices.length
+      ? await supabase
+          .from("service_assignments")
+          .select("id,service_id,status")
+          .eq("user_id", user.userId)
+          .in("service_id", publishedServices.map((service) => service.id))
+          .in("status", ["scheduled", "confirmed"])
+      : { data: [], error: null };
+    if (assignmentError) throw assignmentError;
+
+    const eligibleServices = (assignments ?? []).flatMap((assignment) => {
+      const service = publishedServices.find((item) => item.id === assignment.service_id);
+      return service && isServiceType(service.service_type)
+        ? [{ serviceType: service.service_type, assignmentId: assignment.id }]
+        : [];
+    });
 
     const { data: checkIn, error: checkInError } = await supabase
       .from("service_check_ins")
@@ -55,7 +74,7 @@ export async function GET(request: NextRequest) {
       .limit(1)
       .maybeSingle();
     if (checkInError) throw checkInError;
-    if (!checkIn) return NextResponse.json({ checkIn: null });
+    if (!checkIn) return NextResponse.json({ checkIn: null, eligibleServices });
 
     const service = services.find((item) => item.id === checkIn.service_id);
     const { data: confirmation, error: confirmationError } = await supabase
@@ -68,6 +87,7 @@ export async function GET(request: NextRequest) {
     if (confirmationError) throw confirmationError;
 
     return NextResponse.json({
+      eligibleServices,
       checkIn: {
         id: checkIn.id,
         assignmentId: checkIn.assignment_id,
@@ -99,7 +119,7 @@ export async function POST(request: NextRequest) {
     if (!isServiceType(serviceType)) {
       return NextResponse.json({ error: "堂次無效。" }, { status: 400 });
     }
-    if (!UUID_PATTERN.test(assignmentId)) {
+    if (!isUuid(assignmentId)) {
       return NextResponse.json({ error: "請先確認本次服事分派。" }, { status: 400 });
     }
 
@@ -146,7 +166,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "check_in") {
-      if (existingCheckIn) return NextResponse.json({ ok: true, checkIn: existingCheckIn });
+      if (existingCheckIn) {
+        return NextResponse.json({ ok: true, serviceType: service.service_type, checkIn: existingCheckIn });
+      }
       const { data, error } = await supabase
         .from("service_check_ins")
         .insert({ service_id: service.id, user_id: user.userId, assignment_id: assignment.id, status: "checked_in", check_in_source: "web" })
@@ -174,10 +196,15 @@ export async function POST(request: NextRequest) {
             { status: 409 }
           );
         }
-        if (racedCheckIn) return NextResponse.json({ ok: true, checkIn: racedCheckIn });
+        if (racedCheckIn) {
+          return NextResponse.json({ ok: true, serviceType: service.service_type, checkIn: racedCheckIn });
+        }
       }
       if (error) throw error;
-      return NextResponse.json({ ok: true, checkIn: data }, { status: 201 });
+      return NextResponse.json(
+        { ok: true, serviceType: service.service_type, checkIn: data },
+        { status: 201 }
+      );
     }
 
     if (action === "confirm_station") {

@@ -37,6 +37,12 @@ import { MyServiceDashboard } from '@/components/service/MyServiceDashboard';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
+import {
+  CHECK_IN_NETWORK_MESSAGES,
+  getSelectedCheckInOption,
+  normalizeEligibleCheckInOptions,
+  type EligibleCheckInOption,
+} from '@/lib/services/check-in';
 
 // 第一階段 PWA 完成版：報到、堂次、QR Code 崗位確認、總招控場
 const { url: supabaseUrl, publishableKey: supabasePublishableKey } = getPublicSupabaseConfig();
@@ -211,12 +217,16 @@ export default function App() {
   const [showPhoneChange, setShowPhoneChange] = useState(false);
   const [wifiVerified, setWifiVerified] = useState(false);
   const [wifiChecking, setWifiChecking] = useState(false);
-  const [wifiCheckMessage, setWifiCheckMessage] = useState("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
+  const [wifiCheckMessage, setWifiCheckMessage] = useState<string>(
+    CHECK_IN_NETWORK_MESSAGES.unavailable
+  );
   const [isCheckinSyncing, setIsCheckinSyncing] = useState(false);
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
   const [checkedInDay, setCheckedInDay] = useState<number | null>(null);
   const [checkedInService, setCheckedInService] = useState("");
+  const [selectedCheckInService, setSelectedCheckInService] = useState("");
+  const [eligibleCheckInOptions, setEligibleCheckInOptions] = useState<EligibleCheckInOption[]>([]);
   const [currentAssignmentId, setCurrentAssignmentId] = useState("");
   const [confirmedStation, setConfirmedStation] = useState("");
   const [stationScannerOpen, setStationScannerOpen] = useState(false);
@@ -472,6 +482,7 @@ export default function App() {
       });
       if (!response.ok) return;
       const result = await response.json();
+      setEligibleCheckInOptions(normalizeEligibleCheckInOptions(result?.eligibleServices));
       const record = result?.checkIn;
       if (!record?.id || !record?.serviceType) return;
 
@@ -1899,10 +1910,13 @@ export default function App() {
   ]);
 
 
-  const fetchData = async (isBackgroundSync = false) => {
+  const fetchData = async (isBackgroundSync = false, requestedServiceType = "") => {
     try {
       if (!isBackgroundSync) setFetchError("");
-      const response = await fetch("/api/service-context", {
+      const serviceContextUrl = isServiceType(requestedServiceType)
+        ? `/api/service-context?serviceType=${encodeURIComponent(requestedServiceType)}`
+        : "/api/service-context";
+      const response = await fetch(serviceContextUrl, {
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
       });
@@ -2452,11 +2466,13 @@ export default function App() {
     setShowPhoneChange(false);
     setWifiVerified(false);
     setWifiChecking(false);
-    setWifiCheckMessage("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
+    setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.unavailable);
     setCheckinStatus("not_checked_in");
     setCheckedInAt("");
     setCheckedInDay(null);
     setCheckedInService("");
+    setSelectedCheckInService("");
+    setEligibleCheckInOptions([]);
     setConfirmedStation("");
     setAssignedStation("");
     setControlSelectedStation("");
@@ -2538,7 +2554,7 @@ export default function App() {
     setWifiChecking(true);
 
     if (!silent) {
-      setWifiCheckMessage("正在重新檢查 Wi-Fi 連線...");
+      setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.checking);
     }
 
     try {
@@ -2551,15 +2567,15 @@ export default function App() {
 
       if (response.ok && result.connected) {
         setWifiVerified(true);
-        setWifiCheckMessage("目前您在教會網路，可進行點選簽到");
+        setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.connected);
       } else {
         setWifiVerified(false);
-        setWifiCheckMessage("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
+        setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.unavailable);
       }
     } catch (err) {
       console.error("檢查 Wi-Fi 連線失敗:", err);
       setWifiVerified(false);
-      setWifiCheckMessage("目前不在教會網路，請確認連上 Wi-Fi：Slllc 後重試");
+      setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.unavailable);
     } finally {
       setWifiChecking(false);
     }
@@ -2573,7 +2589,6 @@ export default function App() {
     if (activeTab !== "checkin") return;
     if (!hasCheckinProfile) return;
     if (checkinStatus !== "not_checked_in") return;
-    if (wifiVerified) return;
 
     void checkWifiConnection({ silent: true });
 
@@ -2585,6 +2600,11 @@ export default function App() {
       void checkWifiConnection({ silent: true });
     };
 
+    const handleOffline = () => {
+      setWifiVerified(false);
+      setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.unavailable);
+    };
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         void checkWifiConnection({ silent: true });
@@ -2592,11 +2612,13 @@ export default function App() {
     };
 
     window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       window.clearInterval(autoCheckTimer);
       window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [activeTab, hasCheckinProfile, checkinStatus, checkWifiConnection]);
@@ -2609,27 +2631,20 @@ export default function App() {
     }
 
     if (!wifiVerified) {
-      setCustomAlert({ isOpen: true, message: "請確認連接上 Wi-Fi：Slllc 後重試。" });
+      setCustomAlert({ isOpen: true, message: CHECK_IN_NETWORK_MESSAGES.unavailable });
       return;
     }
 
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const activeWindow = serviceTimeWindows.find((window) =>
-      window.day === now.getDay()
-      && currentMinutes >= timeTextToMinutes(window.start)
-      && currentMinutes <= timeTextToMinutes(window.end)
+    const selectedOption = getSelectedCheckInOption(
+      eligibleCheckInOptions,
+      selectedCheckInService
     );
-    const serviceType = activeWindow?.service || currentService;
-    if (!isServiceType(serviceType)) {
-      setCustomAlert({ isOpen: true, message: "目前無法判斷服事堂次，請聯絡總招確認。" });
-      return;
-    }
-    if (!currentAssignmentId) {
-      setCustomAlert({ isOpen: true, message: "目前沒有可用的服事分派，請聯絡帶領者／協調員。" });
+    if (!selectedOption) {
+      setCustomAlert({ isOpen: true, message: "請先選擇並確認你本次服事的堂次。" });
       return;
     }
 
+    const { serviceType, assignmentId } = selectedOption;
     setIsCheckinSyncing(true);
     try {
       const response = await fetch("/api/check-in", {
@@ -2638,7 +2653,7 @@ export default function App() {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ action: "check_in", serviceType, assignmentId: currentAssignmentId }),
+        body: JSON.stringify({ action: "check_in", serviceType, assignmentId }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "報到失敗，請稍後再試。");
@@ -2652,14 +2667,20 @@ export default function App() {
       }).format(checkedInDate);
       setCheckedInAt(timeText);
       setCheckedInDay(checkedInDate.getDay());
-      setCheckedInService(serviceType);
-      setCurrentService(serviceType);
+      const lockedServiceType = String(result.serviceType || "");
+      if (!isServiceType(lockedServiceType)) {
+        throw new Error("伺服器未能確認報到堂次，請重新整理後再試。");
+      }
+      setCheckedInService(lockedServiceType);
+      setSelectedCheckInService("");
+      setCurrentAssignmentId(assignmentId);
+      setCurrentService(lockedServiceType);
       setConfirmedStation("");
       const nextCheckinStatus =
         result.checkIn.status === "station_confirmed" ? "station_confirmed" : "checked_in";
       setCheckinStatus(nextCheckinStatus);
       setMyServiceContext((previous) =>
-        previous.assignment?.id === currentAssignmentId
+        previous.assignment?.id === assignmentId
           ? {
               ...previous,
               checkIn: {
@@ -2669,6 +2690,7 @@ export default function App() {
             }
           : previous
       );
+      void fetchData(true, lockedServiceType);
       triggerVibration([200, 100, 200]);
     } catch (error) {
       setCustomAlert({ isOpen: true, message: error instanceof Error ? error.message : "報到失敗，請稍後再試。" });
@@ -3624,7 +3646,13 @@ export default function App() {
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
-    const todayService = isCheckedIn ? (checkedInService || currentService || "待確認") : "待報到";
+    const todayService = isCheckedIn ? (checkedInService || currentService || "待確認") : "待確認";
+    const selectedOption = getSelectedCheckInOption(
+      eligibleCheckInOptions,
+      selectedCheckInService
+    );
+    const canSubmitCheckIn =
+      wifiVerified && Boolean(selectedOption) && !isCheckedIn && !isCheckinSyncing;
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -3643,6 +3671,7 @@ export default function App() {
                 <User className="w-7 h-7 text-[#6D55A3]" />
               </div>
               <h3 className="text-[18px] font-black text-[#1F2937] mb-2">第一次使用</h3>
+              <p className="text-sm font-black text-[#6D55A3] mb-2">今日堂次：待確認</p>
               <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
                 請先確認您的服事身分。報到會安全寫入今日場次；拿到名牌後，再掃描 QR Code 確認崗位。
               </p>
@@ -3690,7 +3719,7 @@ export default function App() {
                   <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
                   <h3 className="text-xl font-black text-[#1F2937]">{displayCheckinName || "服事同工"}</h3>
                   <p className="text-sm font-bold text-[#6D55A3] mt-1">
-                    今日堂次：{todayService} {checkedInService ? "已鎖定" : "待確認"}
+                    今日堂次：{todayService}{checkedInService ? "（已鎖定）" : ""}
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
@@ -3715,19 +3744,58 @@ export default function App() {
 
             <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
               <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成報到</h3>
+              {!isCheckedIn && (
+                <fieldset className="mb-5">
+                  <legend className="text-xs font-black text-[#7B7B74] mb-2">
+                    請確認本次服事堂次
+                  </legend>
+                  <div className="grid grid-cols-3 gap-2">
+                    {SERVICE_TYPES.map((serviceType) => {
+                      const isEligible = eligibleCheckInOptions.some(
+                        (option) => option.serviceType === serviceType
+                      );
+                      const isSelected = selectedCheckInService === serviceType;
+                      return (
+                        <button
+                          key={serviceType}
+                          type="button"
+                          onClick={() => setSelectedCheckInService(serviceType)}
+                          disabled={!isEligible}
+                          aria-pressed={isSelected}
+                          className={`min-h-[48px] rounded-[16px] border px-2 text-sm font-black transition-colors ${
+                            isSelected
+                              ? "border-[#6D55A3] bg-[#6D55A3] text-white"
+                              : isEligible
+                                ? "border-[#6D55A3]/25 bg-white text-[#6D55A3] hover:bg-[#F3EEFF]"
+                                : "border-[#E6EAF0] bg-[#F8F8F6] text-[#A1A19A] cursor-not-allowed"
+                          }`}
+                        >
+                          {serviceType}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs font-bold leading-relaxed text-[#7B7B74]">
+                    {eligibleCheckInOptions.length
+                      ? selectedOption
+                        ? `已選擇「${selectedOption.serviceType}」，按下報到後即鎖定。`
+                        : "請點選你的本次堂次；系統只開放今日有效排班。"
+                      : "目前沒有可報到的今日排班，請聯絡帶領者／協調員。"}
+                  </p>
+                </fieldset>
+              )}
               <div className={`text-xs font-bold leading-relaxed mb-4 ${
                 wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"
               }`}>
                 {wifiVerified ? (
                   <>
-                    <p>目前您在教會網路</p>
+                    <p>{wifiCheckMessage}</p>
                     <p className="flex flex-wrap items-center gap-2">
-                      <span>可進行點選簽到</span>
                       <button
                         type="button"
                         onClick={handleWifiCheck}
                         disabled={wifiChecking}
-                        aria-label="重新檢查 Wi-Fi"
+                        aria-label="重新確認現場報到資格"
                         className={`wifi-action-enter wifi-check-button inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-black ${
                           wifiChecking
                             ? "wifi-check-button-checking bg-white text-[#00B8B8] border-[#00B8B8]/40 cursor-wait"
@@ -3743,14 +3811,13 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <p>目前不在教會網路</p>
+                    <p>{wifiCheckMessage}</p>
                     <p className="flex flex-wrap items-center gap-2">
-                      <span>請確認連上 Wi-Fi：Slllc 後重試</span>
                       <button
                         type="button"
                         onClick={handleWifiCheck}
                         disabled={wifiChecking}
-                        aria-label="重新檢查 Wi-Fi"
+                        aria-label="重新確認現場報到資格"
                         className={`wifi-action-enter wifi-check-button inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-black ${
                           wifiChecking
                             ? "wifi-check-button-checking bg-white text-[#00B8B8] border-[#00B8B8]/40 cursor-wait"
@@ -3772,25 +3839,31 @@ export default function App() {
                   wifiVerified
                     ? "bg-[#00B8B8]/10 border-[#00B8B8]/20 text-[#00B8B8]"
                     : "bg-white border-[#F25D6B]/25 text-[#F25D6B]"
-                }`}>
+                  }`}>
                   <div className="text-sm font-black">
-                    {wifiVerified ? "Wi-Fi：已連結" : "Wi-Fi：未連結"}
+                    {wifiVerified ? "現場報到：可使用" : "現場報到：尚不可用"}
                   </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => void handleLocalCheckin()}
-                  disabled={!wifiVerified || isCheckedIn || isCheckinSyncing}
+                  disabled={!canSubmitCheckIn}
                   className={`min-w-[108px] px-5 rounded-[18px] text-sm font-black transition-all ${
                     isCheckedIn
                       ? "bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 cursor-default"
-                      : wifiVerified
+                      : canSubmitCheckIn
                         ? "bg-[#F25D6B] text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E]"
                         : "bg-[#E6EAF0] text-[#9CA3AF] cursor-not-allowed"
                   }`}
                 >
-                  {isCheckedIn ? "已完成報到" : isCheckinSyncing ? "同步中…" : "立即報到"}
+                  {isCheckedIn
+                    ? "已完成報到"
+                    : isCheckinSyncing
+                      ? "同步中…"
+                      : selectedOption
+                        ? `確認${selectedOption.serviceType}並報到`
+                        : "立即報到"}
                 </button>
               </div>
             </div>

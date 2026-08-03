@@ -7,7 +7,7 @@
     "bootstrap:admin": "node scripts/bootstrap-auth-admin.mjs",
     "build": "next build",
     "type-check": "tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/my-service-dashboard.test.ts",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/*.test.ts",
     "start": "next start",
     "lint": "eslint"
   },
