@@ -263,8 +263,19 @@ begin
     return p_is_active and exists (
       select 1
       from public.service_task_assignments sta
+      join public.service_assignments sa
+        on sa.id = sta.assignment_id
+       and sa.service_id = sta.service_id
+      left join public.service_stations ss
+        on ss.id = sa.station_id
+       and ss.service_id = sa.service_id
       where sta.timeline_node_id = p_node_id
-        and app_private.can_view_live_assignment(sta.service_id, sta.assignment_id)
+        and app_private.live_coordination_scope(sta.service_id) = 'third_floor'
+        and (
+          sa.user_id = auth.uid()
+          or app_private.is_third_floor_station(sa.role_label)
+          or app_private.is_third_floor_station(ss.name)
+        )
     );
   end if;
 
