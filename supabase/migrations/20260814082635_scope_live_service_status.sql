@@ -127,6 +127,52 @@ as $$
   );
 $$;
 
+create or replace function app_private.can_view_live_timeline_node(p_node_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $$
+  select exists (
+    select 1
+    from public.timeline_nodes tn
+    where tn.id = p_node_id
+      and (
+        app_private.is_admin()
+        or (
+          tn.service_id is not null
+          and app_private.live_coordination_scope(tn.service_id) = 'all'
+        )
+        or (
+          tn.service_id is null
+          and exists (
+            select 1
+            from public.worship_services ws
+            where ws.service_type = tn.service_type
+              and app_private.live_coordination_scope(ws.id) = 'all'
+          )
+        )
+        or exists (
+          select 1
+          from public.service_task_assignments sta
+          join public.worship_services ws on ws.id = sta.service_id
+          where sta.timeline_node_id = tn.id
+            and (
+              app_private.can_view_live_assignment(sta.service_id, sta.assignment_id)
+              or (
+                app_private.owns_assignment(sta.assignment_id)
+                and ws.status in (
+                  'published'::public.service_status,
+                  'completed'::public.service_status
+                )
+              )
+            )
+        )
+      )
+  );
+$$;
+
 revoke all on function app_private.is_third_floor_station(text)
 from public, anon, authenticated;
 revoke all on function app_private.live_coordination_scope(uuid)
@@ -136,6 +182,8 @@ from public, anon, authenticated;
 revoke all on function app_private.can_view_live_assignment(uuid, uuid)
 from public, anon, authenticated;
 revoke all on function app_private.can_view_live_check_in(uuid, uuid)
+from public, anon, authenticated;
+revoke all on function app_private.can_view_live_timeline_node(text)
 from public, anon, authenticated;
 
 drop policy if exists profiles_select on public.profiles;
@@ -242,40 +290,7 @@ using (
 drop policy if exists timeline_nodes_select_active on public.timeline_nodes;
 create policy timeline_nodes_select_active
 on public.timeline_nodes for select to authenticated
-using (
-  (select app_private.is_admin())
-  or (
-    service_id is not null
-    and (select app_private.live_coordination_scope(service_id)) = 'all'
-  )
-  or (
-    service_id is null
-    and exists (
-      select 1
-      from public.worship_services ws
-      where ws.service_type = timeline_nodes.service_type
-        and app_private.live_coordination_scope(ws.id) = 'all'
-    )
-  )
-  or exists (
-    select 1
-    from public.service_task_assignments sta
-    join public.service_assignments sa
-      on sa.id = sta.assignment_id
-     and sa.service_id = sta.service_id
-    join public.worship_services ws on ws.id = sta.service_id
-    where sta.timeline_node_id = timeline_nodes.id
-      and (
-        (select app_private.can_view_live_assignment(sta.service_id, sta.assignment_id))
-        or (
-          sa.user_id = (select auth.uid())
-          and sa.status in ('scheduled', 'confirmed', 'completed')
-          and ws.status in ('published', 'completed')
-          and (select app_private.is_active_user())
-        )
-      )
-  )
-);
+using ((select app_private.can_view_live_timeline_node(id)));
 
 create or replace function app_private.set_assignment_checklist_state(
   p_assignment_id uuid,
