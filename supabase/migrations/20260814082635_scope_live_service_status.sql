@@ -140,8 +140,7 @@ set row_security = off
 as $$
   select case
     when app_private.is_admin() then 'all'
-    when not app_private.is_active_user()
-      or not app_private.has_role('coordinator'::public.app_role) then 'none'
+    when not app_private.has_role('coordinator'::public.app_role) then 'none'
     else coalesce((
       select sc.coordination_scope
       from public.service_coordinators sc
