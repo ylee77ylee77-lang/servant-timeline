@@ -22,6 +22,84 @@ alter table public.service_coordinators
   add column coordination_scope text not null default 'all'
   check (coordination_scope in ('all', 'third_floor'));
 
+alter table public.service_assignments
+  add column is_third_floor boolean not null default false;
+
+create function app_private.resolve_assignment_third_floor(
+  p_service_id uuid,
+  p_station_id uuid,
+  p_role_label text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+  select app_private.is_third_floor_station(p_role_label)
+    or exists (
+      select 1
+      from public.service_stations ss
+      where ss.id = p_station_id
+        and ss.service_id = p_service_id
+        and app_private.is_third_floor_station(ss.name)
+    );
+$$;
+
+create function app_private.set_assignment_floor_scope()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+begin
+  new.is_third_floor := app_private.resolve_assignment_third_floor(
+    new.service_id,
+    new.station_id,
+    new.role_label
+  );
+  return new;
+end;
+$$;
+
+create trigger service_assignments_set_floor_scope
+before insert or update of service_id, station_id, role_label
+on public.service_assignments
+for each row execute function app_private.set_assignment_floor_scope();
+
+create function app_private.sync_assignment_floor_scope_from_station()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+begin
+  update public.service_assignments sa
+  set is_third_floor = app_private.resolve_assignment_third_floor(
+    sa.service_id,
+    sa.station_id,
+    sa.role_label
+  )
+  where sa.service_id = new.service_id
+    and sa.station_id = new.id;
+  return new;
+end;
+$$;
+
+create trigger service_stations_sync_assignment_floor_scope
+after update of name on public.service_stations
+for each row execute function app_private.sync_assignment_floor_scope_from_station();
+
+update public.service_assignments sa
+set is_third_floor = app_private.resolve_assignment_third_floor(
+  sa.service_id,
+  sa.station_id,
+  sa.role_label
+);
+
 create function app_private.resolve_live_coordination_scope(
   p_service_id uuid,
   p_user_id uuid
@@ -150,30 +228,6 @@ as $$
   end;
 $$;
 
-create or replace function app_private.can_view_live_station(
-  p_service_id uuid,
-  p_station_id uuid
-)
-returns boolean
-language sql
-stable
-security definer
-set search_path = pg_catalog
-set row_security = off
-as $$
-  select case app_private.live_coordination_scope(p_service_id)
-    when 'all' then true
-    when 'third_floor' then exists (
-      select 1
-      from public.service_stations ss
-      where ss.id = p_station_id
-        and ss.service_id = p_service_id
-        and app_private.is_third_floor_station(ss.name)
-    )
-    else false
-  end;
-$$;
-
 create or replace function app_private.can_view_live_assignment(
   p_service_id uuid,
   p_assignment_id uuid
@@ -190,15 +244,11 @@ as $$
     when 'third_floor' then exists (
       select 1
       from public.service_assignments sa
-      left join public.service_stations ss
-        on ss.id = sa.station_id
-       and ss.service_id = sa.service_id
       where sa.id = p_assignment_id
         and sa.service_id = p_service_id
         and (
           sa.user_id = auth.uid()
-          or app_private.is_third_floor_station(sa.role_label)
-          or app_private.is_third_floor_station(ss.name)
+          or sa.is_third_floor
         )
     )
     else false
@@ -266,15 +316,11 @@ begin
       join public.service_assignments sa
         on sa.id = sta.assignment_id
        and sa.service_id = sta.service_id
-      left join public.service_stations ss
-        on ss.id = sa.station_id
-       and ss.service_id = sa.service_id
       where sta.timeline_node_id = p_node_id
         and app_private.live_coordination_scope(sta.service_id) = 'third_floor'
         and (
           sa.user_id = auth.uid()
-          or app_private.is_third_floor_station(sa.role_label)
-          or app_private.is_third_floor_station(ss.name)
+          or sa.is_third_floor
         )
     );
   end if;
@@ -305,6 +351,12 @@ $$;
 
 revoke all on function app_private.is_third_floor_station(text)
 from public, anon, authenticated;
+revoke all on function app_private.resolve_assignment_third_floor(uuid, uuid, text)
+from public, anon, authenticated;
+revoke all on function app_private.set_assignment_floor_scope()
+from public, anon, authenticated;
+revoke all on function app_private.sync_assignment_floor_scope_from_station()
+from public, anon, authenticated;
 revoke all on function app_private.resolve_live_coordination_scope(uuid, uuid)
 from public, anon, authenticated;
 revoke all on function app_private.set_service_coordinator_scope()
@@ -312,8 +364,6 @@ from public, anon, authenticated;
 revoke all on function app_private.sync_service_coordinator_scope_from_assignment()
 from public, anon, authenticated;
 revoke all on function app_private.live_coordination_scope(uuid)
-from public, anon, authenticated;
-revoke all on function app_private.can_view_live_station(uuid, uuid)
 from public, anon, authenticated;
 revoke all on function app_private.can_view_live_assignment(uuid, uuid)
 from public, anon, authenticated;
@@ -356,11 +406,7 @@ using (
     when 'all' then true
     when 'third_floor' then
       user_id = (select auth.uid())
-      or app_private.is_third_floor_station(role_label)
-      or (
-        station_id is not null
-        and (select app_private.can_view_live_station(service_id, station_id))
-      )
+      or is_third_floor
     else false
   end
 );
