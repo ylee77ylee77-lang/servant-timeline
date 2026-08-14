@@ -136,6 +136,10 @@ select pg_temp.assert_true(
   (select count(*) = 2 from public.service_task_assignments),
   'lead cannot read all related task mappings'
 );
+select pg_temp.assert_true(
+  (select count(*) = 2 from public.timeline_nodes where id like '__live_%'),
+  'lead cannot read all service task definitions'
+);
 
 -- 副總招 sees self plus three-floor rows, never second-floor rows or tasks.
 select set_config('request.jwt.claim.sub', '81000000-0000-4000-8000-000000000003', true);
@@ -152,6 +156,10 @@ select pg_temp.assert_true(
 select pg_temp.assert_true(
   (select count(*) = 1 and bool_and(timeline_node_id = '__live_3f_task__') from public.service_task_assignments),
   'deputy task visibility is not limited to three-floor scope'
+);
+select pg_temp.assert_true(
+  (select count(*) = 1 and bool_and(id = '__live_3f_task__') from public.timeline_nodes where id like '__live_%'),
+  'deputy task definitions are not limited to three-floor scope'
 );
 select pg_temp.assert_true(
   (select count(*) = 1 and bool_and(assignment_id = '84000000-0000-4000-8000-000000000004') from public.service_check_ins),

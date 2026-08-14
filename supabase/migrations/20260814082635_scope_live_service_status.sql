@@ -226,6 +226,64 @@ as $$
   );
 $$;
 
+-- Keep legacy all-scope and volunteer behavior while avoiding nested RLS joins
+-- from the timeline policy into the newly scoped assignment policies.
+create function app_private.can_view_live_timeline_node(
+  p_node_id text,
+  p_service_id uuid,
+  p_service_type text,
+  p_is_active boolean
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+  select
+    app_private.is_admin()
+    or (
+      p_service_id is not null
+      and app_private.live_coordination_scope(p_service_id) = 'all'
+    )
+    or (
+      p_service_id is null
+      and exists (
+        select 1
+        from public.worship_services ws
+        where ws.service_type = p_service_type
+          and app_private.live_coordination_scope(ws.id) = 'all'
+      )
+    )
+    or (
+      p_is_active
+      and exists (
+        select 1
+        from public.service_task_assignments sta
+        join public.service_assignments sa on sa.id = sta.assignment_id
+        join public.worship_services ws on ws.id = sta.service_id
+        where sta.timeline_node_id = p_node_id
+          and (
+            app_private.can_view_live_assignment(sta.service_id, sta.assignment_id)
+            or (
+              sa.user_id = auth.uid()
+              and sa.status in (
+                'scheduled'::public.assignment_status,
+                'confirmed'::public.assignment_status,
+                'completed'::public.assignment_status
+              )
+              and ws.status in (
+                'published'::public.service_status,
+                'completed'::public.service_status
+              )
+              and app_private.is_active_user()
+            )
+          )
+      )
+    );
+$$;
+
 revoke all on function app_private.is_third_floor_station(text)
 from public, anon, authenticated;
 revoke all on function app_private.resolve_live_coordination_scope(uuid, uuid)
@@ -241,6 +299,8 @@ from public, anon, authenticated;
 revoke all on function app_private.can_view_live_assignment(uuid, uuid)
 from public, anon, authenticated;
 revoke all on function app_private.can_view_live_check_in(uuid, uuid)
+from public, anon, authenticated;
+revoke all on function app_private.can_view_live_timeline_node(text, uuid, text, boolean)
 from public, anon, authenticated;
 
 drop policy if exists profiles_select on public.profiles;
@@ -348,6 +408,18 @@ for select to authenticated
 using (
   (select app_private.can_view_live_assignment(service_id, assignment_id))
   or (select app_private.owns_assignment(assignment_id))
+);
+
+drop policy if exists timeline_nodes_select_active on public.timeline_nodes;
+create policy timeline_nodes_select_active on public.timeline_nodes
+for select to authenticated
+using (
+  (select app_private.can_view_live_timeline_node(
+    id,
+    service_id,
+    service_type,
+    is_active
+  ))
 );
 
 create or replace function app_private.set_assignment_checklist_state(
