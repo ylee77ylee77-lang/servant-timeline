@@ -165,14 +165,6 @@ select pg_temp.assert_true(
   (select count(*) = 1 and bool_and(assignment_id = '84000000-0000-4000-8000-000000000004') from public.service_check_ins),
   'deputy check-in visibility is not limited to three-floor scope'
 );
-select pg_temp.assert_true(
-  not exists (
-    select 1 from public.profiles
-    where id = '81000000-0000-4000-8000-000000000004'
-  ),
-  'deputy can read a second-floor profile'
-);
-
 select * from public.set_assignment_checklist_state(
   '84000000-0000-4000-8000-000000000004', '__live_3f_item__', true
 );

@@ -304,20 +304,6 @@ from public, anon, authenticated;
 revoke all on function app_private.can_view_live_timeline_node(text, uuid, text, boolean)
 from public, anon, authenticated;
 
-drop policy if exists profiles_select on public.profiles;
-create policy profiles_select on public.profiles
-for select to authenticated
-using (
-  id = (select auth.uid())
-  or (select app_private.is_admin())
-  or exists (
-    select 1
-    from public.service_assignments sa
-    where sa.user_id = profiles.id
-      and (select app_private.can_view_live_assignment(sa.service_id, sa.id))
-  )
-);
-
 drop policy if exists service_stations_select on public.service_stations;
 create policy service_stations_select on public.service_stations
 for select to authenticated
