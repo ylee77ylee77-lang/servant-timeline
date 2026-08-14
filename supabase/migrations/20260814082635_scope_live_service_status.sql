@@ -241,47 +241,54 @@ set search_path = pg_catalog
 set row_security = off
 as $$
 begin
-  return
-    app_private.is_admin()
-    or (
-      p_service_id is not null
-      and app_private.live_coordination_scope(p_service_id) = 'all'
-    )
-    or (
-      p_service_id is null
-      and exists (
+  if app_private.is_admin() then
+    return true;
+  end if;
+
+  if app_private.has_role('coordinator'::public.app_role) then
+    if p_service_id is not null
+      and app_private.live_coordination_scope(p_service_id) = 'all' then
+      return true;
+    end if;
+
+    if p_service_id is null and exists (
         select 1
         from public.worship_services ws
         where ws.service_type = p_service_type
           and app_private.live_coordination_scope(ws.id) = 'all'
-      )
-    )
-    or (
-      p_is_active
-      and exists (
-        select 1
-        from public.service_task_assignments sta
-        join public.service_assignments sa on sa.id = sta.assignment_id
-        join public.worship_services ws on ws.id = sta.service_id
-        where sta.timeline_node_id = p_node_id
-          and (
-            app_private.can_view_live_assignment(sta.service_id, sta.assignment_id)
-            or (
-              sa.user_id = auth.uid()
-              and sa.status in (
-                'scheduled'::public.assignment_status,
-                'confirmed'::public.assignment_status,
-                'completed'::public.assignment_status
-              )
-              and ws.status in (
-                'published'::public.service_status,
-                'completed'::public.service_status
-              )
-              and app_private.is_active_user()
-            )
-          )
-      )
+    ) then
+      return true;
+    end if;
+
+    return p_is_active and exists (
+      select 1
+      from public.service_task_assignments sta
+      where sta.timeline_node_id = p_node_id
+        and app_private.can_view_live_assignment(sta.service_id, sta.assignment_id)
     );
+  end if;
+
+  if not p_is_active or not app_private.is_active_user() then
+    return false;
+  end if;
+
+  return exists (
+    select 1
+    from public.service_task_assignments sta
+    join public.service_assignments sa on sa.id = sta.assignment_id
+    join public.worship_services ws on ws.id = sta.service_id
+    where sta.timeline_node_id = p_node_id
+      and sa.user_id = auth.uid()
+      and sa.status in (
+        'scheduled'::public.assignment_status,
+        'confirmed'::public.assignment_status,
+        'completed'::public.assignment_status
+      )
+      and ws.status in (
+        'published'::public.service_status,
+        'completed'::public.service_status
+      )
+  );
 end;
 $$;
 
