@@ -25,6 +25,9 @@ alter table public.service_coordinators
 alter table public.service_assignments
   add column is_third_floor boolean not null default false;
 
+alter table public.service_task_assignments
+  add column is_third_floor boolean not null default false;
+
 create function app_private.resolve_assignment_third_floor(
   p_service_id uuid,
   p_station_id uuid,
@@ -99,6 +102,55 @@ set is_third_floor = app_private.resolve_assignment_third_floor(
   sa.station_id,
   sa.role_label
 );
+
+create function app_private.set_task_assignment_floor_scope()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+begin
+  select sa.is_third_floor
+  into new.is_third_floor
+  from public.service_assignments sa
+  where sa.id = new.assignment_id
+    and sa.service_id = new.service_id;
+  new.is_third_floor := coalesce(new.is_third_floor, false);
+  return new;
+end;
+$$;
+
+create trigger service_task_assignments_set_floor_scope
+before insert or update of service_id, assignment_id
+on public.service_task_assignments
+for each row execute function app_private.set_task_assignment_floor_scope();
+
+create function app_private.sync_task_floor_scope_from_assignment()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+begin
+  update public.service_task_assignments sta
+  set is_third_floor = new.is_third_floor
+  where sta.service_id = new.service_id
+    and sta.assignment_id = new.id;
+  return new;
+end;
+$$;
+
+create trigger service_assignments_sync_task_floor_scope
+after update of is_third_floor on public.service_assignments
+for each row execute function app_private.sync_task_floor_scope_from_assignment();
+
+update public.service_task_assignments sta
+set is_third_floor = sa.is_third_floor
+from public.service_assignments sa
+where sa.id = sta.assignment_id
+  and sa.service_id = sta.service_id;
 
 create function app_private.resolve_live_coordination_scope(
   p_service_id uuid,
@@ -283,6 +335,10 @@ revoke all on function app_private.set_assignment_floor_scope()
 from public, anon, authenticated;
 revoke all on function app_private.sync_assignment_floor_scope_from_station()
 from public, anon, authenticated;
+revoke all on function app_private.set_task_assignment_floor_scope()
+from public, anon, authenticated;
+revoke all on function app_private.sync_task_floor_scope_from_assignment()
+from public, anon, authenticated;
 revoke all on function app_private.resolve_live_coordination_scope(uuid, uuid)
 from public, anon, authenticated;
 revoke all on function app_private.set_service_coordinator_scope()
@@ -373,8 +429,12 @@ drop policy if exists service_task_assignments_select on public.service_task_ass
 create policy service_task_assignments_select on public.service_task_assignments
 for select to authenticated
 using (
-  (select app_private.can_view_live_assignment(service_id, assignment_id))
-  or (select app_private.owns_assignment(assignment_id))
+  (select app_private.owns_assignment(assignment_id))
+  or case (select app_private.live_coordination_scope(service_id))
+    when 'all' then true
+    when 'third_floor' then is_third_floor
+    else false
+  end
 );
 
 drop policy if exists assignment_checklist_states_select on public.assignment_checklist_states;
