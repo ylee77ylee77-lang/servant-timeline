@@ -167,24 +167,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Capture PostgreSQL diagnostics
-        if: steps.database_tests.outputs.exit_code != '0'
-        shell: bash
-        run: |
-          container_id="$(docker ps -aq --filter 'name=supabase_db_' | head -n 1)"
-          if [[ -n "${container_id}" ]]; then
-            docker logs "${container_id}" > postgres-diagnostics.log 2>&1 || true
-          fi
-
-      - name: Upload PostgreSQL diagnostics
-        if: steps.database_tests.outputs.exit_code != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: postgres-diagnostics
-          path: postgres-diagnostics.log
-          if-no-files-found: warn
-          retention-days: 1
-
       - name: Fail when database verification failed
         if: steps.database_tests.outputs.exit_code != '0'
         run: exit 1
