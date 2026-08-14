@@ -24,6 +24,7 @@ language sql
 stable
 security definer
 set search_path = pg_catalog
+set row_security = off
 as $$
   select case
     when app_private.is_admin() then 'all'
@@ -64,6 +65,7 @@ language sql
 stable
 security definer
 set search_path = pg_catalog
+set row_security = off
 as $$
   select case app_private.live_coordination_scope(p_service_id)
     when 'all' then true
@@ -87,6 +89,7 @@ language sql
 stable
 security definer
 set search_path = pg_catalog
+set row_security = off
 as $$
   select case app_private.live_coordination_scope(p_service_id)
     when 'all' then true
@@ -117,6 +120,7 @@ language sql
 stable
 security definer
 set search_path = pg_catalog
+set row_security = off
 as $$
   select exists (
     select 1
@@ -246,6 +250,7 @@ returns table(
 language plpgsql
 security definer
 set search_path = pg_catalog
+set row_security = off
 as $$
 declare
   resolved_service_id uuid;
