@@ -66,6 +66,31 @@ insert into public.service_coordinators (service_id, user_id, granted_by) values
   ('82000000-0000-4000-8000-000000000001', '81000000-0000-4000-8000-000000000002', '81000000-0000-4000-8000-000000000001'),
   ('82000000-0000-4000-8000-000000000001', '81000000-0000-4000-8000-000000000003', '81000000-0000-4000-8000-000000000001');
 
+select pg_temp.assert_true(
+  (
+    select array_agg(coordination_scope order by user_id) = array['all', 'third_floor']
+    from public.service_coordinators
+    where service_id = '82000000-0000-4000-8000-000000000001'
+  ),
+  'coordinator scopes were not derived from 總招 and 副總招 assignments'
+);
+
+update public.service_assignments
+set role_label = '總招'
+where id = '84000000-0000-4000-8000-000000000002';
+select pg_temp.assert_true(
+  (
+    select coordination_scope = 'all'
+    from public.service_coordinators
+    where user_id = '81000000-0000-4000-8000-000000000003'
+      and service_id = '82000000-0000-4000-8000-000000000001'
+  ),
+  'coordinator scope did not refresh after an assignment role change'
+);
+update public.service_assignments
+set role_label = '副總招'
+where id = '84000000-0000-4000-8000-000000000002';
+
 insert into public.timeline_nodes (
   id, service_id, service_type, time, title, assignee, is_active
 ) values

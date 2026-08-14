@@ -18,7 +18,14 @@ as $$
     or btrim(coalesce(p_station_name, '')) ~* '^(6|7A|7B|8|9A|9B|10)([[:space:]]|區|$)';
 $$;
 
-create or replace function app_private.live_coordination_scope(p_service_id uuid)
+alter table public.service_coordinators
+  add column coordination_scope text not null default 'all'
+  check (coordination_scope in ('all', 'third_floor'));
+
+create function app_private.resolve_live_coordination_scope(
+  p_service_id uuid,
+  p_user_id uuid
+)
 returns text
 language sql
 stable
@@ -27,13 +34,11 @@ set search_path = pg_catalog
 set row_security = off
 as $$
   select case
-    when app_private.is_admin() then 'all'
-    when not app_private.can_coordinate_service(p_service_id) then 'none'
     when exists (
       select 1
       from public.service_assignments sa
       where sa.service_id = p_service_id
-        and sa.user_id = auth.uid()
+        and sa.user_id = p_user_id
         and btrim(sa.role_label) = '副總招'
         and sa.status in (
           'scheduled'::public.assignment_status,
@@ -44,7 +49,7 @@ as $$
       select 1
       from public.service_assignments sa
       where sa.service_id = p_service_id
-        and sa.user_id = auth.uid()
+        and sa.user_id = p_user_id
         and btrim(sa.role_label) = '總招'
         and sa.status in (
           'scheduled'::public.assignment_status,
@@ -53,6 +58,96 @@ as $$
         )
     ) then 'third_floor'
     else 'all'
+  end;
+$$;
+
+create function app_private.set_service_coordinator_scope()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+begin
+  new.coordination_scope := app_private.resolve_live_coordination_scope(
+    new.service_id,
+    new.user_id
+  );
+  return new;
+end;
+$$;
+
+create trigger service_coordinators_set_live_scope
+before insert or update of service_id, user_id
+on public.service_coordinators
+for each row execute function app_private.set_service_coordinator_scope();
+
+create function app_private.sync_service_coordinator_scope_from_assignment()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+begin
+  if tg_op <> 'INSERT' then
+    update public.service_coordinators sc
+    set coordination_scope = app_private.resolve_live_coordination_scope(
+      old.service_id,
+      old.user_id
+    )
+    where sc.service_id = old.service_id
+      and sc.user_id = old.user_id;
+  end if;
+
+  if tg_op <> 'DELETE' then
+    update public.service_coordinators sc
+    set coordination_scope = app_private.resolve_live_coordination_scope(
+      new.service_id,
+      new.user_id
+    )
+    where sc.service_id = new.service_id
+      and sc.user_id = new.user_id;
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger service_assignments_sync_live_scope_insert_delete
+after insert or delete
+on public.service_assignments
+for each row execute function app_private.sync_service_coordinator_scope_from_assignment();
+
+create trigger service_assignments_sync_live_scope_update
+after update of service_id, user_id, role_label, status
+on public.service_assignments
+for each row execute function app_private.sync_service_coordinator_scope_from_assignment();
+
+update public.service_coordinators sc
+set coordination_scope = app_private.resolve_live_coordination_scope(sc.service_id, sc.user_id);
+
+create or replace function app_private.live_coordination_scope(p_service_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+  select case
+    when app_private.is_admin() then 'all'
+    when not app_private.is_active_user()
+      or not app_private.has_role('coordinator'::public.app_role) then 'none'
+    else coalesce((
+      select sc.coordination_scope
+      from public.service_coordinators sc
+      where sc.service_id = p_service_id
+        and sc.user_id = auth.uid()
+    ), 'none')
   end;
 $$;
 
@@ -133,6 +228,12 @@ $$;
 
 revoke all on function app_private.is_third_floor_station(text)
 from public, anon, authenticated;
+revoke all on function app_private.resolve_live_coordination_scope(uuid, uuid)
+from public, anon, authenticated;
+revoke all on function app_private.set_service_coordinator_scope()
+from public, anon, authenticated;
+revoke all on function app_private.sync_service_coordinator_scope_from_assignment()
+from public, anon, authenticated;
 revoke all on function app_private.live_coordination_scope(uuid)
 from public, anon, authenticated;
 revoke all on function app_private.can_view_live_station(uuid, uuid)
@@ -160,7 +261,11 @@ drop policy if exists service_stations_select on public.service_stations;
 create policy service_stations_select on public.service_stations
 for select to authenticated
 using (
-  (select app_private.can_view_live_station(service_id, id))
+  case (select app_private.live_coordination_scope(service_id))
+    when 'all' then true
+    when 'third_floor' then app_private.is_third_floor_station(name)
+    else false
+  end
   or exists (
     select 1
     from public.service_assignments sa
@@ -182,7 +287,17 @@ using (
     user_id = (select auth.uid())
     and (select app_private.is_active_user())
   )
-  or (select app_private.can_view_live_assignment(service_id, id))
+  or case (select app_private.live_coordination_scope(service_id))
+    when 'all' then true
+    when 'third_floor' then
+      user_id = (select auth.uid())
+      or app_private.is_third_floor_station(role_label)
+      or (
+        station_id is not null
+        and (select app_private.can_view_live_station(service_id, station_id))
+      )
+    else false
+  end
 );
 
 drop policy if exists service_check_ins_select on public.service_check_ins;
