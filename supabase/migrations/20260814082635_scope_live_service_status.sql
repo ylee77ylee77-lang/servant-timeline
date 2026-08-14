@@ -235,13 +235,14 @@ create function app_private.can_view_live_timeline_node(
   p_is_active boolean
 )
 returns boolean
-language sql
+language plpgsql
 stable
 security definer
 set search_path = pg_catalog
 set row_security = off
 as $$
-  select
+begin
+  return
     app_private.is_admin()
     or (
       p_service_id is not null
@@ -282,6 +283,7 @@ as $$
           )
       )
     );
+end;
 $$;
 
 revoke all on function app_private.is_third_floor_station(text)
