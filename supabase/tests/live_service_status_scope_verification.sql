@@ -107,6 +107,15 @@ insert into public.service_task_assignments (
   ('82000000-0000-4000-8000-000000000001', '84000000-0000-4000-8000-000000000003', '__live_2f_task__', '81000000-0000-4000-8000-000000000001'),
   ('82000000-0000-4000-8000-000000000001', '84000000-0000-4000-8000-000000000004', '__live_3f_task__', '81000000-0000-4000-8000-000000000001');
 
+select pg_temp.assert_true(
+  (
+    select array_agg(is_third_floor order by timeline_node_id) = array[false, true]
+    from public.service_task_assignments
+    where service_id = '82000000-0000-4000-8000-000000000001'
+  ),
+  'task floor scope was not copied from its assignment'
+);
+
 insert into public.service_check_ins (
   id, service_id, user_id, assignment_id, status, check_in_source
 ) values
