@@ -26,7 +26,8 @@ alter table public.service_assignments
   add column is_third_floor boolean not null default false;
 
 alter table public.service_task_assignments
-  add column is_third_floor boolean not null default false;
+  add column is_third_floor boolean not null default false,
+  add column user_id uuid references public.profiles(id) on delete cascade;
 
 create function app_private.resolve_assignment_third_floor(
   p_service_id uuid,
@@ -111,8 +112,8 @@ set search_path = pg_catalog
 set row_security = off
 as $$
 begin
-  select sa.is_third_floor
-  into new.is_third_floor
+  select sa.is_third_floor, sa.user_id
+  into new.is_third_floor, new.user_id
   from public.service_assignments sa
   where sa.id = new.assignment_id
     and sa.service_id = new.service_id;
@@ -135,7 +136,8 @@ set row_security = off
 as $$
 begin
   update public.service_task_assignments sta
-  set is_third_floor = new.is_third_floor
+  set is_third_floor = new.is_third_floor,
+      user_id = new.user_id
   where sta.service_id = new.service_id
     and sta.assignment_id = new.id;
   return new;
@@ -143,14 +145,21 @@ end;
 $$;
 
 create trigger service_assignments_sync_task_floor_scope
-after update of is_third_floor on public.service_assignments
+after update of is_third_floor, user_id on public.service_assignments
 for each row execute function app_private.sync_task_floor_scope_from_assignment();
 
 update public.service_task_assignments sta
-set is_third_floor = sa.is_third_floor
+set is_third_floor = sa.is_third_floor,
+    user_id = sa.user_id
 from public.service_assignments sa
 where sa.id = sta.assignment_id
   and sa.service_id = sta.service_id;
+
+alter table public.service_task_assignments
+  alter column user_id set not null;
+
+create index service_task_assignments_live_user_idx
+  on public.service_task_assignments (user_id, timeline_node_id);
 
 create function app_private.resolve_live_coordination_scope(
   p_service_id uuid,
@@ -327,6 +336,64 @@ as $$
   );
 $$;
 
+create function app_private.can_view_live_timeline_node(
+  p_node_id text,
+  p_service_id uuid,
+  p_service_type text,
+  p_is_active boolean
+)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+set row_security = off
+as $$
+begin
+  if app_private.is_admin() then
+    return true;
+  end if;
+
+  if app_private.has_role('coordinator'::public.app_role) then
+    if p_service_id is not null
+      and app_private.live_coordination_scope(p_service_id) = 'all' then
+      return true;
+    end if;
+    if p_service_id is null and exists (
+      select 1
+      from public.worship_services ws
+      where ws.service_type = p_service_type
+        and app_private.live_coordination_scope(ws.id) = 'all'
+    ) then
+      return true;
+    end if;
+    return p_is_active and exists (
+      select 1
+      from public.service_task_assignments sta
+      where sta.timeline_node_id = p_node_id
+        and sta.is_third_floor
+        and app_private.live_coordination_scope(sta.service_id) = 'third_floor'
+    );
+  end if;
+
+  if not p_is_active or not app_private.is_active_user() then
+    return false;
+  end if;
+
+  return exists (
+    select 1
+    from public.service_task_assignments sta
+    join public.worship_services ws on ws.id = sta.service_id
+    where sta.timeline_node_id = p_node_id
+      and sta.user_id = auth.uid()
+      and ws.status in (
+        'published'::public.service_status,
+        'completed'::public.service_status
+      )
+  );
+end;
+$$;
+
 revoke all on function app_private.is_third_floor_station(text)
 from public, anon, authenticated;
 revoke all on function app_private.resolve_assignment_third_floor(uuid, uuid, text)
@@ -350,6 +417,8 @@ from public, anon, authenticated;
 revoke all on function app_private.can_view_live_assignment(uuid, uuid)
 from public, anon, authenticated;
 revoke all on function app_private.can_view_live_check_in(uuid, uuid)
+from public, anon, authenticated;
+revoke all on function app_private.can_view_live_timeline_node(text, uuid, text, boolean)
 from public, anon, authenticated;
 
 drop policy if exists service_stations_select on public.service_stations;
@@ -444,6 +513,16 @@ using (
   (select app_private.can_view_live_assignment(service_id, assignment_id))
   or (select app_private.owns_assignment(assignment_id))
 );
+
+drop policy if exists timeline_nodes_select_active on public.timeline_nodes;
+create policy timeline_nodes_select_active on public.timeline_nodes
+for select to authenticated
+using ((select app_private.can_view_live_timeline_node(
+  id,
+  service_id,
+  service_type,
+  is_active
+)));
 
 create or replace function app_private.set_assignment_checklist_state(
   p_assignment_id uuid,
