@@ -134,40 +134,19 @@ stable
 security definer
 set search_path = pg_catalog
 as $$
-  select exists (
+  select app_private.is_admin() or exists (
     select 1
-    from public.timeline_nodes tn
-    where tn.id = p_node_id
+    from public.service_task_assignments sta
+    join public.worship_services ws on ws.id = sta.service_id
+    where sta.timeline_node_id = p_node_id
       and (
-        app_private.is_admin()
+        app_private.can_view_live_assignment(sta.service_id, sta.assignment_id)
         or (
-          tn.service_id is not null
-          and app_private.live_coordination_scope(tn.service_id) = 'all'
-        )
-        or (
-          tn.service_id is null
-          and exists (
-            select 1
-            from public.worship_services ws
-            where ws.service_type = tn.service_type
-              and app_private.live_coordination_scope(ws.id) = 'all'
+          app_private.owns_assignment(sta.assignment_id)
+          and ws.status in (
+            'published'::public.service_status,
+            'completed'::public.service_status
           )
-        )
-        or exists (
-          select 1
-          from public.service_task_assignments sta
-          join public.worship_services ws on ws.id = sta.service_id
-          where sta.timeline_node_id = tn.id
-            and (
-              app_private.can_view_live_assignment(sta.service_id, sta.assignment_id)
-              or (
-                app_private.owns_assignment(sta.assignment_id)
-                and ws.status in (
-                  'published'::public.service_status,
-                  'completed'::public.service_status
-                )
-              )
-            )
         )
       )
   );
@@ -290,7 +269,13 @@ using (
 drop policy if exists timeline_nodes_select_active on public.timeline_nodes;
 create policy timeline_nodes_select_active
 on public.timeline_nodes for select to authenticated
-using ((select app_private.can_view_live_timeline_node(id)));
+using (
+  (
+    service_id is not null
+    and (select app_private.live_coordination_scope(service_id)) = 'all'
+  )
+  or (select app_private.can_view_live_timeline_node(id))
+);
 
 create or replace function app_private.set_assignment_checklist_state(
   p_assignment_id uuid,
