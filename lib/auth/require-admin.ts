@@ -1,6 +1,10 @@
 import "server-only";
 
 import type { NextRequest } from "next/server";
+import {
+  deriveLiveCoordinationScope,
+  type LiveCoordinationScope,
+} from "@/lib/services/live-service-status";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
 export type VerifiedAdmin = {
@@ -100,6 +104,33 @@ export async function requireCoordinatorForService(
   }
 
   return user;
+}
+
+export async function requireLiveCoordinatorForService(
+  request: NextRequest,
+  serviceId: string
+): Promise<VerifiedUser & { scope: LiveCoordinationScope }> {
+  const user = await requireCoordinatorForService(request, serviceId);
+  if (user.roles.includes("admin")) return { ...user, scope: "all" };
+
+  const { data: assignments, error } = await getSupabaseAdminClient()
+    .from("service_assignments")
+    .select("role_label")
+    .eq("service_id", serviceId)
+    .eq("user_id", user.userId)
+    .in("status", ["scheduled", "confirmed", "completed"]);
+
+  if (error) {
+    throw Object.assign(new Error("無法確認現場協調範圍。"), { status: 500 });
+  }
+
+  return {
+    ...user,
+    scope: deriveLiveCoordinationScope({
+      isAdmin: false,
+      assignmentRoleLabels: (assignments ?? []).map((assignment) => String(assignment.role_label)),
+    }),
+  };
 }
 
 export function getAuthErrorResponse(error: unknown) {

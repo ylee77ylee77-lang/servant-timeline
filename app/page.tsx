@@ -34,6 +34,7 @@ import {
 import { BrowserQRCodeReader } from '@zxing/browser';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { MyServiceDashboard } from '@/components/service/MyServiceDashboard';
+import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStatusDashboard';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
@@ -2355,10 +2356,10 @@ export default function App() {
   useEffect(() => {
     setIsAdminUnlocked(canManageTimeline);
 
-    if (!canManageTimeline && activeTab === "admin") {
-      setActiveTab("checkin");
+    if ((!canManageTimeline && activeTab === "admin") || (!isCoordinator && ["status", "control"].includes(activeTab))) {
+      setActiveTab("service");
     }
-  }, [canManageTimeline, activeTab]);
+  }, [canManageTimeline, isCoordinator, activeTab]);
 
   const refreshVoiceSettingsAndUsage = useCallback(async () => {
     try {
@@ -4671,6 +4672,9 @@ export default function App() {
     );
   };
 
+  // Keep the previous local-only review renderer available while the live view is rolled out.
+  void renderReviewView;
+
   const renderPersonalSettingsView = () => {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -5688,7 +5692,7 @@ export default function App() {
         ) : activeTab === 'timeline' ? (
           renderTimelineView()
         ) : activeTab === 'status' ? (
-          renderReviewView()
+          <LiveServiceStatusDashboard accessToken={session.access_token} />
         ) : activeTab === 'settings' ? (
           renderPersonalSettingsView()
         ) : activeTab === 'control' ? (
@@ -5869,7 +5873,11 @@ export default function App() {
             { key: "control", label: "控場", icon: HeartHandshake, color: "purple" },
             { key: "settings", label: "設定", icon: User, color: "purple" },
             { key: "admin", label: "管理", icon: Unlock, color: "purple" }
-          ].filter((item) => item.key !== "admin" || canManageTimeline).map((item) => {
+          ].filter((item) => {
+            if (item.key === "admin") return canManageTimeline;
+            if (item.key === "status" || item.key === "control") return isCoordinator;
+            return true;
+          }).map((item) => {
             const NavIcon = item.icon;
             const active = activeTab === item.key;
             const activeClass = item.color === "rose"
