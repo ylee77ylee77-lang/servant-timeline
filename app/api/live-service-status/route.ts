@@ -4,6 +4,7 @@ import {
   requireCoordinator,
   requireLiveCoordinatorForService,
 } from "@/lib/auth/require-admin";
+import { isServiceType } from "@/lib/services/catalog";
 import { deriveLiveServiceStatus } from "@/lib/services/live-service-status";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getServiceActivationState } from "@/lib/services/service-activation";
@@ -24,7 +25,7 @@ function taipeiDateKey() {
 }
 
 function selectCurrentService<
-  T extends { id: string; service_date: string; status: string }
+  T extends { id: string; service_date: string; service_type: string; status: string }
 >(services: T[], requestedServiceId: string) {
   if (requestedServiceId) {
     return services.find((service) => service.id === requestedServiceId) ?? null;
@@ -38,7 +39,8 @@ function selectCurrentService<
   const activeToday = chronological.filter((service) =>
     service.service_date === today
     && service.status === "published"
-    && current.activeServiceTypes.includes(service.service_type as never)
+    && isServiceType(service.service_type)
+    && current.activeServiceTypes.includes(service.service_type)
   );
   return (current.defaultServiceType
       ? activeToday.find((service) => service.service_type === current.defaultServiceType)
