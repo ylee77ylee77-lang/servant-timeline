@@ -4,6 +4,7 @@ import { createHash, createSign } from "node:crypto";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { getRequestClientIp } from "@/lib/network/church-wifi";
 import { isServiceType, type ServiceType } from "@/lib/services/catalog";
+import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
@@ -605,31 +606,6 @@ const saveCachedAudioBase64 = async (payload: {
   });
 };
 
-const getServiceCloseMinutes = (serviceType: ServiceType) => {
-  const map: Record<ServiceType, number> = {
-    "六晚崇": 21 * 60 + 45,
-    "主一堂": 10 * 60 + 15,
-    "主二堂": 12 * 60 + 45
-  };
-
-  return map[serviceType] ?? null;
-};
-
-const getServiceBlockReason = (serviceType: ServiceType) => {
-  const taipei = getTaipeiParts();
-  const closeMinutes = getServiceCloseMinutes(serviceType);
-  const currentMinutes = taipei.hour * 60 + taipei.minute;
-  if (currentMinutes >= closeMinutes) {
-    return {
-      blocked: true,
-      reason: "service_closed",
-      message: "本場服事已結束，語音助理已關閉。"
-    };
-  }
-
-  return { blocked: false, reason: "", message: "" };
-};
-
 const authorizeRegularVoice = async (
   request: NextRequest,
   userId: string,
@@ -817,6 +793,18 @@ export async function POST(request: NextRequest) {
     }
 
     if (!isPreview && isServiceType(serviceType)) {
+      const current = await ensureCurrentServices();
+      if (!current.activeServiceTypes.includes(serviceType)) {
+        return NextResponse.json(
+          {
+            error: "本場目前不在開放時間內，語音助理已關閉。",
+            fallbackToBrowser: false,
+            reason: "service_closed"
+          },
+          { status: 403 }
+        );
+      }
+
       const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);
       if (!isAuthorized) {
         return NextResponse.json(
@@ -829,17 +817,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const blockState = getServiceBlockReason(serviceType);
-      if (blockState.blocked) {
-        return NextResponse.json(
-          {
-            error: blockState.message,
-            fallbackToBrowser: false,
-            reason: blockState.reason
-          },
-          { status: 403 }
-        );
-      }
     }
 
     const globalSettings = await getGlobalVoiceSettings();
