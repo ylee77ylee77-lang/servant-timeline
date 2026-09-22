@@ -5,6 +5,8 @@ import {
   requireLiveCoordinatorForService,
 } from "@/lib/auth/require-admin";
 import { deriveLiveServiceStatus } from "@/lib/services/live-service-status";
+import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
+import { getServiceActivationState } from "@/lib/services/service-activation";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
@@ -28,11 +30,21 @@ function selectCurrentService<
     return services.find((service) => service.id === requestedServiceId) ?? null;
   }
 
+  const current = getServiceActivationState();
   const today = taipeiDateKey();
   const chronological = [...services].sort((left, right) => (
     left.service_date.localeCompare(right.service_date)
   ));
-  return chronological.find((service) => service.service_date === today && service.status === "published")
+  const activeToday = chronological.filter((service) =>
+    service.service_date === today
+    && service.status === "published"
+    && current.activeServiceTypes.includes(service.service_type as never)
+  );
+  return (current.defaultServiceType
+      ? activeToday.find((service) => service.service_type === current.defaultServiceType)
+      : null)
+    ?? activeToday[0]
+    ?? chronological.find((service) => service.service_date === today && service.status === "published")
     ?? chronological.find((service) => service.service_date >= today && service.status === "published")
     ?? [...chronological].reverse().find((service) => service.status === "completed")
     ?? chronological[0]
@@ -49,6 +61,7 @@ function response(data: unknown, status = 200) {
 export async function GET(request: NextRequest) {
   try {
     await requireCoordinator(request);
+    await ensureCurrentServices();
     const requestedServiceId = request.nextUrl.searchParams.get("serviceId")?.trim() ?? "";
     if (requestedServiceId && !UUID_PATTERN.test(requestedServiceId)) {
       return response({ error: "場次識別資料無效。" }, 400);
