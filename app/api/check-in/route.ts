@@ -3,50 +3,34 @@ import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admi
 import { isChurchNetworkRequest } from "@/lib/network/church-wifi";
 import { isServiceType, STATION_OPTIONS_BY_SERVICE } from "@/lib/services/catalog";
 import { isUuid } from "@/lib/services/check-in";
+import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function taipeiDateKey() {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
-}
-
-async function findPublishedService(request: NextRequest, serviceType: string) {
-  const { data, error } = await getSupabaseUserClient(request)
-    .from("worship_services")
-    .select("id,service_date,service_type,status")
-    .eq("service_date", taipeiDateKey())
-    .eq("service_type", serviceType)
-    .eq("status", "published")
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-}
-
 export async function GET(request: NextRequest) {
   try {
     const user = await requireActiveUser(request);
+    const current = await ensureCurrentServices();
     const supabase = getSupabaseUserClient(request);
-    const { data: services, error: serviceError } = await supabase
-      .from("worship_services")
-      .select("id,service_date,service_type,status")
-      .eq("service_date", taipeiDateKey())
-      .in("status", ["published", "completed"]);
-    if (serviceError) throw serviceError;
-    if (!services?.length) {
-      return NextResponse.json({ checkIn: null, eligibleServices: [] });
+    const services = current.services.filter((service) =>
+      ["published", "completed"].includes(String(service.status))
+    );
+    if (!services.length) {
+      return NextResponse.json({
+        checkIn: null,
+        eligibleServices: [],
+        activeServiceTypes: current.activeServiceTypes,
+      });
     }
 
-    const publishedServices = services.filter((service) => service.status === "published");
+    const publishedServices = services.filter((service) =>
+      service.status === "published"
+      && isServiceType(service.service_type)
+      && current.activeServiceTypes.includes(service.service_type)
+    );
     const { data: assignments, error: assignmentError } = publishedServices.length
       ? await supabase
           .from("service_assignments")
@@ -88,12 +72,13 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       eligibleServices,
+      activeServiceTypes: current.activeServiceTypes,
       checkIn: {
         id: checkIn.id,
         assignmentId: checkIn.assignment_id,
         status: checkIn.status,
         checkedInAt: checkIn.checked_in_at,
-        serviceDate: service?.service_date ?? taipeiDateKey(),
+        serviceDate: service?.service_date ?? current.dateKey,
         serviceType: service?.service_type ?? "",
         stationName: confirmation?.station_name_snapshot ?? "",
         confirmedAt: confirmation?.confirmed_at ?? null,
@@ -123,9 +108,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "請先確認本次服事分派。" }, { status: 400 });
     }
 
-    const service = await findPublishedService(request, serviceType);
+    const current = await ensureCurrentServices();
+    if (!current.activeServiceTypes.includes(serviceType)) {
+      return NextResponse.json(
+        { error: "目前不在此堂次的開放時間內。" },
+        { status: 409 }
+      );
+    }
+
+    const service = current.services.find((item) =>
+      item.service_type === serviceType && item.status === "published"
+    );
     if (!service) {
-      return NextResponse.json({ error: "今日場次尚未由總招開放，請聯絡總招。" }, { status: 409 });
+      return NextResponse.json(
+        { error: "今日場次目前未開放，請聯絡總招。" },
+        { status: 409 }
+      );
     }
 
     // Authenticated clients have no direct INSERT grant on operational check-in
