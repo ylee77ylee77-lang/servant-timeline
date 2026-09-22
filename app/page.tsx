@@ -38,6 +38,7 @@ import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStat
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
+import { getServiceActivationState } from '@/lib/services/service-activation';
 import {
   CHECK_IN_NETWORK_MESSAGES,
   getSelectedCheckInOption,
@@ -882,23 +883,9 @@ export default function App() {
     return h * 60 + m;
   };
 
-  const getVoiceCloseMinutesForService = (service: string) => {
-    const map: Record<string, number> = {
-      "六晚崇": 21 * 60 + 45,
-      "主一堂": 10 * 60 + 15,
-      "主二堂": 12 * 60 + 45
-    };
-
-    return map[service] ?? null;
-  };
-
   const isCurrentServiceVoiceClosed = () => {
-    const closeMinutes = getVoiceCloseMinutesForService(currentService);
-    if (closeMinutes === null) return false;
-
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    return currentMinutes >= closeMinutes;
+    if (!isServiceType(currentService)) return true;
+    return !getServiceActivationState(new Date()).activeServiceTypes.includes(currentService);
   };
 
   const stopVoiceAssistantForServiceEnd = () => {
@@ -1835,20 +1822,8 @@ export default function App() {
       setCurrentTime(newTimeStr);
 
       if (!hasManuallySwitchedRef.current) {
-        const day = now.getDay(); 
-        const timeValue = now.getHours() + (now.getMinutes() / 60); 
-
-        if (day === 6) {
-          setCurrentService('六晚崇');
-        } else if (day === 0) {
-          if (timeValue < 10.5) { 
-            setCurrentService('主一堂');
-          } else { 
-            setCurrentService('主二堂');
-          }
-        } else {
-          setCurrentService('');
-        }
+        const activation = getServiceActivationState(now);
+        setCurrentService(activation.defaultServiceType || '');
       }
     };
     
