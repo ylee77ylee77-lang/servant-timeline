@@ -78,12 +78,12 @@ export async function GET(request: NextRequest) {
       ?? null;
 
     if (!service) {
-      return NextResponse.json({ assignment: null, service: null, nodes: [] });
+      return NextResponse.json({ assignment: null, service: null, nodes: [], activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
     }
 
     const selectedAssignment = assignments.find((item) => item.service_id === service.id) ?? null;
     if (!selectedAssignment) {
-      return NextResponse.json({ assignment: null, service: null, nodes: [] });
+      return NextResponse.json({ assignment: null, service: null, nodes: [], activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
     }
     const assignment = {
       ...selectedAssignment,
@@ -127,6 +127,8 @@ export async function GET(request: NextRequest) {
         assignedStation,
         checkIn,
         nodes: [],
+        activeServiceTypes: current.activeServiceTypes,
+        defaultServiceType: current.defaultServiceType,
       });
     }
 
