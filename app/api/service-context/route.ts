@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { isServiceType } from "@/lib/services/catalog";
+import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
@@ -28,6 +29,7 @@ function taipeiTime(value: string | null) {
 export async function GET(request: NextRequest) {
   try {
     const user = await requireActiveUser(request);
+    const current = await ensureCurrentServices();
     const requestedServiceType = request.nextUrl.searchParams.get("serviceType")?.trim() ?? "";
     if (requestedServiceType && !isServiceType(requestedServiceType)) {
       return NextResponse.json({ error: "堂次無效。" }, { status: 400 });
@@ -41,7 +43,7 @@ export async function GET(request: NextRequest) {
       .in("status", ["scheduled", "confirmed", "completed"]);
     if (assignmentError) throw assignmentError;
     if (!assignments?.length) {
-      return NextResponse.json({ assignment: null, service: null, nodes: [] });
+      return NextResponse.json({ assignment: null, service: null, nodes: [], activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
     }
 
     const { data: services, error: serviceError } = await supabase
@@ -58,8 +60,19 @@ export async function GET(request: NextRequest) {
       (service) => !requestedServiceType || service.service_type === requestedServiceType
     );
     const candidates = requestedCandidates.length ? requestedCandidates : (services ?? []);
+    const activeToday = candidates.filter(
+      (item) =>
+        item.service_date === today
+        && item.status === "published"
+        && isServiceType(item.service_type)
+        && current.activeServiceTypes.includes(item.service_type)
+    );
     const service =
-      candidates.find((item) => item.service_date === today && item.status === "published")
+      (!requestedServiceType && current.defaultServiceType
+        ? activeToday.find((item) => item.service_type === current.defaultServiceType)
+        : null)
+      ?? activeToday[0]
+      ?? candidates.find((item) => item.service_date === today && item.status === "published")
       ?? candidates.find((item) => item.service_date >= today && item.status === "published")
       ?? [...candidates].reverse().find((item) => item.status === "completed")
       ?? null;
@@ -142,7 +155,7 @@ export async function GET(request: NextRequest) {
         }),
     }));
 
-    return NextResponse.json({ assignment, service, assignedStation, checkIn, nodes: formattedNodes });
+    return NextResponse.json({ assignment, service, assignedStation, checkIn, nodes: formattedNodes, activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
   } catch (error) {
     const authError = getAuthErrorResponse(error);
     return NextResponse.json({ error: authError.message }, { status: authError.status });
