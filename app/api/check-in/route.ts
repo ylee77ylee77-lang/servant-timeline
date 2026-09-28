@@ -1,67 +1,76 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
+import { requireActiveUser } from "@/lib/auth/require-admin";
 import { isChurchNetworkRequest } from "@/lib/network/church-wifi";
 import { isServiceType, STATION_OPTIONS_BY_SERVICE } from "@/lib/services/catalog";
-import { isUuid } from "@/lib/services/check-in";
+import { ensureCheckInAssignment } from "@/lib/services/check-in-assignment";
+import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function taipeiDateKey() {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Taipei",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
-}
-
-async function findPublishedService(request: NextRequest, serviceType: string) {
-  const { data, error } = await getSupabaseUserClient(request)
-    .from("worship_services")
-    .select("id,service_date,service_type,status")
-    .eq("service_date", taipeiDateKey())
-    .eq("service_type", serviceType)
-    .eq("status", "published")
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+function errorResponse(error: unknown) {
+  const status =
+    typeof error === "object" && error && "status" in error
+      ? Number((error as { status?: unknown }).status) || 500
+      : 500;
+  const message =
+    status < 500 && error instanceof Error
+      ? error.message
+      : "伺服器無法完成報到操作。";
+  return NextResponse.json({ error: message }, { status });
 }
 
 export async function GET(request: NextRequest) {
   try {
     const user = await requireActiveUser(request);
+    const current = await ensureCurrentServices();
     const supabase = getSupabaseUserClient(request);
-    const { data: services, error: serviceError } = await supabase
-      .from("worship_services")
-      .select("id,service_date,service_type,status")
-      .eq("service_date", taipeiDateKey())
-      .in("status", ["published", "completed"]);
-    if (serviceError) throw serviceError;
-    if (!services?.length) {
-      return NextResponse.json({ checkIn: null, eligibleServices: [] });
+    const services = current.services.filter((service) =>
+      ["published", "completed"].includes(String(service.status))
+    );
+    if (!services.length) {
+      return NextResponse.json({
+        checkIn: null,
+        eligibleServices: [],
+        activeServiceTypes: current.activeServiceTypes,
+      });
     }
 
-    const publishedServices = services.filter((service) => service.status === "published");
+    const publishedServices = services.filter((service) =>
+      service.status === "published"
+      && isServiceType(service.service_type)
+      && current.activeServiceTypes.includes(service.service_type)
+    );
     const { data: assignments, error: assignmentError } = publishedServices.length
       ? await supabase
           .from("service_assignments")
-          .select("id,service_id,status")
+          .select("id,service_id,role_label,status,created_at")
           .eq("user_id", user.userId)
           .in("service_id", publishedServices.map((service) => service.id))
-          .in("status", ["scheduled", "confirmed"])
+          .order("created_at", { ascending: true })
       : { data: [], error: null };
     if (assignmentError) throw assignmentError;
 
-    const eligibleServices = (assignments ?? []).flatMap((assignment) => {
-      const service = publishedServices.find((item) => item.id === assignment.service_id);
-      return service && isServiceType(service.service_type)
-        ? [{ serviceType: service.service_type, assignmentId: assignment.id }]
-        : [];
+    const eligibleServices = publishedServices.flatMap((service) => {
+      if (!isServiceType(service.service_type)) return [];
+
+      const serviceAssignments = (assignments ?? []).filter(
+        (assignment) => assignment.service_id === service.id
+      );
+      const activeAssignment = serviceAssignments.find((assignment) =>
+        ["scheduled", "confirmed"].includes(String(assignment.status))
+      );
+      const blocked = !activeAssignment && serviceAssignments.some((assignment) =>
+        ["declined", "cancelled"].includes(String(assignment.status))
+      );
+
+      if (blocked) return [];
+      return [{
+        serviceType: service.service_type,
+        assignmentId: activeAssignment?.id ?? null,
+      }];
     });
 
     const { data: checkIn, error: checkInError } = await supabase
@@ -74,7 +83,13 @@ export async function GET(request: NextRequest) {
       .limit(1)
       .maybeSingle();
     if (checkInError) throw checkInError;
-    if (!checkIn) return NextResponse.json({ checkIn: null, eligibleServices });
+    if (!checkIn) {
+      return NextResponse.json({
+        checkIn: null,
+        eligibleServices,
+        activeServiceTypes: current.activeServiceTypes,
+      });
+    }
 
     const service = services.find((item) => item.id === checkIn.service_id);
     const { data: confirmation, error: confirmationError } = await supabase
@@ -88,20 +103,20 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       eligibleServices,
+      activeServiceTypes: current.activeServiceTypes,
       checkIn: {
         id: checkIn.id,
         assignmentId: checkIn.assignment_id,
         status: checkIn.status,
         checkedInAt: checkIn.checked_in_at,
-        serviceDate: service?.service_date ?? taipeiDateKey(),
+        serviceDate: service?.service_date ?? current.dateKey,
         serviceType: service?.service_type ?? "",
         stationName: confirmation?.station_name_snapshot ?? "",
         confirmedAt: confirmation?.confirmed_at ?? null,
       },
     });
   } catch (error) {
-    const authError = getAuthErrorResponse(error);
-    return NextResponse.json({ error: authError.message }, { status: authError.status });
+    return errorResponse(error);
   }
 }
 
@@ -115,35 +130,32 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const action = String(body.action ?? "");
     const serviceType = String(body.serviceType ?? "").trim();
-    const assignmentId = String(body.assignmentId ?? "").trim();
     if (!isServiceType(serviceType)) {
       return NextResponse.json({ error: "堂次無效。" }, { status: 400 });
     }
-    if (!isUuid(assignmentId)) {
-      return NextResponse.json({ error: "請先確認本次服事分派。" }, { status: 400 });
+
+    const current = await ensureCurrentServices();
+    if (!current.activeServiceTypes.includes(serviceType)) {
+      return NextResponse.json(
+        { error: "目前不在此堂次的開放時間內。" },
+        { status: 409 }
+      );
     }
 
-    const service = await findPublishedService(request, serviceType);
+    const service = current.services.find((item) =>
+      item.service_type === serviceType && item.status === "published"
+    );
     if (!service) {
-      return NextResponse.json({ error: "今日場次尚未由總招開放，請聯絡總招。" }, { status: 409 });
+      return NextResponse.json(
+        { error: "今日場次目前未開放，請聯絡總招。" },
+        { status: 409 }
+      );
     }
 
     // Authenticated clients have no direct INSERT grant on operational check-in
-    // tables. Only this network-gated server route may perform these writes.
+    // tables. Only this network-gated server route may create a placeholder
+    // assignment and write operational check-in state.
     const supabase = getSupabaseAdminClient();
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("service_assignments")
-      .select("id,service_id,user_id,station_id,status")
-      .eq("id", assignmentId)
-      .eq("service_id", service.id)
-      .eq("user_id", user.userId)
-      .in("status", ["scheduled", "confirmed"])
-      .maybeSingle();
-    if (assignmentError) throw assignmentError;
-    if (!assignment) {
-      return NextResponse.json({ error: "你沒有此場次的有效服事分派。" }, { status: 403 });
-    }
-
     const { data: existingCheckIn, error: lookupError } = await supabase
       .from("service_check_ins")
       .select("id,service_id,assignment_id,status,checked_in_at")
@@ -158,17 +170,36 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
-    if (existingCheckIn && existingCheckIn.assignment_id !== assignment.id) {
-      return NextResponse.json(
-        { error: "此場次已使用另一個服事分派完成報到，請聯絡帶領者／協調員。" },
-        { status: 409 }
-      );
+
+    let assignment = null;
+    if (existingCheckIn?.assignment_id) {
+      const { data: existingAssignment, error: assignmentError } = await supabase
+        .from("service_assignments")
+        .select("id,service_id,user_id,station_id,role_label,status")
+        .eq("id", existingCheckIn.assignment_id)
+        .eq("service_id", service.id)
+        .eq("user_id", user.userId)
+        .in("status", ["scheduled", "confirmed", "completed"])
+        .maybeSingle();
+      if (assignmentError) throw assignmentError;
+      assignment = existingAssignment;
     }
 
     if (action === "check_in") {
       if (existingCheckIn) {
-        return NextResponse.json({ ok: true, serviceType: service.service_type, checkIn: existingCheckIn });
+        return NextResponse.json({
+          ok: true,
+          serviceType: service.service_type,
+          assignmentId: existingCheckIn.assignment_id,
+          checkIn: existingCheckIn,
+        });
       }
+
+      assignment = await ensureCheckInAssignment({
+        service,
+        userId: user.userId,
+        ministryGroup: user.ministryGroup,
+      });
       const { data, error } = await supabase
         .from("service_check_ins")
         .insert({ service_id: service.id, user_id: user.userId, assignment_id: assignment.id, status: "checked_in", check_in_source: "web" })
@@ -190,19 +221,18 @@ export async function POST(request: NextRequest) {
             { status: 409 }
           );
         }
-        if (racedCheckIn && racedCheckIn.assignment_id !== assignment.id) {
-          return NextResponse.json(
-            { error: "此場次已使用另一個服事分派完成報到，請聯絡帶領者／協調員。" },
-            { status: 409 }
-          );
-        }
         if (racedCheckIn) {
-          return NextResponse.json({ ok: true, serviceType: service.service_type, checkIn: racedCheckIn });
+          return NextResponse.json({
+            ok: true,
+            serviceType: service.service_type,
+            assignmentId: racedCheckIn.assignment_id,
+            checkIn: racedCheckIn,
+          });
         }
       }
       if (error) throw error;
       return NextResponse.json(
-        { ok: true, serviceType: service.service_type, checkIn: data },
+        { ok: true, serviceType: service.service_type, assignmentId: assignment.id, checkIn: data },
         { status: 201 }
       );
     }
@@ -210,6 +240,12 @@ export async function POST(request: NextRequest) {
     if (action === "confirm_station") {
       if (!existingCheckIn) {
         return NextResponse.json({ error: "請先完成報到，再確認崗位。" }, { status: 409 });
+      }
+      if (!assignment) {
+        return NextResponse.json(
+          { error: "找不到這次報到的服事資料，請聯絡總招。" },
+          { status: 409 }
+        );
       }
       const stationName = String(body.stationName ?? "").normalize("NFKC").trim();
       if (!STATION_OPTIONS_BY_SERVICE[serviceType].includes(stationName)) {
@@ -273,7 +309,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: "不支援的報到動作。" }, { status: 400 });
   } catch (error) {
-    const authError = getAuthErrorResponse(error);
-    return NextResponse.json({ error: authError.message }, { status: authError.status });
+    return errorResponse(error);
   }
 }

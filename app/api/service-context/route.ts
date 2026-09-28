@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { isServiceType } from "@/lib/services/catalog";
+import { AUTO_ASSIGNMENT_ROLE } from "@/lib/services/check-in-assignment";
+import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
+import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
@@ -28,6 +31,7 @@ function taipeiTime(value: string | null) {
 export async function GET(request: NextRequest) {
   try {
     const user = await requireActiveUser(request);
+    const current = await ensureCurrentServices();
     const requestedServiceType = request.nextUrl.searchParams.get("serviceType")?.trim() ?? "";
     if (requestedServiceType && !isServiceType(requestedServiceType)) {
       return NextResponse.json({ error: "堂次無效。" }, { status: 400 });
@@ -41,7 +45,7 @@ export async function GET(request: NextRequest) {
       .in("status", ["scheduled", "confirmed", "completed"]);
     if (assignmentError) throw assignmentError;
     if (!assignments?.length) {
-      return NextResponse.json({ assignment: null, service: null, nodes: [] });
+      return NextResponse.json({ assignment: null, service: null, nodes: [], activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
     }
 
     const { data: services, error: serviceError } = await supabase
@@ -58,19 +62,30 @@ export async function GET(request: NextRequest) {
       (service) => !requestedServiceType || service.service_type === requestedServiceType
     );
     const candidates = requestedCandidates.length ? requestedCandidates : (services ?? []);
+    const activeToday = candidates.filter(
+      (item) =>
+        item.service_date === today
+        && item.status === "published"
+        && isServiceType(item.service_type)
+        && current.activeServiceTypes.includes(item.service_type)
+    );
     const service =
-      candidates.find((item) => item.service_date === today && item.status === "published")
+      (!requestedServiceType && current.defaultServiceType
+        ? activeToday.find((item) => item.service_type === current.defaultServiceType)
+        : null)
+      ?? activeToday[0]
+      ?? candidates.find((item) => item.service_date === today && item.status === "published")
       ?? candidates.find((item) => item.service_date >= today && item.status === "published")
       ?? [...candidates].reverse().find((item) => item.status === "completed")
       ?? null;
 
     if (!service) {
-      return NextResponse.json({ assignment: null, service: null, nodes: [] });
+      return NextResponse.json({ assignment: null, service: null, nodes: [], activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
     }
 
     const selectedAssignment = assignments.find((item) => item.service_id === service.id) ?? null;
     if (!selectedAssignment) {
-      return NextResponse.json({ assignment: null, service: null, nodes: [] });
+      return NextResponse.json({ assignment: null, service: null, nodes: [], activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
     }
     const assignment = {
       ...selectedAssignment,
@@ -107,6 +122,50 @@ export async function GET(request: NextRequest) {
     if (mappingError) throw mappingError;
 
     const nodeIds = (taskMappings ?? []).map((mapping) => mapping.timeline_node_id);
+    const useSharedTimeline =
+      assignment.role_label === AUTO_ASSIGNMENT_ROLE && nodeIds.length === 0;
+
+    if (useSharedTimeline) {
+      // Placeholder assignments deliberately have no task mappings, so their
+      // shared timeline is resolved server-side after ownership is verified.
+      const { data: rows, error: sharedNodeError } = await getSupabaseAdminClient()
+        .from("timeline_nodes")
+        .select("*")
+        .or(`service_id.eq.${service.id},and(service_id.is.null,service_type.eq.${service.service_type})`)
+        .order("sort_order", { ascending: true })
+        .order("time", { ascending: true })
+        .order("id", { ascending: true });
+      if (sharedNodeError) throw sharedNodeError;
+
+      const scopedRows = (rows ?? []).filter((row) => row.service_id === service.id);
+      const shadowedTemplateIds = new Set(
+        scopedRows.map((row) => row.source_template_node_id).filter(Boolean)
+      );
+      const sharedNodes = (rows ?? [])
+        .filter((row) => (
+          row.service_id === service.id
+            ? row.is_active
+            : row.is_active && !shadowedTemplateIds.has(row.id)
+        ))
+        .map((node) => ({
+          ...node,
+          service_type: service.service_type,
+          assignment_id: assignment.id,
+          checklist: [],
+        }));
+
+      return NextResponse.json({
+        assignment,
+        service,
+        assignedStation,
+        checkIn,
+        nodes: sharedNodes,
+        sharedTimeline: true,
+        activeServiceTypes: current.activeServiceTypes,
+        defaultServiceType: current.defaultServiceType,
+      });
+    }
+
     if (!nodeIds.length) {
       return NextResponse.json({
         assignment,
@@ -114,6 +173,9 @@ export async function GET(request: NextRequest) {
         assignedStation,
         checkIn,
         nodes: [],
+        sharedTimeline: false,
+        activeServiceTypes: current.activeServiceTypes,
+        defaultServiceType: current.defaultServiceType,
       });
     }
 
@@ -142,7 +204,7 @@ export async function GET(request: NextRequest) {
         }),
     }));
 
-    return NextResponse.json({ assignment, service, assignedStation, checkIn, nodes: formattedNodes });
+    return NextResponse.json({ assignment, service, assignedStation, checkIn, nodes: formattedNodes, sharedTimeline: false, activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
   } catch (error) {
     const authError = getAuthErrorResponse(error);
     return NextResponse.json({ error: authError.message }, { status: authError.status });

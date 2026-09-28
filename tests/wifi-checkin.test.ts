@@ -20,7 +20,7 @@ test("eligible service options reject malformed and duplicate records", () => {
   );
 });
 
-test("check-in selection only resolves a server-provided eligible assignment", () => {
+test("check-in selection resolves only a server-provided eligible service", () => {
   const options = normalizeEligibleCheckInOptions([
     { serviceType: "六晚崇", assignmentId: ASSIGNMENT_ID },
   ]);
@@ -28,6 +28,19 @@ test("check-in selection only resolves a server-provided eligible assignment", (
   assert.deepEqual(getSelectedCheckInOption(options, "六晚崇"), options[0]);
   assert.equal(getSelectedCheckInOption(options, "主一堂"), null);
   assert.equal(getSelectedCheckInOption(options, "偽造堂次"), null);
+});
+
+test("eligible service may omit an assignment in no-schedule mode", () => {
+  const options = normalizeEligibleCheckInOptions([
+    { serviceType: "主一堂", assignmentId: null },
+    { serviceType: "主二堂" },
+  ]);
+
+  assert.deepEqual(options, [
+    { serviceType: "主一堂", assignmentId: null },
+    { serviceType: "主二堂", assignmentId: null },
+  ]);
+  assert.deepEqual(getSelectedCheckInOption(options, "主二堂"), options[1]);
 });
 
 test("network failure copy does not expose church network identifiers", () => {
