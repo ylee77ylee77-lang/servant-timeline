@@ -2703,9 +2703,9 @@ export default function App() {
   };
 
   const serviceTimeWindows = [
-    { service: "六晚崇", day: 6, start: "17:30", end: "21:30", label: "週六 17:30–21:30" },
-    { service: "主一堂", day: 0, start: "07:30", end: "09:59", label: "週日 07:30–09:59" },
-    { service: "主二堂", day: 0, start: "10:00", end: "12:30", label: "週日 10:00–12:30" }
+    { service: "六晚崇", day: 6, start: "17:00", end: "21:44", label: "週六 17:00–21:44" },
+    { service: "主一堂", day: 0, start: "00:00", end: "12:44", label: "週日 00:00–12:44" },
+    { service: "主二堂", day: 0, start: "10:00", end: "12:44", label: "週日 10:00–12:44" }
   ];
 
   const weekdayLabels = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
