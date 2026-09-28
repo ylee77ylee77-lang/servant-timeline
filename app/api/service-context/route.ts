@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { isServiceType } from "@/lib/services/catalog";
+import { AUTO_ASSIGNMENT_ROLE } from "@/lib/services/check-in-assignment";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
@@ -120,6 +121,48 @@ export async function GET(request: NextRequest) {
     if (mappingError) throw mappingError;
 
     const nodeIds = (taskMappings ?? []).map((mapping) => mapping.timeline_node_id);
+    const useSharedTimeline =
+      assignment.role_label === AUTO_ASSIGNMENT_ROLE && nodeIds.length === 0;
+
+    if (useSharedTimeline) {
+      const { data: rows, error: sharedNodeError } = await supabase
+        .from("timeline_nodes")
+        .select("*")
+        .or(`service_id.eq.${service.id},and(service_id.is.null,service_type.eq.${service.service_type})`)
+        .order("sort_order", { ascending: true })
+        .order("time", { ascending: true })
+        .order("id", { ascending: true });
+      if (sharedNodeError) throw sharedNodeError;
+
+      const scopedRows = (rows ?? []).filter((row) => row.service_id === service.id);
+      const shadowedTemplateIds = new Set(
+        scopedRows.map((row) => row.source_template_node_id).filter(Boolean)
+      );
+      const sharedNodes = (rows ?? [])
+        .filter((row) => (
+          row.service_id === service.id
+            ? row.is_active
+            : row.is_active && !shadowedTemplateIds.has(row.id)
+        ))
+        .map((node) => ({
+          ...node,
+          service_type: service.service_type,
+          assignment_id: assignment.id,
+          checklist: [],
+        }));
+
+      return NextResponse.json({
+        assignment,
+        service,
+        assignedStation,
+        checkIn,
+        nodes: sharedNodes,
+        sharedTimeline: true,
+        activeServiceTypes: current.activeServiceTypes,
+        defaultServiceType: current.defaultServiceType,
+      });
+    }
+
     if (!nodeIds.length) {
       return NextResponse.json({
         assignment,
@@ -127,6 +170,7 @@ export async function GET(request: NextRequest) {
         assignedStation,
         checkIn,
         nodes: [],
+        sharedTimeline: false,
         activeServiceTypes: current.activeServiceTypes,
         defaultServiceType: current.defaultServiceType,
       });
@@ -157,7 +201,7 @@ export async function GET(request: NextRequest) {
         }),
     }));
 
-    return NextResponse.json({ assignment, service, assignedStation, checkIn, nodes: formattedNodes, activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
+    return NextResponse.json({ assignment, service, assignedStation, checkIn, nodes: formattedNodes, sharedTimeline: false, activeServiceTypes: current.activeServiceTypes, defaultServiceType: current.defaultServiceType });
   } catch (error) {
     const authError = getAuthErrorResponse(error);
     return NextResponse.json({ error: authError.message }, { status: authError.status });
