@@ -3,6 +3,7 @@ import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admi
 import { isServiceType } from "@/lib/services/catalog";
 import { AUTO_ASSIGNMENT_ROLE } from "@/lib/services/check-in-assignment";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
+import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
 export const runtime = "nodejs";
@@ -125,7 +126,9 @@ export async function GET(request: NextRequest) {
       assignment.role_label === AUTO_ASSIGNMENT_ROLE && nodeIds.length === 0;
 
     if (useSharedTimeline) {
-      const { data: rows, error: sharedNodeError } = await supabase
+      // Placeholder assignments deliberately have no task mappings, so their
+      // shared timeline is resolved server-side after ownership is verified.
+      const { data: rows, error: sharedNodeError } = await getSupabaseAdminClient()
         .from("timeline_nodes")
         .select("*")
         .or(`service_id.eq.${service.id},and(service_id.is.null,service_type.eq.${service.service_type})`)
