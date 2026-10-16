@@ -133,20 +133,26 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     let mounted = true;
 
-    void supabase.auth.getSession()
-      .then(({ data }) => {
-        if (!mounted) return;
-        void loadAuthorization(data.session);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setErrorMessage("無法確認登入狀態，請重新整理後再試。");
-        setIsLoading(false);
-      });
-
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    // Supabase emits INITIAL_SESSION after the browser client finishes restoring
+    // its persisted session. Rely on that single initialization path instead of
+    // calling getSession() in parallel, which could trigger duplicate profile
+    // and role queries during startup.
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       window.setTimeout(() => {
         if (!mounted) return;
+
+        // Token refreshes do not change this app's authorization data. Keep the
+        // current UI mounted and only replace the session token for an already
+        // authorized user.
+        if (
+          event === "TOKEN_REFRESHED"
+          && nextSession
+          && authorizedUserIdRef.current === nextSession.user.id
+        ) {
+          setSession(nextSession);
+          return;
+        }
+
         void loadAuthorization(nextSession);
       }, 0);
     });
