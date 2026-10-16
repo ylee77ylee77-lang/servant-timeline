@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, KeyRound, Loader2, RefreshCw, UserPlus } from "lucide-react";
+import { ArrowLeft, KeyRound, Loader2, RefreshCw, ShieldAlert, UserPlus } from "lucide-react";
 import { useAuth, type AppRole } from "@/components/auth/AuthProvider";
 
 type PasswordResetRequest = {
@@ -29,17 +29,32 @@ export default function AdminUsersPage() {
   const [resetIsError, setResetIsError] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isLoadingResets, setIsLoadingResets] = useState(true);
+  const [adminCount, setAdminCount] = useState<number | null>(null);
 
   const loadResetRequests = useCallback(async () => {
     if (!isAdmin) return;
 
     try {
-      const response = await fetch("/api/admin/password-resets", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "無法讀取密碼重設申請。");
-      setResetRequests(Array.isArray(data?.requests) ? data.requests : []);
+      const [resetResponse, adminResponse] = await Promise.all([
+        fetch("/api/admin/password-resets", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+        fetch("/api/admin/users", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+      ]);
+      const [resetData, adminData] = await Promise.all([
+        resetResponse.json().catch(() => null),
+        adminResponse.json().catch(() => null),
+      ]);
+      if (!resetResponse.ok) {
+        throw new Error(resetData?.error || "無法讀取密碼重設申請。");
+      }
+      if (!adminResponse.ok) {
+        throw new Error(adminData?.error || "無法確認管理員安全狀態。");
+      }
+      setResetRequests(Array.isArray(resetData?.requests) ? resetData.requests : []);
+      setAdminCount(Number(adminData?.adminCount ?? 0));
     } catch (error) {
       setResetIsError(true);
       setResetMessage(error instanceof Error ? error.message : "無法讀取密碼重設申請。");
@@ -127,6 +142,7 @@ export default function AdminUsersPage() {
       setDisplayName("");
       setPassword("");
       setRole("volunteer");
+      await loadResetRequests();
     } catch (error) {
       setIsError(true);
       setMessage(error instanceof Error ? error.message : "建立帳號失敗。");
@@ -141,6 +157,27 @@ export default function AdminUsersPage() {
         <Link href="/" className="mb-5 inline-flex items-center gap-2 text-sm font-black text-[#6D55A3]">
           <ArrowLeft className="h-4 w-4" /> 返回首頁
         </Link>
+        {adminCount !== null && adminCount <= 1 && (
+          <section className="mb-6 rounded-[24px] border border-[#E3A008]/30 bg-[#FFF8E1] p-5">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-[#A66B00]" />
+              <div>
+                <h1 className="text-base font-black text-[#6A4700]">目前只有 1 位管理員</h1>
+                <p className="mt-1 text-sm font-bold leading-6 text-[#7A5A12]">
+                  如果唯一管理員在所有裝置都登出又忘記密碼，App 內將沒有人能批准重設。建議建立第 2 位可信任的備援管理員。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setRole("admin")}
+                  className="mt-3 rounded-xl bg-white px-3 py-2 text-xs font-black text-[#8A5D00] shadow-sm"
+                >
+                  下方建立備援管理員
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         <section className="mb-6 rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-lg shadow-[#6D55A3]/5">
           <div className="flex items-start justify-between gap-3">
             <div>
