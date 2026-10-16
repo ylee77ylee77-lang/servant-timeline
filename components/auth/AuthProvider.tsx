@@ -48,6 +48,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [passwordResetMessage, setPasswordResetMessage] = useState("");
+  const [isPasswordResetSubmitting, setIsPasswordResetSubmitting] = useState(false);
   const authorizedUserIdRef = useRef<string | null>(null);
   const authorizationRequestRef = useRef(0);
   const publicConfig = getPublicSupabaseConfig();
@@ -182,6 +185,41 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const handlePasswordResetRequest = async () => {
+    setPasswordResetMessage("");
+    setErrorMessage("");
+
+    const normalizedCode = normalizeAccountCode(loginCode);
+    if (!normalizedCode) {
+      setPasswordResetMessage("請先輸入你的服事帳號。");
+      return;
+    }
+
+    setIsPasswordResetSubmitting(true);
+    try {
+      const response = await fetch("/api/password-reset-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountCode: normalizedCode }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || "目前無法送出密碼重設申請。");
+      }
+
+      setLoginCode(normalizedCode);
+      setPasswordResetMessage(
+        data?.message || "密碼重設申請已送出，請聯絡管理員協助設定新密碼。"
+      );
+    } catch (error) {
+      setPasswordResetMessage(
+        error instanceof Error ? error.message : "目前無法送出密碼重設申請。"
+      );
+    } finally {
+      setIsPasswordResetSubmitting(false);
+    }
+  };
+
   const signOut = useCallback(async () => {
     await getSupabaseBrowserClient().auth.signOut();
   }, []);
@@ -265,6 +303,39 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
             {isSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
             {isSubmitting ? "登入中" : "登入"}
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowPasswordReset((value) => !value);
+              setPasswordResetMessage("");
+            }}
+            className="mt-4 w-full text-center text-sm font-black text-[#6D55A3]"
+          >
+            {showPasswordReset ? "返回登入" : "忘記密碼？"}
+          </button>
+
+          {showPasswordReset && (
+            <div className="mt-4 rounded-2xl border border-[#6D55A3]/15 bg-[#F3EEFF]/60 p-4">
+              <p className="text-sm font-bold leading-6 text-[#55516A]">
+                先在上方輸入你的服事帳號，再送出申請。系統不會顯示帳號是否存在；管理員會在帳號管理頁處理重設。
+              </p>
+              {passwordResetMessage && (
+                <p role="status" className="mt-3 text-sm font-bold leading-6 text-[#008A7A]">
+                  {passwordResetMessage}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => void handlePasswordResetRequest()}
+                disabled={isPasswordResetSubmitting}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#6D55A3]/20 bg-white px-5 py-3 font-black text-[#6D55A3] disabled:opacity-60"
+              >
+                {isPasswordResetSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isPasswordResetSubmitting ? "送出中" : "送出密碼重設申請"}
+              </button>
+            </div>
+          )}
         </form>
       </main>
     );

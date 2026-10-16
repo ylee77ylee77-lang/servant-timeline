@@ -1,9 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
-import { ArrowLeft, Loader2, UserPlus } from "lucide-react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { ArrowLeft, KeyRound, Loader2, RefreshCw, ShieldAlert, UserPlus } from "lucide-react";
 import { useAuth, type AppRole } from "@/components/auth/AuthProvider";
+
+type PasswordResetRequest = {
+  userId: string;
+  accountCode: string;
+  displayName: string;
+  isActive: boolean;
+  requestedAt: string;
+};
 
 export default function AdminUsersPage() {
   const { isAdmin, session } = useAuth();
@@ -14,6 +22,54 @@ export default function AdminUsersPage() {
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resetRequests, setResetRequests] = useState<PasswordResetRequest[]>([]);
+  const [resetAccountCode, setResetAccountCode] = useState("");
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
+  const [resetIsError, setResetIsError] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [isLoadingResets, setIsLoadingResets] = useState(true);
+  const [adminCount, setAdminCount] = useState<number | null>(null);
+
+  const loadResetRequests = useCallback(async () => {
+    if (!isAdmin) return;
+
+    try {
+      const [resetResponse, adminResponse] = await Promise.all([
+        fetch("/api/admin/password-resets", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+        fetch("/api/admin/users", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }),
+      ]);
+      const [resetData, adminData] = await Promise.all([
+        resetResponse.json().catch(() => null),
+        adminResponse.json().catch(() => null),
+      ]);
+      if (!resetResponse.ok) {
+        throw new Error(resetData?.error || "無法讀取密碼重設申請。");
+      }
+      if (!adminResponse.ok) {
+        throw new Error(adminData?.error || "無法確認管理員安全狀態。");
+      }
+      setResetRequests(Array.isArray(resetData?.requests) ? resetData.requests : []);
+      setAdminCount(Number(adminData?.adminCount ?? 0));
+    } catch (error) {
+      setResetIsError(true);
+      setResetMessage(error instanceof Error ? error.message : "無法讀取密碼重設申請。");
+    } finally {
+      setIsLoadingResets(false);
+    }
+  }, [isAdmin, session.access_token]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadResetRequests();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadResetRequests]);
 
   if (!isAdmin) {
     return (
@@ -26,6 +82,42 @@ export default function AdminUsersPage() {
       </main>
     );
   }
+
+  const handlePasswordReset = async (event: FormEvent) => {
+    event.preventDefault();
+    setResetMessage("");
+    setResetIsError(false);
+    setIsResetting(true);
+
+    try {
+      const response = await fetch("/api/admin/password-resets", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accountCode: resetAccountCode,
+          password: resetPassword,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "重設密碼失敗。");
+
+      setResetIsError(false);
+      setResetMessage(
+        `已重設 ${data.user.displayName}（${data.user.accountCode}）的密碼。`
+      );
+      setResetAccountCode("");
+      setResetPassword("");
+      await loadResetRequests();
+    } catch (error) {
+      setResetIsError(true);
+      setResetMessage(error instanceof Error ? error.message : "重設密碼失敗。");
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -50,6 +142,7 @@ export default function AdminUsersPage() {
       setDisplayName("");
       setPassword("");
       setRole("volunteer");
+      await loadResetRequests();
     } catch (error) {
       setIsError(true);
       setMessage(error instanceof Error ? error.message : "建立帳號失敗。");
@@ -64,6 +157,123 @@ export default function AdminUsersPage() {
         <Link href="/" className="mb-5 inline-flex items-center gap-2 text-sm font-black text-[#6D55A3]">
           <ArrowLeft className="h-4 w-4" /> 返回首頁
         </Link>
+        {adminCount !== null && adminCount <= 1 && (
+          <section className="mb-6 rounded-[24px] border border-[#E3A008]/30 bg-[#FFF8E1] p-5">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-[#A66B00]" />
+              <div>
+                <h1 className="text-base font-black text-[#6A4700]">目前只有 1 位管理員</h1>
+                <p className="mt-1 text-sm font-bold leading-6 text-[#7A5A12]">
+                  如果唯一管理員在所有裝置都登出又忘記密碼，App 內將沒有人能批准重設。建議建立第 2 位可信任的備援管理員。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setRole("admin")}
+                  className="mt-3 rounded-xl bg-white px-3 py-2 text-xs font-black text-[#8A5D00] shadow-sm"
+                >
+                  下方建立備援管理員
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section className="mb-6 rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-lg shadow-[#6D55A3]/5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-black text-[#1F2937]">待處理密碼重設</h1>
+              <p className="mt-1 text-sm font-medium leading-6 text-[#7B7B74]">
+                同工在登入頁送出的申請會顯示在這裡。只有管理員可以真正設定新密碼。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsLoadingResets(true);
+                void loadResetRequests();
+              }}
+              disabled={isLoadingResets}
+              aria-label="重新整理密碼重設申請"
+              className="rounded-xl border border-[#6D55A3]/15 bg-[#F3EEFF] p-2 text-[#6D55A3] disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoadingResets ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {resetRequests.length === 0 ? (
+              <div className="rounded-2xl bg-[#FFF9F3] px-4 py-4 text-sm font-bold text-[#7B7B74]">
+                目前沒有待處理的密碼重設申請。
+              </div>
+            ) : (
+              resetRequests.map((request) => (
+                <div key={request.userId} className="rounded-2xl border border-[#E6EAF0] p-4">
+                  <div className="font-black text-[#1F2937]">{request.displayName}</div>
+                  <div className="mt-1 text-sm font-bold text-[#6D55A3]">{request.accountCode}</div>
+                  <div className="mt-1 text-xs font-medium text-[#7B7B74]">
+                    申請時間：{new Date(request.requestedAt).toLocaleString("zh-TW")}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetAccountCode(request.accountCode);
+                      setResetPassword("");
+                      setResetMessage("");
+                      setResetIsError(false);
+                    }}
+                    className="mt-3 rounded-xl bg-[#F3EEFF] px-3 py-2 text-xs font-black text-[#6D55A3]"
+                  >
+                    選擇這個帳號
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <form onSubmit={handlePasswordReset} className="mb-6 rounded-[28px] border border-[#6D55A3]/15 bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
+          <div className="mb-6">
+            <h2 className="flex items-center gap-2 text-xl font-black text-[#1F2937]">
+              <KeyRound className="h-5 w-5 text-[#6D55A3]" />
+              重設既有帳號密碼
+            </h2>
+            <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
+              可處理上方申請，也可直接輸入既有服事帳號。新密碼不會寫入活動紀錄。
+            </p>
+          </div>
+
+          <Field
+            label="要重設的服事帳號"
+            value={resetAccountCode}
+            onChange={setResetAccountCode}
+            autoComplete="off"
+            hint="輸入原本的服事帳號，例如 dongli"
+          />
+          <Field
+            label="新密碼"
+            value={resetPassword}
+            onChange={setResetPassword}
+            type="password"
+            autoComplete="new-password"
+            hint="8–72 字元，請用安全方式交給本人"
+          />
+
+          {resetMessage && (
+            <p role="status" className={`mt-4 text-sm font-bold ${resetIsError ? "text-[#D73A49]" : "text-[#008A7A]"}`}>
+              {resetMessage}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={isResetting}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
+          >
+            {isResetting ? <Loader2 className="h-5 w-5 animate-spin" /> : <KeyRound className="h-5 w-5" />}
+            {isResetting ? "重設中" : "設定新密碼"}
+          </button>
+        </form>
+
         <form onSubmit={handleSubmit} className="rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
           <div className="mb-6">
             <h1 className="text-2xl font-black text-[#1F2937]">建立服事帳號</h1>
