@@ -5,7 +5,7 @@ const UUID_PATTERN =
 
 export type EligibleCheckInOption = {
   serviceType: ServiceType;
-  assignmentId: string;
+  assignmentId: string | null;
 };
 
 export const CHECK_IN_NETWORK_MESSAGES = {
@@ -28,8 +28,13 @@ export function normalizeEligibleCheckInOptions(
     if (!item || typeof item !== "object") return [];
     const record = item as Record<string, unknown>;
     const serviceType = String(record.serviceType ?? "").trim();
-    const assignmentId = String(record.assignmentId ?? "").trim();
-    if (!isServiceType(serviceType) || !isUuid(assignmentId) || seen.has(serviceType)) {
+    const assignmentIdRaw = record.assignmentId;
+    const assignmentId = assignmentIdRaw == null ? null : String(assignmentIdRaw).trim();
+    if (
+      !isServiceType(serviceType)
+      || (assignmentId !== null && !isUuid(assignmentId))
+      || seen.has(serviceType)
+    ) {
       return [];
     }
     seen.add(serviceType);

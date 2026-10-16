@@ -116,9 +116,9 @@ export const MyServiceDashboard = memo(function MyServiceDashboard({
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#F3EEFF]">
             <HeartHandshake className="h-7 w-7 text-[#6D55A3]" />
           </div>
-          <h2 className="mt-4 text-xl font-black text-[#1F2937]">目前沒有服事安排</h2>
+          <h2 className="mt-4 text-xl font-black text-[#1F2937]">尚未確認今日服事</h2>
           <p className="mt-2 text-sm font-medium leading-6 text-[#64645F]">
-            有新的排班時，日期、時間、地點和角色會顯示在這裡。
+            若今天有服事，可先到「我要報到」選擇目前開放堂次；沒有事前排班也可以現場報到。
           </p>
         </section>
         <QuickActions onNavigate={onNavigate} />

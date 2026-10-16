@@ -38,6 +38,7 @@ import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStat
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
+import { getServiceActivationState } from '@/lib/services/service-activation';
 import {
   CHECK_IN_NETWORK_MESSAGES,
   getSelectedCheckInOption,
@@ -882,23 +883,9 @@ export default function App() {
     return h * 60 + m;
   };
 
-  const getVoiceCloseMinutesForService = (service: string) => {
-    const map: Record<string, number> = {
-      "六晚崇": 21 * 60 + 45,
-      "主一堂": 10 * 60 + 15,
-      "主二堂": 12 * 60 + 45
-    };
-
-    return map[service] ?? null;
-  };
-
   const isCurrentServiceVoiceClosed = () => {
-    const closeMinutes = getVoiceCloseMinutesForService(currentService);
-    if (closeMinutes === null) return false;
-
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    return currentMinutes >= closeMinutes;
+    if (!isServiceType(currentService)) return true;
+    return !getServiceActivationState(new Date()).activeServiceTypes.includes(currentService);
   };
 
   const stopVoiceAssistantForServiceEnd = () => {
@@ -1835,20 +1822,8 @@ export default function App() {
       setCurrentTime(newTimeStr);
 
       if (!hasManuallySwitchedRef.current) {
-        const day = now.getDay(); 
-        const timeValue = now.getHours() + (now.getMinutes() / 60); 
-
-        if (day === 6) {
-          setCurrentService('六晚崇');
-        } else if (day === 0) {
-          if (timeValue < 10.5) { 
-            setCurrentService('主一堂');
-          } else { 
-            setCurrentService('主二堂');
-          }
-        } else {
-          setCurrentService('');
-        }
+        const activation = getServiceActivationState(now);
+        setCurrentService(activation.defaultServiceType || '');
       }
     };
     
@@ -2645,7 +2620,7 @@ export default function App() {
       return;
     }
 
-    const { serviceType, assignmentId } = selectedOption;
+    const { serviceType } = selectedOption;
     setIsCheckinSyncing(true);
     try {
       const response = await fetch("/api/check-in", {
@@ -2654,7 +2629,7 @@ export default function App() {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ action: "check_in", serviceType, assignmentId }),
+        body: JSON.stringify({ action: "check_in", serviceType }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "報到失敗，請稍後再試。");
@@ -2674,14 +2649,17 @@ export default function App() {
       }
       setCheckedInService(lockedServiceType);
       setSelectedCheckInService("");
-      setCurrentAssignmentId(assignmentId);
+      const resolvedAssignmentId = String(
+        result.assignmentId || result.checkIn?.assignment_id || ""
+      );
+      setCurrentAssignmentId(resolvedAssignmentId);
       setCurrentService(lockedServiceType);
       setConfirmedStation("");
       const nextCheckinStatus =
         result.checkIn.status === "station_confirmed" ? "station_confirmed" : "checked_in";
       setCheckinStatus(nextCheckinStatus);
       setMyServiceContext((previous) =>
-        previous.assignment?.id === assignmentId
+        previous.assignment?.id === resolvedAssignmentId
           ? {
               ...previous,
               checkIn: {
@@ -2725,9 +2703,9 @@ export default function App() {
   };
 
   const serviceTimeWindows = [
-    { service: "六晚崇", day: 6, start: "17:30", end: "21:30", label: "週六 17:30–21:30" },
-    { service: "主一堂", day: 0, start: "07:30", end: "09:59", label: "週日 07:30–09:59" },
-    { service: "主二堂", day: 0, start: "10:00", end: "12:30", label: "週日 10:00–12:30" }
+    { service: "六晚崇", day: 6, start: "17:00", end: "21:44", label: "週六 17:00–21:44" },
+    { service: "主一堂", day: 0, start: "00:00", end: "12:44", label: "週日 00:00–12:44" },
+    { service: "主二堂", day: 0, start: "10:00", end: "12:44", label: "週日 10:00–12:44" }
   ];
 
   const weekdayLabels = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
@@ -3093,6 +3071,11 @@ export default function App() {
   const handleOpenStationScanner = () => {
     if (checkinStatus === "not_checked_in") {
       setCustomAlert({ isOpen: true, message: "請先完成報到，再掃描崗位名牌。" });
+      return;
+    }
+
+    if (!assignedStation) {
+      setCustomAlert({ isOpen: true, message: "目前尚未分派崗位，不需要掃描 QR Code；可直接使用共用流程與語音提醒。" });
       return;
     }
 
@@ -3674,7 +3657,7 @@ export default function App() {
               <h3 className="text-[18px] font-black text-[#1F2937] mb-2">第一次使用</h3>
               <p className="text-sm font-black text-[#6D55A3] mb-2">今日堂次：待確認</p>
               <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                請先確認您的服事身分。報到會安全寫入今日場次；拿到名牌後，再掃描 QR Code 確認崗位。
+                請先確認您的服事身分。系統會依目前時間開放可報到堂次；若尚未排班，也可先完成現場報到。
               </p>
 
               <div className="space-y-3.5">
@@ -3780,8 +3763,8 @@ export default function App() {
                     {eligibleCheckInOptions.length
                       ? selectedOption
                         ? `已選擇「${selectedOption.serviceType}」，按下報到後即鎖定。`
-                        : "請點選你的本次堂次；系統只開放今日有效排班。"
-                      : "目前沒有可報到的今日排班，請聯絡帶領者／協調員。"}
+                        : "請點選本次服事堂次；有正式排班會直接沿用，沒有排班則以「待分派」完成現場報到。"
+                      : "目前沒有開放中的崇拜堂次。" }
                   </p>
                 </fieldset>
               )}
@@ -3901,26 +3884,37 @@ export default function App() {
                   您已於 <span className="text-[#F25D6B]">{checkedInAt || "--:--"}</span> 完成報到
                 </h3>
                 <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                  目前狀態：等待總招分派崗位
+                  {assignedStation
+                    ? "目前狀態：已分派崗位，請確認名牌。"
+                    : "目前狀態：已完成報到，尚未分派崗位；可直接進入共用流程。"}
                 </p>
 
-                {assignedStation && (
-                  <div className="mb-5 p-4 rounded-[20px] bg-[#00B8B8]/10 border border-[#00B8B8]/20">
-                    <div className="text-[11px] font-black text-[#00B8B8] tracking-widest mb-1">總招指定崗位</div>
-                    <div className="text-[16px] font-black text-[#1F2937]">{assignedStation}</div>
-                    <p className="text-xs font-bold text-[#7B7B74] mt-1 leading-relaxed">
-                      請掃描這張崗位名牌上的 QR Code。若掃到不同崗位，系統會提醒可能拿錯名牌。
-                    </p>
-                  </div>
+                {assignedStation ? (
+                  <>
+                    <div className="mb-5 p-4 rounded-[20px] bg-[#00B8B8]/10 border border-[#00B8B8]/20">
+                      <div className="text-[11px] font-black text-[#00B8B8] tracking-widest mb-1">總招指定崗位</div>
+                      <div className="text-[16px] font-black text-[#1F2937]">{assignedStation}</div>
+                      <p className="text-xs font-bold text-[#7B7B74] mt-1 leading-relaxed">
+                        有指定崗位時才需要掃描 QR Code 確認；未指定前不影響今日流程與語音提醒。
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenStationScanner}
+                      className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+                    >
+                      掃描崗位名牌 QR code
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("timeline")}
+                    className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
+                  >
+                    進入今日共用流程
+                  </button>
                 )}
-
-                <button
-                  type="button"
-                  onClick={handleOpenStationScanner}
-                  className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
-                >
-                  掃描崗位名牌 QR code
-                </button>
               </div>
             ) : null}
 
@@ -3952,12 +3946,18 @@ export default function App() {
             <MapPin className={`w-7 h-7 ${stationReady ? "text-[#00B8B8]" : "text-[#6D55A3]"}`} />
           </div>
           <h3 className="text-[18px] font-black text-[#1F2937] mb-2">
-            {stationReady ? "已確認今日崗位" : "等待掃描崗位名牌"}
+            {stationReady
+              ? "已確認今日崗位"
+              : assignedStation
+                ? "等待掃描崗位名牌"
+                : "目前未分派崗位"}
           </h3>
           <p className="text-sm font-medium leading-relaxed text-[#7B7B74]">
             {stationReady
               ? `今日崗位：${confirmedStation || personalSettings.role}。系統會依此切換個人流程。`
-              : "總招分配崗位時會發崗位名牌。拿到名牌後，掃描名牌上的 QR Code 確認崗位。"}
+              : assignedStation
+                ? `總招已指定「${assignedStation}」，拿到名牌後可掃描 QR Code 確認。`
+                : "免人工排班模式下，沒有指定崗位也可以正常報到、查看共用流程與使用語音提醒。"}
           </p>
         </div>
 
@@ -3970,15 +3970,15 @@ export default function App() {
         <div className="grid grid-cols-1 gap-3">
           <button
             type="button"
-            disabled={!isCheckedIn}
+            disabled={!isCheckedIn || !assignedStation}
             onClick={handleOpenStationScanner}
             className={`w-full py-4 font-black rounded-[18px] transition-all ${
-              isCheckedIn
+              isCheckedIn && assignedStation
                 ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 hover:opacity-90"
                 : "bg-[#E6EAF0] text-[#7B7B74] cursor-not-allowed"
             }`}
           >
-            掃描崗位名牌
+            {assignedStation ? "掃描崗位名牌" : "目前不需確認崗位"}
           </button>
 
         </div>
