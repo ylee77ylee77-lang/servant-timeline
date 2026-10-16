@@ -28,12 +28,11 @@ export default function AdminUsersPage() {
   const [resetMessage, setResetMessage] = useState("");
   const [resetIsError, setResetIsError] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-  const [isLoadingResets, setIsLoadingResets] = useState(false);
+  const [isLoadingResets, setIsLoadingResets] = useState(true);
 
   const loadResetRequests = useCallback(async () => {
     if (!isAdmin) return;
 
-    setIsLoadingResets(true);
     try {
       const response = await fetch("/api/admin/password-resets", {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -148,7 +147,10 @@ export default function AdminUsersPage() {
             </div>
             <button
               type="button"
-              onClick={() => void loadResetRequests()}
+              onClick={() => {
+                setIsLoadingResets(true);
+                void loadResetRequests();
+              }}
               disabled={isLoadingResets}
               aria-label="重新整理密碼重設申請"
               className="rounded-xl border border-[#6D55A3]/15 bg-[#F3EEFF] p-2 text-[#6D55A3] disabled:opacity-50"
