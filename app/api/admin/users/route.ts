@@ -8,6 +8,27 @@ export const dynamic = "force-dynamic";
 
 const VALID_ROLES = new Set(["volunteer", "coordinator", "admin"]);
 
+export async function GET(request: NextRequest) {
+  try {
+    await requireAdmin(request);
+    const supabase = getSupabaseAdminClient();
+
+    const { count, error } = await supabase
+      .from("user_roles")
+      .select("user_id", { count: "exact", head: true })
+      .eq("role", "admin");
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      adminCount: count ?? 0,
+    });
+  } catch (error) {
+    const authError = getAuthErrorResponse(error);
+    return NextResponse.json({ error: authError.message }, { status: authError.status });
+  }
+}
+
 export async function POST(request: NextRequest) {
   let createdUserId: string | null = null;
 
