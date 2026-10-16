@@ -49,7 +49,11 @@ export default function AdminUsersPage() {
   }, [isAdmin, session.access_token]);
 
   useEffect(() => {
-    void loadResetRequests();
+    const timer = window.setTimeout(() => {
+      void loadResetRequests();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [loadResetRequests]);
 
   if (!isAdmin) {
