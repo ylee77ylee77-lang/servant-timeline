@@ -13,12 +13,23 @@ export async function GET(request: NextRequest) {
     await requireAdmin(request);
     const supabase = getSupabaseAdminClient();
 
-    const { count, error } = await supabase
+    const { data: adminRows, error: roleError } = await supabase
       .from("user_roles")
-      .select("user_id", { count: "exact", head: true })
+      .select("user_id")
       .eq("role", "admin");
+    if (roleError) throw roleError;
 
-    if (error) throw error;
+    const adminIds = (adminRows ?? []).map((row) => String(row.user_id));
+    if (!adminIds.length) {
+      return NextResponse.json({ adminCount: 0 });
+    }
+
+    const { count, error: profileError } = await supabase
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .in("id", adminIds)
+      .eq("is_active", true);
+    if (profileError) throw profileError;
 
     return NextResponse.json({
       adminCount: count ?? 0,
