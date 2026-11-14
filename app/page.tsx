@@ -107,6 +107,10 @@ const DEFAULT_TTS_USAGE = {
   total: { usedChars: 0, limitChars: 2000000, remainingChars: 2000000, usageRate: 0 }
 };
 
+// Phase 1 rollout: coordinators first use only check-in, timeline, and personal settings.
+// Existing features remain implemented and available to admins for later rollout phases.
+const PHASE_ONE_COORDINATOR_TABS = new Set(["checkin", "timeline", "settings"]);
+
 const formatNumber = (value: any) => Number(value || 0).toLocaleString("zh-TW");
 
 type MyServiceContext = {
@@ -2326,15 +2330,21 @@ export default function App() {
   const displayCheckinName = authDisplayName;
   const isCurrentUserAdmin = isAdmin;
   const canManageTimeline = isAdmin;
-  const canUseQuestionAssistant = isCoordinator;
+  const isPhaseOneCoordinator = isCoordinator && !isAdmin;
+  const canUseQuestionAssistant = isCoordinator && !isPhaseOneCoordinator;
 
   useEffect(() => {
     setIsAdminUnlocked(canManageTimeline);
 
+    if (isPhaseOneCoordinator && !PHASE_ONE_COORDINATOR_TABS.has(activeTab)) {
+      setActiveTab("checkin");
+      return;
+    }
+
     if ((!canManageTimeline && activeTab === "admin") || (!isCoordinator && ["status", "control"].includes(activeTab))) {
       setActiveTab("service");
     }
-  }, [canManageTimeline, isCoordinator, activeTab]);
+  }, [canManageTimeline, isCoordinator, isPhaseOneCoordinator, activeTab]);
 
   const refreshVoiceSettingsAndUsage = useCallback(async () => {
     try {
@@ -5874,6 +5884,7 @@ export default function App() {
             { key: "settings", label: "設定", icon: User, color: "purple" },
             { key: "admin", label: "管理", icon: Unlock, color: "purple" }
           ].filter((item) => {
+            if (isPhaseOneCoordinator) return PHASE_ONE_COORDINATOR_TABS.has(item.key);
             if (item.key === "admin") return canManageTimeline;
             if (item.key === "status" || item.key === "control") return isCoordinator;
             return true;
