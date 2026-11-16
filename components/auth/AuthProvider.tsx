@@ -51,6 +51,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [passwordResetMessage, setPasswordResetMessage] = useState("");
   const [isPasswordResetSubmitting, setIsPasswordResetSubmitting] = useState(false);
+  const [showRegistration, setShowRegistration] = useState(false);
+  const [registrationDisplayName, setRegistrationDisplayName] = useState("");
+  const [registrationAccountCode, setRegistrationAccountCode] = useState("");
+  const [registrationPassword, setRegistrationPassword] = useState("");
+  const [registrationPasswordConfirm, setRegistrationPasswordConfirm] = useState("");
+  const [registrationMessage, setRegistrationMessage] = useState("");
+  const [registrationIsError, setRegistrationIsError] = useState(false);
+  const [isRegistrationSubmitting, setIsRegistrationSubmitting] = useState(false);
   const authorizedUserIdRef = useRef<string | null>(null);
   const authorizationRequestRef = useRef(0);
   const publicConfig = getPublicSupabaseConfig();
@@ -220,6 +228,50 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+
+  const handleRegistration = async (event: FormEvent) => {
+    event.preventDefault();
+    setRegistrationMessage("");
+    setRegistrationIsError(false);
+
+    const normalizedCode = normalizeAccountCode(registrationAccountCode);
+    if (registrationPassword !== registrationPasswordConfirm) {
+      setRegistrationIsError(true);
+      setRegistrationMessage("兩次輸入的密碼不一致。");
+      return;
+    }
+
+    setIsRegistrationSubmitting(true);
+    try {
+      const response = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          displayName: registrationDisplayName,
+          accountCode: normalizedCode,
+          password: registrationPassword,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || "註冊失敗，請稍後再試。");
+      }
+
+      setRegistrationIsError(false);
+      setRegistrationMessage(data?.message || "註冊完成，請等待管理員啟用帳號。");
+      setLoginCode(normalizedCode);
+      setRegistrationDisplayName("");
+      setRegistrationAccountCode("");
+      setRegistrationPassword("");
+      setRegistrationPasswordConfirm("");
+    } catch (error) {
+      setRegistrationIsError(true);
+      setRegistrationMessage(error instanceof Error ? error.message : "註冊失敗，請稍後再試。");
+    } finally {
+      setIsRegistrationSubmitting(false);
+    }
+  };
+
   const signOut = useCallback(async () => {
     await getSupabaseBrowserClient().auth.signOut();
   }, []);
@@ -262,6 +314,92 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   if (!session || !contextValue) {
     return (
       <main className="min-h-screen bg-[#FFF9F3] px-5 py-10 flex items-center justify-center">
+        {showRegistration ? (
+          <form onSubmit={handleRegistration} className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
+            <div className="mb-7">
+              <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
+              <h1 className="mt-2 text-2xl font-black text-[#1F2937]">總招試用註冊</h1>
+              <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
+                建立自己的服事帳號。註冊後需由管理員啟用，啟用前不會取得總招權限。
+              </p>
+            </div>
+
+            <label htmlFor="registration-name" className="text-sm font-black text-[#1F2937]">姓名</label>
+            <input
+              id="registration-name"
+              autoComplete="name"
+              value={registrationDisplayName}
+              onChange={(event) => setRegistrationDisplayName(event.target.value)}
+              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
+              required
+            />
+
+            <label htmlFor="registration-code" className="mt-5 block text-sm font-black text-[#1F2937]">服事帳號</label>
+            <input
+              id="registration-code"
+              autoCapitalize="none"
+              autoComplete="username"
+              value={registrationAccountCode}
+              onChange={(event) => setRegistrationAccountCode(event.target.value)}
+              placeholder="英文小寫、數字、點、底線或連字號"
+              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
+              required
+            />
+
+            <label htmlFor="registration-password" className="mt-5 block text-sm font-black text-[#1F2937]">密碼</label>
+            <input
+              id="registration-password"
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              maxLength={72}
+              value={registrationPassword}
+              onChange={(event) => setRegistrationPassword(event.target.value)}
+              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
+              required
+            />
+
+            <label htmlFor="registration-password-confirm" className="mt-5 block text-sm font-black text-[#1F2937]">再次輸入密碼</label>
+            <input
+              id="registration-password-confirm"
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              maxLength={72}
+              value={registrationPasswordConfirm}
+              onChange={(event) => setRegistrationPasswordConfirm(event.target.value)}
+              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
+              required
+            />
+
+            {registrationMessage && (
+              <p role="status" className={`mt-4 text-sm font-bold leading-6 ${registrationIsError ? "text-[#D73A49]" : "text-[#008A7A]"}`}>
+                {registrationMessage}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={isRegistrationSubmitting}
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
+            >
+              {isRegistrationSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+              {isRegistrationSubmitting ? "註冊中" : "建立試用帳號"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowRegistration(false);
+                setRegistrationMessage("");
+                setRegistrationIsError(false);
+              }}
+              className="mt-4 w-full text-center text-sm font-black text-[#6D55A3]"
+            >
+              返回登入
+            </button>
+          </form>
+        ) : (
         <form onSubmit={handleLogin} className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
           <div className="mb-7">
             <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
@@ -336,7 +474,25 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               </button>
             </div>
           )}
+
+          <div className="mt-5 border-t border-[#E6EAF0] pt-5">
+            <p className="text-center text-xs font-bold text-[#7B7B74]">第一次參加總招試用？</p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowPasswordReset(false);
+                setPasswordResetMessage("");
+                setShowRegistration(true);
+                setRegistrationMessage("");
+                setRegistrationIsError(false);
+              }}
+              className="mt-2 w-full rounded-2xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-5 py-3 font-black text-[#6D55A3]"
+            >
+              自行註冊試用帳號
+            </button>
+          </div>
         </form>
+        )}
       </main>
     );
   }
