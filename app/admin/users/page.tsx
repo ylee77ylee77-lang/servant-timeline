@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, KeyRound, Loader2, RefreshCw, ShieldAlert, UserPlus } from "lucide-react";
+import { ArrowLeft, KeyRound, Loader2, RefreshCw, ShieldAlert, UserCheck, UserPlus } from "lucide-react";
 import { useAuth, type AppRole } from "@/components/auth/AuthProvider";
 
 type PasswordResetRequest = {
@@ -11,6 +11,14 @@ type PasswordResetRequest = {
   displayName: string;
   isActive: boolean;
   requestedAt: string;
+};
+
+type RegisteredUser = {
+  id: string;
+  accountCode: string;
+  displayName: string;
+  isActive: boolean;
+  roles: AppRole[];
 };
 
 export default function AdminUsersPage() {
@@ -30,6 +38,10 @@ export default function AdminUsersPage() {
   const [isResetting, setIsResetting] = useState(false);
   const [isLoadingResets, setIsLoadingResets] = useState(true);
   const [adminCount, setAdminCount] = useState<number | null>(null);
+  const [registeredUsers, setRegisteredUsers] = useState<RegisteredUser[]>([]);
+  const [activatingUserId, setActivatingUserId] = useState("");
+  const [activationMessage, setActivationMessage] = useState("");
+  const [activationIsError, setActivationIsError] = useState(false);
 
   const loadResetRequests = useCallback(async () => {
     if (!isAdmin) return;
@@ -55,6 +67,7 @@ export default function AdminUsersPage() {
       }
       setResetRequests(Array.isArray(resetData?.requests) ? resetData.requests : []);
       setAdminCount(Number(adminData?.adminCount ?? 0));
+      setRegisteredUsers(Array.isArray(adminData?.users) ? adminData.users : []);
     } catch (error) {
       setResetIsError(true);
       setResetMessage(error instanceof Error ? error.message : "無法讀取密碼重設申請。");
@@ -70,6 +83,35 @@ export default function AdminUsersPage() {
 
     return () => window.clearTimeout(timer);
   }, [loadResetRequests]);
+
+  const activateCoordinator = async (userId: string) => {
+    setActivatingUserId(userId);
+    setActivationMessage("");
+    setActivationIsError(false);
+
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId, action: "activate-coordinator" }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "啟用帳號失敗。");
+
+      setActivationMessage(
+        `已啟用 ${data.user.displayName}（${data.user.accountCode}）為總招試用帳號。`
+      );
+      await loadResetRequests();
+    } catch (error) {
+      setActivationIsError(true);
+      setActivationMessage(error instanceof Error ? error.message : "啟用帳號失敗。");
+    } finally {
+      setActivatingUserId("");
+    }
+  };
 
   if (!isAdmin) {
     return (
@@ -231,6 +273,50 @@ export default function AdminUsersPage() {
           </div>
         </section>
 
+        <section className="mb-6 rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-lg shadow-[#6D55A3]/5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black text-[#1F2937]">待啟用試用帳號</h2>
+              <p className="mt-1 text-sm font-medium leading-6 text-[#7B7B74]">
+                自行註冊的帳號會自動出現在這裡。確認本人後，一鍵啟用為總招試用帳號。
+              </p>
+            </div>
+            <UserCheck className="h-5 w-5 shrink-0 text-[#6D55A3]" />
+          </div>
+
+          {activationMessage && (
+            <p role="status" className={`mt-4 text-sm font-bold ${activationIsError ? "text-[#D73A49]" : "text-[#008A7A]"}`}>
+              {activationMessage}
+            </p>
+          )}
+
+          <div className="mt-4 space-y-3">
+            {registeredUsers.filter((user) => !user.isActive && user.roles.length === 0).length === 0 ? (
+              <div className="rounded-2xl bg-[#FFF9F3] px-4 py-4 text-sm font-bold text-[#7B7B74]">
+                目前沒有待啟用的自行註冊帳號。
+              </div>
+            ) : (
+              registeredUsers
+                .filter((user) => !user.isActive && user.roles.length === 0)
+                .map((user) => (
+                  <div key={user.id} className="rounded-2xl border border-[#E6EAF0] p-4">
+                    <div className="font-black text-[#1F2937]">{user.displayName}</div>
+                    <div className="mt-1 text-sm font-bold text-[#6D55A3]">{user.accountCode}</div>
+                    <button
+                      type="button"
+                      onClick={() => void activateCoordinator(user.id)}
+                      disabled={activatingUserId === user.id}
+                      className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#6D55A3] px-3 py-2.5 text-sm font-black text-white disabled:opacity-60"
+                    >
+                      {activatingUserId === user.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+                      {activatingUserId === user.id ? "啟用中" : "啟用為總招試用帳號"}
+                    </button>
+                  </div>
+                ))
+            )}
+          </div>
+        </section>
+
         <form onSubmit={handlePasswordReset} className="mb-6 rounded-[28px] border border-[#6D55A3]/15 bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
           <div className="mb-6">
             <h2 className="flex items-center gap-2 text-xl font-black text-[#1F2937]">
@@ -242,13 +328,24 @@ export default function AdminUsersPage() {
             </p>
           </div>
 
-          <Field
-            label="要重設的服事帳號"
+          <label htmlFor="reset-account-code" className="block text-sm font-black text-[#1F2937]">要重設的服事帳號</label>
+          <select
+            id="reset-account-code"
             value={resetAccountCode}
-            onChange={setResetAccountCode}
-            autoComplete="off"
-            hint="輸入原本的服事帳號，例如 dongli"
-          />
+            onChange={(event) => setResetAccountCode(event.target.value)}
+            className="mt-2 w-full rounded-2xl border border-[#D9DEE7] bg-white px-4 py-3"
+            required
+          >
+            <option value="">請選擇已註冊帳號</option>
+            {registeredUsers.map((user) => (
+              <option key={user.id} value={user.accountCode}>
+                {user.displayName}（{user.accountCode}）{user.isActive ? "" : "｜待啟用"}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs font-medium text-[#7B7B74]">
+            自行註冊後會自動出現在此清單，不必手動輸入帳號。
+          </p>
           <Field
             label="新密碼"
             value={resetPassword}

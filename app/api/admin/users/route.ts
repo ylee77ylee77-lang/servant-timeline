@@ -13,26 +13,118 @@ export async function GET(request: NextRequest) {
     await requireAdmin(request);
     const supabase = getSupabaseAdminClient();
 
-    const { data: adminRows, error: roleError } = await supabase
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "admin");
+    const [{ data: profiles, error: profileError }, { data: roleRows, error: roleError }] =
+      await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id,account_code,display_name,is_active")
+          .order("display_name", { ascending: true }),
+        supabase
+          .from("user_roles")
+          .select("user_id,role"),
+      ]);
+
+    if (profileError) throw profileError;
     if (roleError) throw roleError;
 
-    const adminIds = (adminRows ?? []).map((row) => String(row.user_id));
-    if (!adminIds.length) {
-      return NextResponse.json({ adminCount: 0 });
+    const roleMap = new Map<string, string[]>();
+    for (const row of roleRows ?? []) {
+      const userId = String(row.user_id);
+      const current = roleMap.get(userId) ?? [];
+      current.push(String(row.role));
+      roleMap.set(userId, current);
     }
 
-    const { count, error: profileError } = await supabase
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .in("id", adminIds)
-      .eq("is_active", true);
-    if (profileError) throw profileError;
+    const users = (profiles ?? [])
+      .filter((profile) => Boolean(profile.account_code))
+      .map((profile) => ({
+        id: String(profile.id),
+        accountCode: String(profile.account_code ?? ""),
+        displayName: String(profile.display_name ?? "同工"),
+        isActive: Boolean(profile.is_active),
+        roles: roleMap.get(String(profile.id)) ?? [],
+      }));
+
+    const adminCount = users.filter(
+      (user) => user.isActive && user.roles.includes("admin")
+    ).length;
 
     return NextResponse.json({
-      adminCount: count ?? 0,
+      adminCount,
+      users,
+    });
+  } catch (error) {
+    const authError = getAuthErrorResponse(error);
+    return NextResponse.json({ error: authError.message }, { status: authError.status });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const admin = await requireAdmin(request);
+    const body = await request.json().catch(() => ({}));
+    const userId = String(body.userId ?? "").trim();
+    const action = String(body.action ?? "");
+
+    if (!userId) {
+      return NextResponse.json({ error: "缺少帳號識別資料。" }, { status: 400 });
+    }
+    if (action !== "activate-coordinator") {
+      return NextResponse.json({ error: "無效的帳號操作。" }, { status: 400 });
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id,account_code,display_name,is_active")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileError) throw profileError;
+    if (!profile) {
+      return NextResponse.json({ error: "找不到這個服事帳號。" }, { status: 404 });
+    }
+    if (profile.is_active) {
+      return NextResponse.json({ error: "這個帳號已經啟用。" }, { status: 409 });
+    }
+
+    const { data: existingRoles, error: existingRoleError } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId);
+    if (existingRoleError) throw existingRoleError;
+
+    if ((existingRoles ?? []).length > 0) {
+      return NextResponse.json(
+        { error: "此停用帳號已有角色設定，請由管理員另外確認後再處理。" },
+        { status: 409 }
+      );
+    }
+
+    const { error: activateError } = await supabase
+      .from("profiles")
+      .update({ is_active: true })
+      .eq("id", userId);
+    if (activateError) throw activateError;
+
+    const { error: roleError } = await supabase.from("user_roles").insert({
+      user_id: userId,
+      role: "coordinator",
+      granted_by: admin.userId,
+    });
+    if (roleError) {
+      await supabase.from("profiles").update({ is_active: false }).eq("id", userId);
+      throw roleError;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      user: {
+        id: String(profile.id),
+        accountCode: String(profile.account_code ?? ""),
+        displayName: String(profile.display_name ?? "同工"),
+        role: "coordinator",
+      },
     });
   } catch (error) {
     const authError = getAuthErrorResponse(error);
