@@ -205,22 +205,7 @@ export default function App() {
 
 
   // --- 報到 / 崗位 UI 狀態 ---
-  // 報到顯示名稱由已驗證的 Supabase Auth 帳號提供；手機後四碼只作現場聯絡辨識。
-  const checkinProfileStorageKey = `${CHECKIN_PROFILE_STORAGE_PREFIX}:${session.user.id}`;
-
-  const [checkinProfile, setCheckinProfile] = useState({
-    name: "",
-    phoneLast4: "",
-    deviceRemembered: false
-  });
-  const [checkinForm, setCheckinForm] = useState({
-    phoneLast4: ""
-  });
-  const [phoneChangeForm, setPhoneChangeForm] = useState({
-    newPhoneLast4: "",
-    confirmPhoneLast4: ""
-  });
-  const [showPhoneChange, setShowPhoneChange] = useState(false);
+  // 已驗證的 Supabase Auth 帳號即為報到身分，不再額外蒐集手機後四碼。
   const [wifiVerified, setWifiVerified] = useState(false);
   const [wifiChecking, setWifiChecking] = useState(false);
   const [wifiCheckMessage, setWifiCheckMessage] = useState<string>(
@@ -353,7 +338,7 @@ export default function App() {
   const voiceWakeLockRef = useRef<any>(null);
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
 
-  // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的身分、手機後四碼或密碼雜湊。
+  // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的個人提醒設定。
   const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v12";
   const VOICE_AUDIO_CACHE_VERSION = "v12-chirp3-unlocked-audio";
   useEffect(() => {
@@ -441,44 +426,11 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    try {
-      // Remove obsolete client-side identity credentials from older releases.
-      window.localStorage.removeItem("shekinah_checkin_registry_v1");
-      window.localStorage.removeItem(LEGACY_CHECKIN_PROFILE_STORAGE_KEY);
-      const saved = window.localStorage.getItem(checkinProfileStorageKey);
-      if (!saved) return;
-
-      const parsed = JSON.parse(saved);
-      const phoneLast4 = String(parsed.phoneLast4 || "").trim();
-      if (!/^\d{4}$/.test(phoneLast4)) {
-        window.localStorage.removeItem(checkinProfileStorageKey);
-        return;
-      }
-
-      setCheckinProfile({
-        name: authDisplayName,
-        phoneLast4,
-        deviceRemembered: parsed.deviceRemembered === true
-      });
-      setPersonalSettings(prev => ({ ...prev, name: authDisplayName }));
-    } catch (err) {
-      console.error("讀取報到身分失敗:", err);
-    }
-  }, [authDisplayName, checkinProfileStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!checkinProfile.name || !checkinProfile.phoneLast4) return;
-
-    try {
-      window.localStorage.setItem(checkinProfileStorageKey, JSON.stringify({
-        phoneLast4: checkinProfile.phoneLast4,
-        deviceRemembered: checkinProfile.deviceRemembered
-      }));
-    } catch (err) {
-      console.error("儲存報到身分失敗:", err);
-    }
-  }, [checkinProfile, checkinProfileStorageKey]);
+    // 帳號登入現在就是報到身分；順便清除舊版本留在瀏覽器的本機身分資料。
+    window.localStorage.removeItem("shekinah_checkin_registry_v1");
+    window.localStorage.removeItem(LEGACY_CHECKIN_PROFILE_STORAGE_KEY);
+    window.localStorage.removeItem(`${CHECKIN_PROFILE_STORAGE_PREFIX}:${session.user.id}`);
+  }, [session.user.id]);
 
   const restorePersistentCheckin = useCallback(async () => {
     try {
@@ -2326,7 +2278,6 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [isVoiceEnabled, currentService]);
 
-  const hasCheckinProfile = Boolean(checkinProfile.name && checkinProfile.phoneLast4);
   const displayCheckinName = authDisplayName;
   const isCurrentUserAdmin = isAdmin;
   const canManageTimeline = isAdmin;
@@ -2429,113 +2380,6 @@ export default function App() {
     }
   };
 
-  const isValidPhoneLast4 = (value: string) => /^\d{4}$/.test(value.trim());
-
-  const clearCheckinIdentity = () => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(checkinProfileStorageKey);
-      window.localStorage.removeItem(LEGACY_CHECKIN_PROFILE_STORAGE_KEY);
-    }
-
-    setCheckinProfile({
-      name: "",
-      phoneLast4: "",
-      deviceRemembered: false
-    });
-    setCheckinForm({
-      phoneLast4: ""
-    });
-    setPhoneChangeForm({
-      newPhoneLast4: "",
-      confirmPhoneLast4: ""
-    });
-    setShowPhoneChange(false);
-    setWifiVerified(false);
-    setWifiChecking(false);
-    setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.unavailable);
-    setCheckinStatus("not_checked_in");
-    setCheckedInAt("");
-    setCheckedInDay(null);
-    setCheckedInService("");
-    setSelectedCheckInService("");
-    setEligibleCheckInOptions([]);
-    setConfirmedStation("");
-    setAssignedStation("");
-    setControlSelectedStation("");
-    setControlNote("");
-    setStationScannerOpen(false);
-    setStationManualCode("");
-    setStationScannerMessage("可掃描崗位名牌上的 QR Code，或手動輸入崗位碼內容。");
-    hasManuallySwitchedRef.current = false;
-    setPersonalSettings(prev => ({ ...prev, name: authDisplayName }));
-  };
-
-  const handleCreateCheckinProfile = () => {
-    const name = authDisplayName.trim();
-    const phoneLast4 = checkinForm.phoneLast4.trim();
-
-    if (!name) {
-      setCustomAlert({ isOpen: true, message: "請輸入姓名。" });
-      return;
-    }
-
-    if (!isValidPhoneLast4(phoneLast4)) {
-      setCustomAlert({ isOpen: true, message: "手機後四碼請輸入 4 位數字。" });
-      return;
-    }
-
-    setCheckinProfile({
-      name,
-      phoneLast4,
-      deviceRemembered: true
-    });
-    setPersonalSettings(prev => ({
-      ...prev,
-      name
-    }));
-    setCheckinForm({
-      phoneLast4: ""
-    });
-    setCustomAlert({ isOpen: true, message: "已建立服事身分。這台手機下次會自動記住您。" });
-  };
-
-  const handleChangePhoneLast4 = () => {
-    if (!checkinProfile.name || !checkinProfile.phoneLast4) {
-      setCustomAlert({ isOpen: true, message: "請先建立服事身分。" });
-      return;
-    }
-
-    const newPhoneLast4 = phoneChangeForm.newPhoneLast4.trim();
-    const confirmPhoneLast4 = phoneChangeForm.confirmPhoneLast4.trim();
-
-    if (!isValidPhoneLast4(newPhoneLast4) || !isValidPhoneLast4(confirmPhoneLast4)) {
-      setCustomAlert({ isOpen: true, message: "新的手機後四碼請輸入 4 位數字。" });
-      return;
-    }
-
-    if (newPhoneLast4 !== confirmPhoneLast4) {
-      setCustomAlert({ isOpen: true, message: "兩次輸入的新手機後四碼不一致。" });
-      return;
-    }
-
-    if (newPhoneLast4 === checkinProfile.phoneLast4) {
-      setCustomAlert({ isOpen: true, message: "新的手機後四碼與目前相同，不需要更換。" });
-      return;
-    }
-
-    setCheckinProfile(prev => ({
-      ...prev,
-      phoneLast4: newPhoneLast4,
-      deviceRemembered: true
-    }));
-    setPhoneChangeForm({
-      newPhoneLast4: "",
-      confirmPhoneLast4: ""
-    });
-    setShowPhoneChange(false);
-    setCustomAlert({ isOpen: true, message: "手機後四碼已更新完成。" });
-  };
-
   const checkWifiConnection = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     setWifiChecking(true);
 
@@ -2573,7 +2417,6 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab !== "checkin") return;
-    if (!hasCheckinProfile) return;
     if (checkinStatus !== "not_checked_in") return;
 
     void checkWifiConnection({ silent: true });
@@ -2607,15 +2450,10 @@ export default function App() {
       window.removeEventListener("offline", handleOffline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeTab, hasCheckinProfile, checkinStatus, checkWifiConnection]);
+  }, [activeTab, checkinStatus, checkWifiConnection]);
 
 
   const handleLocalCheckin = async () => {
-    if (!hasCheckinProfile) {
-      setCustomAlert({ isOpen: true, message: "請先建立服事身分，再進行報到。" });
-      return;
-    }
-
     if (!wifiVerified) {
       setCustomAlert({ isOpen: true, message: CHECK_IN_NETWORK_MESSAGES.unavailable });
       return;
@@ -3654,60 +3492,11 @@ export default function App() {
           <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">報到</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
             <Check className="w-4 h-4 text-[#6D55A3]" />
-            首頁｜建立身分、現場報到、等待分派
+            首頁｜確認堂次、現場報到、等待分派
           </p>
         </div>
 
-        {!hasCheckinProfile ? (
-          <div className="space-y-5">
-            <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5">
-              <div className="w-14 h-14 rounded-[22px] bg-[#F3EEFF] flex items-center justify-center mb-4">
-                <User className="w-7 h-7 text-[#6D55A3]" />
-              </div>
-              <h3 className="text-[18px] font-black text-[#1F2937] mb-2">第一次使用</h3>
-              <p className="text-sm font-black text-[#6D55A3] mb-2">今日堂次：待確認</p>
-              <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                請先確認您的服事身分。系統會依目前時間開放可報到堂次；若尚未排班，也可先完成現場報到。
-              </p>
-
-              <div className="space-y-3.5">
-                <div>
-                  <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">姓名</label>
-                  <input
-                    type="text"
-                    value={authDisplayName}
-                    readOnly
-                    className="w-full px-4 py-3 bg-[#E6EAF0]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-black text-[#7B7B74] mb-2 tracking-widest">手機後四碼</label>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={4}
-                    value={checkinForm.phoneLast4}
-                    onChange={e => setCheckinForm(prev => ({ ...prev, phoneLast4: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                    placeholder="例如：6820"
-                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleCreateCheckinProfile}
-                  className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
-                >
-                  建立服事身分
-                </button>
-              </div>
-            </div>
-
-          </div>
-        ) : (
-          <>
-            <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+        <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
@@ -3716,21 +3505,12 @@ export default function App() {
                     今日堂次：{todayService}{checkedInService ? "（已鎖定）" : ""}
                   </p>
                 </div>
-                <div className="flex flex-col items-end gap-2 shrink-0">
-                  <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${
-                    isCheckedIn
-                      ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
-                      : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
-                  }`}>
-                    {isCheckedIn ? "已報到" : "尚未報到"}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={clearCheckinIdentity}
-                    className="text-[11px] font-black text-[#7B7B74] hover:text-[#F25D6B] transition-colors whitespace-nowrap"
-                  >
-                    不是我？重新輸入
-                  </button>
+                <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border shrink-0 ${
+                  isCheckedIn
+                    ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
+                    : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
+                }`}>
+                  {isCheckedIn ? "已報到" : "尚未報到"}
                 </div>
               </div>
 
@@ -3928,8 +3708,6 @@ export default function App() {
               </div>
             ) : null}
 
-          </>
-        )}
       </div>
     );
   };
@@ -4791,54 +4569,6 @@ export default function App() {
               {personalSettings.voiceDetailLevel === "detailed" && "詳細：會加上任務提示與前三項確認清單，適合任務不多的崗位。"}
             </div>
           </div>
-
-          {hasCheckinProfile && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowPhoneChange(prev => !prev)}
-                className="w-full p-4 rounded-[18px] bg-[#FFF9F3] border border-[#E6EAF0] text-left hover:bg-[#F3EEFF]/50 transition-colors"
-              >
-                <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">報到身分</div>
-                <div className="text-sm font-black text-[#1F2937]">更換手機後四碼</div>
-                <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
-                  目前綁定：{checkinProfile.name}｜後四碼 {checkinProfile.phoneLast4}
-                </div>
-              </button>
-
-              {showPhoneChange && (
-                <div className="mt-3 p-4 rounded-[18px] bg-white border border-[#E6EAF0] space-y-3">
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={4}
-                    value={phoneChangeForm.newPhoneLast4}
-                    onChange={e => setPhoneChangeForm(prev => ({ ...prev, newPhoneLast4: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                    placeholder="新的手機後四碼"
-                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-                  />
-
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={4}
-                    value={phoneChangeForm.confirmPhoneLast4}
-                    onChange={e => setPhoneChangeForm(prev => ({ ...prev, confirmPhoneLast4: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
-                    placeholder="再次輸入新的手機後四碼"
-                    className="w-full px-4 py-3 bg-[#F3EEFF]/50 border border-[#E6EAF0] rounded-[16px] text-sm font-bold text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#6D55A3]/30"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={handleChangePhoneLast4}
-                    className="w-full py-3.5 bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 font-black rounded-[18px] hover:bg-[#EDE6FF] transition-colors"
-                  >
-                    確認更換
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
 
           <p className="text-center text-[11px] font-bold text-[#00B8B8]">
             設定已自動儲存在這台裝置
