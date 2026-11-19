@@ -52,6 +52,11 @@ type CallRow = {
   created_at: string;
 };
 
+type IceServerResponse = {
+  iceServers?: RTCIceServer[];
+  relayAvailable?: boolean;
+};
+
 type CallSignal = {
   id: number;
   call_id: string;
@@ -301,6 +306,19 @@ export function CommunicationHub() {
     }
   }, [processSignal, requestJson]);
 
+  const loadIceServers = useCallback(async (): Promise<RTCIceServer[]> => {
+    try {
+      const data = await requestJson("/api/communications/ice-servers") as IceServerResponse;
+      if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+        return data.iceServers;
+      }
+    } catch {
+      // Keep calling available even when the TURN credential service is unavailable.
+    }
+
+    return [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+  }, [requestJson]);
+
   const setupPeerConnection = useCallback(async (call: CallRow, caller: boolean) => {
     cleanupPeerConnection();
     isCallerRef.current = caller;
@@ -311,10 +329,14 @@ export function CommunicationHub() {
       throw new Error("此瀏覽器不支援 App 內語音通話。");
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const [stream, iceServers] = await Promise.all([
+      navigator.mediaDevices.getUserMedia({ audio: true, video: false }),
+      loadIceServers(),
+    ]);
     localStreamRef.current = stream;
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers,
+      iceTransportPolicy: "all",
     });
     peerConnectionRef.current = pc;
     activeCallRef.current = call;
@@ -362,7 +384,7 @@ export function CommunicationHub() {
     } else {
       await loadCallSignals(call.id);
     }
-  }, [cleanupPeerConnection, loadCallSignals, requestJson, sendSignal]);
+  }, [cleanupPeerConnection, loadCallSignals, loadIceServers, requestJson, sendSignal]);
 
   const loadActiveCalls = useCallback(async () => {
     if (!canUse) return;
