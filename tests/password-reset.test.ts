@@ -5,6 +5,8 @@ import {
   isValidResetPassword,
   PASSWORD_RESET_COMPLETED_EVENT,
   PASSWORD_RESET_REQUESTED_EVENT,
+  requiresPasswordChange,
+  withPasswordChangeRequired,
 } from "../lib/auth/password-reset.ts";
 
 test("latest reset request remains pending until completed", () => {
@@ -54,4 +56,21 @@ test("password reset length matches app rule", () => {
   assert.equal(isValidResetPassword("12345678"), true);
   assert.equal(isValidResetPassword("x".repeat(72)), true);
   assert.equal(isValidResetPassword("x".repeat(73)), false);
+});
+
+test("temporary password flag is read only from app metadata", () => {
+  assert.equal(requiresPasswordChange(null), false);
+  assert.equal(requiresPasswordChange({ must_change_password: false }), false);
+  assert.equal(requiresPasswordChange({ must_change_password: true }), true);
+});
+
+test("temporary password flag preserves other app metadata", () => {
+  assert.deepEqual(
+    withPasswordChangeRequired({ provider: "email", plan: "trial" }, true),
+    { provider: "email", plan: "trial", must_change_password: true }
+  );
+  assert.deepEqual(
+    withPasswordChangeRequired({ provider: "email", must_change_password: true }, false),
+    { provider: "email", must_change_password: false }
+  );
 });
