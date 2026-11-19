@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
         relayAvailable: false,
         source: "stun-cost-guard",
         relayReason: usageGuard.reason,
+        costGuardDiagnostic: usageGuard.diagnostic,
         turnUsagePercent: usageGuard.usagePercent,
         turnUsageGb: usageGuard.egressGb,
         turnLimitPercent: TURN_BLOCK_PERCENT,
