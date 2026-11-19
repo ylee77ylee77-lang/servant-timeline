@@ -247,7 +247,7 @@ export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
                 <div>
                   <div className="text-sm font-black text-[#1F2937]">不用照片建立</div>
                   <div className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-                    直接選男生或女生基礎角色，再調整髮型、髮色、眼睛、配件與寵物。
+                    選男生或女生，再調整眼鏡、背景與陪伴動物；其他 3D 特徵逐步開放。
                   </div>
                 </div>
               </div>
@@ -295,7 +295,7 @@ export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
             <div>
               <h3 className="text-lg font-black text-[#1F2937]">特徵微調</h3>
               <p className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-                寵物是選填；第一階段提供狗、貓、鳥。
+                陪伴動物選填：綿羊、母鹿、獅子、老鷹。
               </p>
             </div>
             <button

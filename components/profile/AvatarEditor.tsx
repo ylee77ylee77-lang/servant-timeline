@@ -23,9 +23,10 @@ const backgroundOptions: Array<{ value: AvatarConfig["background"]; label: strin
 
 const petOptions: Array<{ value: AvatarConfig["pet"]; label: string }> = [
   { value: "none", label: "無" },
-  { value: "dog", label: "狗" },
-  { value: "cat", label: "貓" },
-  { value: "bird", label: "鳥" },
+  { value: "sheep", label: "綿羊" },
+  { value: "doe", label: "母鹿" },
+  { value: "lion", label: "獅子" },
+  { value: "eagle", label: "老鷹" },
 ];
 
 export function AvatarEditor({
@@ -55,7 +56,7 @@ export function AvatarEditor({
         <div className="min-w-0">
           <div className="text-base font-black text-[#1F2937]">即時預覽</div>
           <div className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-            使用你已確認的 3D 角色視覺；人物是主體，寵物只作陪襯。
+            3D 角色保持原樣；陪伴動物會靠在圓形白框邊緣，不遮住人物五官。
           </div>
         </div>
       </div>
@@ -115,11 +116,11 @@ export function AvatarEditor({
       </section>
 
       <section>
-        <div className="mb-1 text-xs font-black tracking-widest text-[#7B7B74]">寵物（選填）</div>
+        <div className="mb-1 text-xs font-black tracking-widest text-[#7B7B74]">陪伴動物（選填）</div>
         <p className="mb-3 text-[11px] font-medium leading-5 text-[#7B7B74]">
-          第一階段提供狗、貓、鳥；預設不選。
+          可選綿羊、母鹿、獅子、老鷹；動物會依附在大頭貼圓框上，預設不選。
         </p>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
           {petOptions.map((option) => {
             const selected = avatar.pet === option.value;
             return (

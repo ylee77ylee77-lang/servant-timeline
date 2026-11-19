@@ -33,7 +33,7 @@ test("avatar normalization preserves valid masculine and feminine choices", () =
       eyeStyle: "bright",
       glasses: true,
       accessory: "cap",
-      pet: "dog",
+      pet: "eagle",
     }),
     {
       style: "masculine",
@@ -54,12 +54,12 @@ test("avatar normalization preserves valid masculine and feminine choices", () =
     hair: "long",
     hairColor: "auburn",
     accessory: "earrings",
-    pet: "bird",
+    pet: "doe",
   });
   assert.equal(feminine.style, "feminine");
   assert.equal(feminine.hairColor, "auburn");
   assert.equal(feminine.accessory, "earrings");
-  assert.equal(feminine.pet, "bird");
+  assert.equal(feminine.pet, "doe");
 });
 
 test("old avatar JSON gains safe defaults for newly added fields", () => {
@@ -111,5 +111,26 @@ test("avatar normalization rejects unknown values without storing arbitrary data
 test("personalization detects either a chosen base role or optional pet", () => {
   assert.equal(isAvatarPersonalized(getDefaultAvatarConfig()), false);
   assert.equal(isAvatarPersonalized(getDefaultAvatarConfig("masculine")), true);
-  assert.equal(isAvatarPersonalized({ ...getDefaultAvatarConfig(), pet: "cat" }), true);
+  assert.equal(isAvatarPersonalized({ ...getDefaultAvatarConfig(), pet: "sheep" }), true);
+});
+
+
+test("the four companion animals are accepted and legacy pets are safely ignored", () => {
+  for (const pet of ["sheep", "doe", "lion", "eagle"]) {
+    assert.equal(normalizeAvatarConfig({ style: "feminine", pet }).pet, pet);
+  }
+  for (const oldPet of ["dog", "cat", "bird"]) {
+    assert.equal(normalizeAvatarConfig({ pet: oldPet }).pet, "none");
+  }
+});
+
+test("changing the background does not change avatar identity or companion", () => {
+  const initial = normalizeAvatarConfig({
+    style: "feminine", glasses: true, pet: "eagle", background: "lavender",
+  });
+  const updated = normalizeAvatarConfig({ ...initial, background: "mint" });
+  assert.equal(updated.style, "feminine");
+  assert.equal(updated.glasses, true);
+  assert.equal(updated.pet, "eagle");
+  assert.equal(updated.background, "mint");
 });

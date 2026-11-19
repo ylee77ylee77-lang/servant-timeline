@@ -6,7 +6,7 @@ export type AvatarOutfit = "shirt" | "polo" | "knit" | "jacket";
 export type AvatarBackground = "lavender" | "peach" | "mint" | "sky" | "sand";
 export type AvatarEyeStyle = "soft" | "bright" | "smile";
 export type AvatarAccessory = "none" | "earrings" | "hairclip" | "cap";
-export type AvatarPet = "none" | "dog" | "cat" | "bird";
+export type AvatarPet = "none" | "sheep" | "doe" | "lion" | "eagle";
 
 export type AvatarConfig = {
   style: AvatarStyle;
@@ -68,7 +68,7 @@ const outfits = new Set<AvatarOutfit>(["shirt", "polo", "knit", "jacket"]);
 const backgrounds = new Set<AvatarBackground>(["lavender", "peach", "mint", "sky", "sand"]);
 const eyeStyles = new Set<AvatarEyeStyle>(["soft", "bright", "smile"]);
 const accessories = new Set<AvatarAccessory>(["none", "earrings", "hairclip", "cap"]);
-const pets = new Set<AvatarPet>(["none", "dog", "cat", "bird"]);
+const pets = new Set<AvatarPet>(["none", "sheep", "doe", "lion", "eagle"]);
 
 export function getDefaultAvatarConfig(style: AvatarStyle = "neutral"): AvatarConfig {
   return { ...AVATAR_DEFAULTS[style] };
