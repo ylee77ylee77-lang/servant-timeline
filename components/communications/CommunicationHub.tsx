@@ -262,7 +262,7 @@ export function CommunicationHub() {
     processedSignalsRef.current.add(Number(signal.id));
 
     if (signal.signal_type === "offer" && !isCallerRef.current) {
-      await pc.setRemoteDescription(signal.payload as RTCSessionDescriptionInit);
+      await pc.setRemoteDescription(signal.payload as unknown as RTCSessionDescriptionInit);
       await flushPendingIce();
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -274,13 +274,13 @@ export function CommunicationHub() {
     }
 
     if (signal.signal_type === "answer" && isCallerRef.current) {
-      await pc.setRemoteDescription(signal.payload as RTCSessionDescriptionInit);
+      await pc.setRemoteDescription(signal.payload as unknown as RTCSessionDescriptionInit);
       await flushPendingIce();
       return;
     }
 
     if (signal.signal_type === "ice") {
-      const candidate = signal.payload as RTCIceCandidateInit;
+      const candidate = signal.payload as unknown as RTCIceCandidateInit;
       if (pc.remoteDescription) {
         await pc.addIceCandidate(candidate).catch(() => undefined);
       } else {
