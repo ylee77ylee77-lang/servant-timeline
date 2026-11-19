@@ -193,6 +193,7 @@ export function CommunicationHub() {
   const activeCallRef = useRef<CallRow | null>(null);
   const isCallerRef = useRef(false);
   const processedSignalsRef = useRef(new Set<number>());
+  const processedMessageInsertIdsRef = useRef(new Set<string>());
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
   const ringTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -283,6 +284,14 @@ export function CommunicationHub() {
 
     const peerId = senderId === currentUserId ? recipientId : senderId;
     if (!peerId) return;
+
+    if (eventType === "INSERT") {
+      if (processedMessageInsertIdsRef.current.has(messageId)) return;
+      if (processedMessageInsertIdsRef.current.size >= 500) {
+        processedMessageInsertIdsRef.current.clear();
+      }
+      processedMessageInsertIdsRef.current.add(messageId);
+    }
 
     const isSelectedConversation = selectedPeerId === peerId;
     if (isSelectedConversation) {
@@ -564,19 +573,6 @@ export function CommunicationHub() {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
-          schema: "public",
-          table: "communication_messages",
-          filter: `sender_id=eq.${userId}`,
-        },
-        (payload) => handleRealtimeMessage(
-          payload.new as Record<string, unknown>,
-          "INSERT"
-        )
-      )
-      .on(
-        "postgres_changes",
-        {
           event: "UPDATE",
           schema: "public",
           table: "communication_messages",
@@ -627,6 +623,41 @@ export function CommunicationHub() {
       void supabase.removeChannel(channel);
     };
   }, [canUse, handleRealtimeMessage, loadActiveCalls, session.user.id]);
+
+  useEffect(() => {
+    if (!canUse) return;
+
+    const supabase = getSupabaseBrowserClient();
+    let disposed = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    void requestJson("/api/communications/broadcast-topic")
+      .then((data) => {
+        if (disposed || typeof data?.topic !== "string" || !data.topic) return;
+
+        channel = supabase
+          .channel(data.topic)
+          .on(
+            "broadcast",
+            { event: "message-insert" },
+            (event) => {
+              const row = (
+                event && typeof event === "object" && "payload" in event
+                  ? event.payload
+                  : event
+              ) as Record<string, unknown>;
+              handleRealtimeMessage(row, "INSERT");
+            }
+          )
+          .subscribe();
+      })
+      .catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [canUse, handleRealtimeMessage, requestJson]);
 
   const signalCallId = activeCall?.id ?? "";
 
