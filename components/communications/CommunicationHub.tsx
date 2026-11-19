@@ -346,7 +346,7 @@ export function CommunicationHub() {
 
       ringTimeoutRef.current = setTimeout(() => {
         const current = activeCallRef.current;
-        if (current?.id === call.id && callState !== "connected") {
+        if (current?.id === call.id && peerConnectionRef.current?.connectionState !== "connected") {
           void requestJson("/api/communications/calls", {
             method: "POST",
             body: JSON.stringify({ action: "end", callId: call.id }),
@@ -357,7 +357,7 @@ export function CommunicationHub() {
     } else {
       await loadCallSignals(call.id);
     }
-  }, [callState, cleanupPeerConnection, loadCallSignals, requestJson, sendSignal]);
+  }, [cleanupPeerConnection, loadCallSignals, requestJson, sendSignal]);
 
   const loadActiveCalls = useCallback(async () => {
     if (!canUse) return;
@@ -689,6 +689,8 @@ export function CommunicationHub() {
                                 <div className="whitespace-pre-wrap break-words">{renderLinkedText(message.body)}</div>
                               ) : message.messageType === "image" ? (
                                 <a href={message.attachmentUrl} target="_blank" rel="noreferrer noopener" className="block">
+                                  {/* Signed attachment URLs are dynamic and intentionally rendered without Next Image optimization. */}
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={message.attachmentUrl} alt={message.attachmentName || "聊天圖片"} className="max-h-52 rounded-xl object-contain" />
                                   <div className="mt-1 break-all text-[11px] font-bold">{message.attachmentName}</div>
                                 </a>
