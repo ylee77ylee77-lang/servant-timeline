@@ -43,3 +43,9 @@ There is **no schema migration**: the renderer reads existing `profiles.avatar_c
 through `normalizeAvatarConfig`, and legacy dog/cat/bird entries fall back safely to none.
 The Supabase API, RLS and authorization remain unchanged. Keep PR #23 in Draft until
 mobile visual acceptance; do not merge directly to production `main`.
+## Unconfigured accounts
+
+The existing `neutral` value is a not-yet-selected status. The renderer displays
+a neutral inline placeholder rather than assigning a male or female 3D portrait
+until the volunteer explicitly chooses a base character. This adds no image files
+and requires no database migration.

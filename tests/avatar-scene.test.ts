@@ -61,7 +61,9 @@ test("background and glasses change without replacing companion artwork", () => 
 
 test("old avatar values preserve established safe fallbacks", () => {
   assert.equal(getAvatarScene({ pet: "dog" }).companion, null);
-  assert.equal(getAvatarScene({ style: "neutral" }).portrait, AVATAR_PORTRAITS.masculine.plain);
+  assert.equal(getAvatarScene({ style: "neutral" }).portrait, null);
+  assert.equal(getAvatarScene({}).portrait, null);
+  assert.equal(getAvatarScene({ style: "neutral", glasses: true }).portrait, null);
 });
 
 

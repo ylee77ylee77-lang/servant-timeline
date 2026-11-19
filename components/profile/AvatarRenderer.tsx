@@ -29,7 +29,7 @@ export function AvatarRenderer({
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
-  const label = `3D 頭像${companion ? `，陪伴動物：${companion.name}` : ""}`;
+  const label = `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，陪伴動物：${companion.name}` : ""}`;
 
   return (
     <svg
@@ -58,7 +58,14 @@ export function AvatarRenderer({
 
       <g clipPath={`url(#${clipId})`}>
         {/* 2. Portrait and 3. animal head/upper body stay inside the frame. */}
-        <image href={portrait} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
+        {portrait ? (
+          <image href={portrait} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
+        ) : (
+          <g aria-hidden="true" fill="#FFFFFF" opacity="0.72">
+            <circle cx="256" cy="205" r="81" />
+            <path d="M98 485 C103 370 165 333 256 333 C347 333 409 370 414 485 Z" />
+          </g>
+        )}
         {companion && (
           <image href={companion.behind} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
         )}

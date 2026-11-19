@@ -63,13 +63,13 @@ export const AVATAR_BACKGROUNDS: Record<AvatarConfig["background"], AvatarGradie
 
 export function getAvatarScene(input: unknown) {
   const avatar = normalizeAvatarConfig(input);
-  // Existing neutral profiles retain their historical fallback appearance.
-  const base = avatar.style === "feminine" ? "feminine" : "masculine";
-  const portraits = AVATAR_PORTRAITS[base];
+  // Neutral means the user has not selected a base portrait.
+  const base = avatar.style === "neutral" ? null : avatar.style;
+  const portraits = base ? AVATAR_PORTRAITS[base] : null;
   const companion = avatar.pet === "none" ? null : AVATAR_COMPANIONS[avatar.pet];
   return {
     avatar,
-    portrait: avatar.glasses ? portraits.glasses : portraits.plain,
+    portrait: portraits ? (avatar.glasses ? portraits.glasses : portraits.plain) : null,
     companion,
     gradient: AVATAR_BACKGROUNDS[avatar.background],
   };
