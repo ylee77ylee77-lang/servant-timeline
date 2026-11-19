@@ -9,7 +9,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const GENERIC_MESSAGE = "如果帳號存在且可使用，管理員會在帳號管理頁看到密碼重設申請。";
+const GENERIC_MESSAGE = "密碼重設申請已送出。如果帳號存在且可使用，管理員會處理申請並提供臨時密碼。";
 
 export async function POST(request: NextRequest) {
   try {

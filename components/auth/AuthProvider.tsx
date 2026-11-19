@@ -12,10 +12,11 @@ import {
   type ReactNode,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { LogIn, LogOut, Loader2 } from "lucide-react";
+import { Eye, EyeOff, KeyRound, LogIn, LogOut, Loader2 } from "lucide-react";
 import { accountCodeToInternalEmail, normalizeAccountCode } from "@/lib/auth/account-code";
 import { getPublicSupabaseConfig } from "@/lib/supabase/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { requiresPasswordChange } from "@/lib/auth/password-reset";
 
 export type AppRole = "volunteer" | "coordinator" | "admin";
 
@@ -47,6 +48,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [loginCode, setLoginCode] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [loginNotice, setLoginNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [passwordResetMessage, setPasswordResetMessage] = useState("");
@@ -59,6 +61,17 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [registrationMessage, setRegistrationMessage] = useState("");
   const [registrationIsError, setRegistrationIsError] = useState(false);
   const [isRegistrationSubmitting, setIsRegistrationSubmitting] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegistrationPassword, setShowRegistrationPassword] = useState(false);
+  const [showRegistrationPasswordConfirm, setShowRegistrationPasswordConfirm] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [forcedPassword, setForcedPassword] = useState("");
+  const [forcedPasswordConfirm, setForcedPasswordConfirm] = useState("");
+  const [showForcedPassword, setShowForcedPassword] = useState(false);
+  const [showForcedPasswordConfirm, setShowForcedPasswordConfirm] = useState(false);
+  const [forcedPasswordMessage, setForcedPasswordMessage] = useState("");
+  const [forcedPasswordIsError, setForcedPasswordIsError] = useState(false);
+  const [isForcedPasswordSubmitting, setIsForcedPasswordSubmitting] = useState(false);
   const authorizedUserIdRef = useRef<string | null>(null);
   const authorizationRequestRef = useRef(0);
   const publicConfig = getPublicSupabaseConfig();
@@ -75,6 +88,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setAccountCode("");
       setRoles([]);
       setIsActive(false);
+      setMustChangePassword(false);
       setErrorMessage("");
       setIsLoading(false);
       return;
@@ -82,6 +96,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
     const isSameAuthorizedUser = authorizedUserIdRef.current === nextSession.user.id;
     setSession(nextSession);
+    setMustChangePassword(requiresPasswordChange(nextSession.user.app_metadata));
 
     // Keep an already-authorized user's UI mounted while Supabase refreshes the
     // session token. Clear stale authorization only when the signed-in user
@@ -161,6 +176,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
           && authorizedUserIdRef.current === nextSession.user.id
         ) {
           setSession(nextSession);
+          setMustChangePassword(requiresPasswordChange(nextSession.user.app_metadata));
           return;
         }
 
@@ -177,6 +193,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const handleLogin = async (event: FormEvent) => {
     event.preventDefault();
     setErrorMessage("");
+    setLoginNotice("");
     setIsSubmitting(true);
 
     try {
@@ -217,7 +234,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
       setLoginCode(normalizedCode);
       setPasswordResetMessage(
-        data?.message || "密碼重設申請已送出，請聯絡管理員協助設定新密碼。"
+        data?.message || "密碼重設申請已送出。待管理員提供臨時密碼後，請用臨時密碼登入並設定自己的新密碼。"
       );
     } catch (error) {
       setPasswordResetMessage(
@@ -272,6 +289,49 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const handleForcedPasswordChange = async (event: FormEvent) => {
+    event.preventDefault();
+    setForcedPasswordMessage("");
+    setForcedPasswordIsError(false);
+
+    if (forcedPassword !== forcedPasswordConfirm) {
+      setForcedPasswordIsError(true);
+      setForcedPasswordMessage("兩次輸入的密碼不一致。");
+      return;
+    }
+
+    setIsForcedPasswordSubmitting(true);
+    try {
+      if (!session?.access_token) throw new Error("登入階段已失效，請重新登入。");
+
+      const response = await fetch("/api/password-change", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password: forcedPassword }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "更新密碼失敗，請稍後再試。");
+
+      setForcedPassword("");
+      setForcedPasswordConfirm("");
+      setForcedPasswordMessage("");
+      setMustChangePassword(false);
+      setLoginCode(accountCode);
+      setLoginNotice("密碼已更新，請使用新密碼重新登入。");
+      await getSupabaseBrowserClient().auth.signOut();
+    } catch (error) {
+      setForcedPasswordIsError(true);
+      setForcedPasswordMessage(
+        error instanceof Error ? error.message : "更新密碼失敗，請稍後再試。"
+      );
+    } finally {
+      setIsForcedPasswordSubmitting(false);
+    }
+  };
+
   const signOut = useCallback(async () => {
     await getSupabaseBrowserClient().auth.signOut();
   }, []);
@@ -311,6 +371,65 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  if (session && isActive && mustChangePassword) {
+    return (
+      <main className="min-h-screen bg-[#FFF9F3] px-5 py-10 flex items-center justify-center">
+        <form onSubmit={handleForcedPasswordChange} className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
+          <div className="mb-7">
+            <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
+            <h1 className="mt-2 text-2xl font-black text-[#1F2937]">設定新密碼</h1>
+            <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
+              您目前使用的是管理員提供的臨時密碼。請先設定自己的新密碼，再進入系統。
+            </p>
+          </div>
+
+          <PasswordInput
+            id="forced-password"
+            label="新密碼（至少 8 位字元）"
+            value={forcedPassword}
+            onChange={setForcedPassword}
+            visible={showForcedPassword}
+            onToggle={() => setShowForcedPassword((value) => !value)}
+            autoComplete="new-password"
+          />
+          <PasswordInput
+            id="forced-password-confirm"
+            label="再次輸入新密碼"
+            value={forcedPasswordConfirm}
+            onChange={setForcedPasswordConfirm}
+            visible={showForcedPasswordConfirm}
+            onToggle={() => setShowForcedPasswordConfirm((value) => !value)}
+            autoComplete="new-password"
+            className="mt-5"
+          />
+
+          {forcedPasswordMessage && (
+            <p role="status" className={`mt-4 text-sm font-bold leading-6 ${forcedPasswordIsError ? "text-[#D73A49]" : "text-[#008A7A]"}`}>
+              {forcedPasswordMessage}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={isForcedPasswordSubmitting}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
+          >
+            {isForcedPasswordSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <KeyRound className="h-5 w-5" />}
+            {isForcedPasswordSubmitting ? "更新中" : "設定新密碼"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="mt-4 w-full text-center text-sm font-black text-[#7B7B74]"
+          >
+            登出
+          </button>
+        </form>
+      </main>
+    );
+  }
+
   if (!session || !contextValue) {
     return (
       <main className="min-h-screen bg-[#FFF9F3] px-5 py-10 flex items-center justify-center">
@@ -318,13 +437,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
           <form onSubmit={handleRegistration} className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
             <div className="mb-7">
               <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
-              <h1 className="mt-2 text-2xl font-black text-[#1F2937]">總招試用註冊</h1>
+              <h1 className="mt-2 text-2xl font-black text-[#1F2937]">註冊新帳號</h1>
               <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
-                建立自己的服事帳號。註冊後需由管理員啟用，啟用前不會取得總招權限。
+                建立自己的服事帳號。註冊完成後需由管理員啟用，啟用後即可登入使用。
               </p>
             </div>
 
-            <label htmlFor="registration-name" className="text-sm font-black text-[#1F2937]">姓名</label>
+            <label htmlFor="registration-name" className="text-sm font-black text-[#1F2937]">姓名（中文全名）</label>
             <input
               id="registration-name"
               autoComplete="name"
@@ -346,30 +465,25 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               required
             />
 
-            <label htmlFor="registration-password" className="mt-5 block text-sm font-black text-[#1F2937]">密碼</label>
-            <input
+            <PasswordInput
               id="registration-password"
-              type="password"
-              autoComplete="new-password"
-              minLength={8}
-              maxLength={72}
+              label="密碼（至少 8 位字元）"
               value={registrationPassword}
-              onChange={(event) => setRegistrationPassword(event.target.value)}
-              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
-              required
-            />
-
-            <label htmlFor="registration-password-confirm" className="mt-5 block text-sm font-black text-[#1F2937]">再次輸入密碼</label>
-            <input
-              id="registration-password-confirm"
-              type="password"
+              onChange={setRegistrationPassword}
+              visible={showRegistrationPassword}
+              onToggle={() => setShowRegistrationPassword((value) => !value)}
               autoComplete="new-password"
-              minLength={8}
-              maxLength={72}
+              className="mt-5"
+            />
+            <PasswordInput
+              id="registration-password-confirm"
+              label="再次輸入密碼"
               value={registrationPasswordConfirm}
-              onChange={(event) => setRegistrationPasswordConfirm(event.target.value)}
-              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
-              required
+              onChange={setRegistrationPasswordConfirm}
+              visible={showRegistrationPasswordConfirm}
+              onToggle={() => setShowRegistrationPasswordConfirm((value) => !value)}
+              autoComplete="new-password"
+              className="mt-5"
             />
 
             {registrationMessage && (
@@ -384,7 +498,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
             >
               {isRegistrationSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-              {isRegistrationSubmitting ? "註冊中" : "建立試用帳號"}
+              {isRegistrationSubmitting ? "註冊中" : "建立帳號"}
             </button>
 
             <button
@@ -399,99 +513,130 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               返回登入
             </button>
           </form>
-        ) : (
-        <form onSubmit={handleLogin} className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
-          <div className="mb-7">
-            <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
-            <h1 className="mt-2 text-2xl font-black text-[#1F2937]">同工登入</h1>
-            <p className="mt-2 text-sm font-medium text-[#7B7B74]">使用管理員提供的服事帳號與密碼，不需要電子郵件。</p>
-          </div>
-
-          <label htmlFor="account-code" className="text-sm font-black text-[#1F2937]">服事帳號</label>
-          <input
-            id="account-code"
-            autoCapitalize="none"
-            autoComplete="username"
-            value={loginCode}
-            onChange={(event) => setLoginCode(event.target.value)}
-            className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
-            required
-          />
-
-          <label htmlFor="password" className="mt-5 block text-sm font-black text-[#1F2937]">密碼</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            minLength={8}
-            maxLength={72}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
-            required
-          />
-
-          {errorMessage && <p role="alert" className="mt-4 text-sm font-bold text-[#D73A49]">{errorMessage}</p>}
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
-          >
-            {isSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
-            {isSubmitting ? "登入中" : "登入"}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setShowPasswordReset((value) => !value);
-              setPasswordResetMessage("");
+        ) : showPasswordReset ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handlePasswordResetRequest();
             }}
-            className="mt-4 w-full text-center text-sm font-black text-[#6D55A3]"
+            className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10"
           >
-            {showPasswordReset ? "返回登入" : "忘記密碼？"}
-          </button>
-
-          {showPasswordReset && (
-            <div className="mt-4 rounded-2xl border border-[#6D55A3]/15 bg-[#F3EEFF]/60 p-4">
-              <p className="text-sm font-bold leading-6 text-[#55516A]">
-                先在上方輸入你的服事帳號，再送出申請。系統不會顯示帳號是否存在；管理員會在帳號管理頁處理重設。
+            <div className="mb-7">
+              <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
+              <h1 className="mt-2 text-2xl font-black text-[#1F2937]">密碼重設申請</h1>
+              <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
+                請輸入您的服事帳號並送出申請。待管理員完成重設並將臨時密碼提供給您後，請用臨時密碼登入，再設定自己的新密碼。
               </p>
-              {passwordResetMessage && (
-                <p role="status" className="mt-3 text-sm font-bold leading-6 text-[#008A7A]">
-                  {passwordResetMessage}
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={() => void handlePasswordResetRequest()}
-                disabled={isPasswordResetSubmitting}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#6D55A3]/20 bg-white px-5 py-3 font-black text-[#6D55A3] disabled:opacity-60"
-              >
-                {isPasswordResetSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isPasswordResetSubmitting ? "送出中" : "送出密碼重設申請"}
-              </button>
             </div>
-          )}
 
-          <div className="mt-5 border-t border-[#E6EAF0] pt-5">
-            <p className="text-center text-xs font-bold text-[#7B7B74]">第一次參加總招試用？</p>
+            <label htmlFor="reset-account-code" className="text-sm font-black text-[#1F2937]">服事帳號</label>
+            <input
+              id="reset-account-code"
+              autoCapitalize="none"
+              autoComplete="username"
+              value={loginCode}
+              onChange={(event) => setLoginCode(event.target.value)}
+              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
+              required
+            />
+
+            {passwordResetMessage && (
+              <p role="status" className="mt-4 text-sm font-bold leading-6 text-[#008A7A]">
+                {passwordResetMessage}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={isPasswordResetSubmitting}
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
+            >
+              {isPasswordResetSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <KeyRound className="h-5 w-5" />}
+              {isPasswordResetSubmitting ? "送出中" : "送出密碼重設申請"}
+            </button>
+
             <button
               type="button"
               onClick={() => {
                 setShowPasswordReset(false);
                 setPasswordResetMessage("");
-                setShowRegistration(true);
-                setRegistrationMessage("");
-                setRegistrationIsError(false);
               }}
-              className="mt-2 w-full rounded-2xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-5 py-3 font-black text-[#6D55A3]"
+              className="mt-4 w-full text-center text-sm font-black text-[#6D55A3]"
             >
-              自行註冊試用帳號
+              返回登入
             </button>
-          </div>
-        </form>
+          </form>
+        ) : (
+          <form onSubmit={handleLogin} className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
+            <div className="mb-7">
+              <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
+              <h1 className="mt-2 text-2xl font-black text-[#1F2937]">同工登入</h1>
+              <p className="mt-2 text-sm font-medium text-[#7B7B74]">請使用您的服事帳號與密碼登入。</p>
+            </div>
+
+            <label htmlFor="account-code" className="text-sm font-black text-[#1F2937]">服事帳號</label>
+            <input
+              id="account-code"
+              autoCapitalize="none"
+              autoComplete="username"
+              value={loginCode}
+              onChange={(event) => setLoginCode(event.target.value)}
+              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
+              required
+            />
+
+            <PasswordInput
+              id="password"
+              label="密碼（至少 8 位字元）"
+              value={password}
+              onChange={setPassword}
+              visible={showLoginPassword}
+              onToggle={() => setShowLoginPassword((value) => !value)}
+              autoComplete="current-password"
+              className="mt-5"
+            />
+
+            {loginNotice && <p role="status" className="mt-4 text-sm font-bold text-[#008A7A]">{loginNotice}</p>}
+            {errorMessage && <p role="alert" className="mt-4 text-sm font-bold text-[#D73A49]">{errorMessage}</p>}
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
+            >
+              {isSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
+              {isSubmitting ? "登入中" : "登入"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowPasswordReset(true);
+                setPasswordResetMessage("");
+                setErrorMessage("");
+              }}
+              className="mt-4 w-full text-center text-sm font-black text-[#6D55A3]"
+            >
+              忘記密碼？
+            </button>
+
+            <div className="mt-5 border-t border-[#E6EAF0] pt-5">
+              <p className="text-center text-xs font-bold text-[#7B7B74]">還沒有帳號？</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPasswordReset(false);
+                  setPasswordResetMessage("");
+                  setShowRegistration(true);
+                  setRegistrationMessage("");
+                  setRegistrationIsError(false);
+                }}
+                className="mt-2 w-full rounded-2xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-5 py-3 font-black text-[#6D55A3]"
+              >
+                註冊新帳號
+              </button>
+            </div>
+          </form>
         )}
       </main>
     );
@@ -512,6 +657,53 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         </button>
       </div>
     </AuthContext.Provider>
+  );
+}
+
+function PasswordInput({
+  id,
+  label,
+  value,
+  onChange,
+  visible,
+  onToggle,
+  autoComplete,
+  className = "",
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  visible: boolean;
+  onToggle: () => void;
+  autoComplete: string;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <label htmlFor={id} className="block text-sm font-black text-[#1F2937]">{label}</label>
+      <div className="relative mt-2">
+        <input
+          id={id}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          minLength={8}
+          maxLength={72}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 pr-12 outline-none focus:border-[#6D55A3]"
+          required
+        />
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={visible ? "隱藏密碼" : "顯示密碼"}
+          className="absolute inset-y-0 right-0 flex w-12 items-center justify-center text-[#7B7B74]"
+        >
+          {visible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+        </button>
+      </div>
+    </div>
   );
 }
 
