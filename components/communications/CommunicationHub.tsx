@@ -529,11 +529,17 @@ export function CommunicationHub() {
     }, 0);
 
     const supabase = getSupabaseBrowserClient();
+    const userId = session.user.id;
     const channel = supabase
-      .channel(`communication-hub-${session.user.id}`)
+      .channel(`communication-user-${userId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "communication_messages" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "communication_messages",
+          filter: `recipient_id=eq.${userId}`,
+        },
         (payload) => handleRealtimeMessage(
           payload.new as Record<string, unknown>,
           "INSERT"
@@ -541,7 +547,25 @@ export function CommunicationHub() {
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "communication_messages" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "communication_messages",
+          filter: `sender_id=eq.${userId}`,
+        },
+        (payload) => handleRealtimeMessage(
+          payload.new as Record<string, unknown>,
+          "INSERT"
+        )
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "communication_messages",
+          filter: `recipient_id=eq.${userId}`,
+        },
         (payload) => handleRealtimeMessage(
           payload.new as Record<string, unknown>,
           "UPDATE"
@@ -549,13 +573,36 @@ export function CommunicationHub() {
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "communication_calls" },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "communication_messages",
+          filter: `sender_id=eq.${userId}`,
+        },
+        (payload) => handleRealtimeMessage(
+          payload.new as Record<string, unknown>,
+          "UPDATE"
+        )
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "communication_calls",
+          filter: `caller_id=eq.${userId}`,
+        },
         () => void loadActiveCalls()
       )
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "communication_call_signals" },
-        (payload) => void processSignal(payload.new as CallSignal)
+        {
+          event: "*",
+          schema: "public",
+          table: "communication_calls",
+          filter: `callee_id=eq.${userId}`,
+        },
+        () => void loadActiveCalls()
       )
       .subscribe();
 
@@ -563,7 +610,32 @@ export function CommunicationHub() {
       window.clearTimeout(initialRefreshTimer);
       void supabase.removeChannel(channel);
     };
-  }, [canUse, handleRealtimeMessage, loadActiveCalls, processSignal, session.user.id]);
+  }, [canUse, handleRealtimeMessage, loadActiveCalls, session.user.id]);
+
+  const signalCallId = activeCall?.id ?? incomingCall?.id ?? "";
+
+  useEffect(() => {
+    if (!canUse || !signalCallId) return;
+
+    const supabase = getSupabaseBrowserClient();
+    const channel = supabase
+      .channel(`communication-call-signals-${signalCallId}-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "communication_call_signals",
+          filter: `call_id=eq.${signalCallId}`,
+        },
+        (payload) => void processSignal(payload.new as CallSignal)
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [canUse, processSignal, session.user.id, signalCallId]);
 
   useEffect(() => () => cleanupPeerConnection(), [cleanupPeerConnection]);
 
