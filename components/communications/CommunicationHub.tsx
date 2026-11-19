@@ -22,7 +22,6 @@ import { normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 type Peer = {
   id: string;
   displayName: string;
-  accountCode: string;
   avatarConfig: AvatarConfig;
   unreadCount: number;
 };
@@ -663,7 +662,7 @@ export function CommunicationHub() {
                       <SystemAvatar config={peer.avatarConfig} size={46} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-black text-[#1F2937]">{peer.displayName}</div>
-                        <div className="truncate text-xs font-medium text-[#7B7B74]">{peer.accountCode}</div>
+                        <div className="truncate text-xs font-medium text-[#7B7B74]">私人對話</div>
                       </div>
                       {peer.unreadCount > 0 && (
                         <span className="min-w-6 rounded-full bg-[#F25D6B] px-2 py-1 text-center text-[10px] font-black text-white">
