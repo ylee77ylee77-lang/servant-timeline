@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { broadcastCommunicationMessage } from "@/lib/communications/broadcast";
 import { communicationErrorResponse, getCommunicationPeer, requireCommunicationActor } from "@/lib/communications/access";
 import {
   COMMUNICATION_BUCKET,
@@ -54,9 +55,11 @@ export async function POST(request: NextRequest) {
         attachment_mime: file.type,
         attachment_size: file.size,
       })
-      .select("id")
+      .select("id,sender_id,recipient_id,message_type,body,attachment_name,attachment_mime,attachment_size,edited_at,retracted_at,read_at,created_at")
       .single();
     if (insertError) throw insertError;
+
+    await broadcastCommunicationMessage(message as unknown as Record<string, unknown>);
 
     return NextResponse.json({ ok: true, messageId: message.id }, { status: 201 });
   } catch (error) {
