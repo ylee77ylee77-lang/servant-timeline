@@ -58,6 +58,7 @@ type IceServerResponse = {
   iceServers?: RTCIceServer[];
   relayAvailable?: boolean;
   relayReason?: string;
+  costGuardDiagnostic?: string | null;
   turnUsagePercent?: number;
   warning?: string;
 };
@@ -70,6 +71,28 @@ type CallSignal = {
   payload: Record<string, unknown>;
 };
 
+
+// Set an upper bound for waiting on Cloudflare before negotiating WebRTC.
+// When the free-tier guard is slow/unavailable, use STUN only; never issue
+// unrestricted TURN credentials.
+function resolveIceServersForCall(
+  pending: Promise<RTCIceServer[]>,
+  waitMs = 1_800
+): Promise<RTCIceServer[]> {
+  const stunOnly: RTCIceServer[] = [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (servers: RTCIceServer[]) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      resolve(servers);
+    };
+    timer = setTimeout(() => finish(stunOnly), waitMs);
+    void pending.then(finish, () => finish(stunOnly));
+  });
+}
 
 function apiHeaders(accessToken: string, json = false) {
   return {
@@ -280,8 +303,10 @@ export function CommunicationHub() {
     });
   }, [incomingCall, playRingtone, stopRingtone]);
 
+  const incomingCallId = incomingCall?.id ?? "";
+
   useEffect(() => {
-    if (!incomingCall) {
+    if (!incomingCallId) {
       stopRingtone();
       return;
     }
@@ -299,7 +324,7 @@ export function CommunicationHub() {
       document.removeEventListener("visibilitychange", resumeWhenVisible);
       stopRingtone();
     };
-  }, [incomingCall?.id, playRingtone, stopRingtone]);
+  }, [incomingCallId, playRingtone, stopRingtone]);
 
   useEffect(() => () => stopRingtone(), [stopRingtone]);
 
@@ -548,7 +573,11 @@ export function CommunicationHub() {
         !data.relayAvailable
         && ["cost-guard-unconfigured", "cost-guard-unavailable"].includes(data.relayReason || "")
       ) {
-        setErrorMessage("TURN 成本保護已啟用：目前無法確認免費額度，因此暫停 TURN relay，改用 P2P／STUN。");
+        const diagnostic = data.costGuardDiagnostic;
+        const detail = typeof diagnostic === "string" && /^[a-z0-9-]+$/.test(diagnostic)
+          ? `（診斷：${diagnostic}）`
+          : "";
+        setErrorMessage(`TURN 額度目前無法確認${detail}，已暫停 TURN，通話改用 P2P／STUN。`);
       }
 
       if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
@@ -576,7 +605,7 @@ export function CommunicationHub() {
       throw new Error("此瀏覽器不支援 App 內語音通話。");
     }
 
-    const iceServers = await iceServersPromise;
+    const iceServers = await resolveIceServersForCall(iceServersPromise);
     localStreamRef.current = stream;
     const pc = new RTCPeerConnection({
       iceServers,
