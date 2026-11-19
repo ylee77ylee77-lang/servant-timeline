@@ -551,32 +551,6 @@ export function CommunicationHub() {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
-          schema: "public",
-          table: "communication_messages",
-          filter: `recipient_id=eq.${userId}`,
-        },
-        (payload) => handleRealtimeMessage(
-          payload.new as Record<string, unknown>,
-          "INSERT"
-        )
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "communication_messages",
-          filter: `sender_id=eq.${userId}`,
-        },
-        (payload) => handleRealtimeMessage(
-          payload.new as Record<string, unknown>,
-          "INSERT"
-        )
-      )
-      .on(
-        "postgres_changes",
-        {
           event: "UPDATE",
           schema: "public",
           table: "communication_messages",
@@ -627,6 +601,40 @@ export function CommunicationHub() {
       void supabase.removeChannel(channel);
     };
   }, [canUse, handleRealtimeMessage, loadActiveCalls, session.user.id]);
+
+  useEffect(() => {
+    if (!canUse) return;
+
+    const supabase = getSupabaseBrowserClient();
+    const userId = session.user.id;
+    let disposed = false;
+
+    const channel = supabase
+      .channel(`communication-message-broadcast-${userId}`, {
+        config: { private: true },
+      })
+      .on(
+        "broadcast",
+        { event: "message-insert" },
+        (event) => {
+          const row = (
+            event && typeof event === "object" && "payload" in event
+              ? event.payload
+              : event
+          ) as Record<string, unknown>;
+          handleRealtimeMessage(row, "INSERT");
+        }
+      );
+
+    void supabase.realtime.setAuth(session.access_token).then(() => {
+      if (!disposed) channel.subscribe();
+    });
+
+    return () => {
+      disposed = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [canUse, handleRealtimeMessage, session.access_token, session.user.id]);
 
   const signalCallId = activeCall?.id ?? "";
 
