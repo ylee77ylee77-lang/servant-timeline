@@ -45,7 +45,7 @@ test("avatar normalization preserves valid masculine and feminine choices", () =
       eyeStyle: "bright",
       glasses: true,
       accessory: "cap",
-      pet: "dog",
+      pet: "eagle",
     }
   );
 
