@@ -87,6 +87,59 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+type RealtimeMessageEvent = "INSERT" | "UPDATE";
+
+function realtimeRowToMessage(
+  row: Record<string, unknown>,
+  existing?: ChatMessage
+): ChatMessage {
+  const rawType = String(row.message_type ?? existing?.messageType ?? "text");
+  const messageType: ChatMessage["messageType"] =
+    rawType === "image" || rawType === "file" ? rawType : "text";
+  const retractedAt = row.retracted_at === undefined
+    ? existing?.retractedAt ?? null
+    : row.retracted_at
+      ? String(row.retracted_at)
+      : null;
+
+  return {
+    id: String(row.id ?? existing?.id ?? ""),
+    senderId: String(row.sender_id ?? existing?.senderId ?? ""),
+    recipientId: String(row.recipient_id ?? existing?.recipientId ?? ""),
+    messageType,
+    body: retractedAt ? "" : String(row.body ?? existing?.body ?? ""),
+    attachmentName: retractedAt ? "" : String(row.attachment_name ?? existing?.attachmentName ?? ""),
+    attachmentMime: retractedAt ? "" : String(row.attachment_mime ?? existing?.attachmentMime ?? ""),
+    attachmentSize: retractedAt ? 0 : Number(row.attachment_size ?? existing?.attachmentSize ?? 0),
+    attachmentUrl: retractedAt ? "" : existing?.attachmentUrl ?? "",
+    editedAt: row.edited_at === undefined
+      ? existing?.editedAt ?? null
+      : row.edited_at
+        ? String(row.edited_at)
+        : null,
+    retractedAt,
+    readAt: row.read_at === undefined
+      ? existing?.readAt ?? null
+      : row.read_at
+        ? String(row.read_at)
+        : null,
+    createdAt: String(row.created_at ?? existing?.createdAt ?? new Date().toISOString()),
+  };
+}
+
+function upsertMessage(current: ChatMessage[], message: ChatMessage) {
+  const index = current.findIndex((item) => item.id === message.id);
+  if (index < 0) {
+    return [...current, message].sort(
+      (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+    );
+  }
+
+  const next = [...current];
+  next[index] = message;
+  return next;
+}
+
 function renderLinkedText(text: string) {
   const urlPattern = /(https?:\/\/[^\s]+)/g;
   return text.split(urlPattern).map((part, index) => {
@@ -186,22 +239,79 @@ export function CommunicationHub() {
     }).catch(() => undefined);
   }, [requestJson]);
 
-  const loadMessages = useCallback(async (peerId: string, markAsRead = true) => {
+  const loadMessages = useCallback(async (
+    peerId: string,
+    markAsRead = true,
+    showLoading = true
+  ) => {
     if (!peerId) return;
-    setLoadingMessages(true);
+    if (showLoading) setLoadingMessages(true);
     try {
       const data = await requestJson(`/api/communications/messages?peerId=${encodeURIComponent(peerId)}`);
       setMessages(Array.isArray(data?.messages) ? data.messages : []);
       if (markAsRead) {
-        await markRead(peerId);
-        await loadPeers();
+        setPeers((current) => current.map((peer) =>
+          peer.id === peerId ? { ...peer, unreadCount: 0 } : peer
+        ));
+        void markRead(peerId);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "無法讀取訊息。");
     } finally {
-      setLoadingMessages(false);
+      if (showLoading) setLoadingMessages(false);
     }
-  }, [loadPeers, markRead, requestJson]);
+  }, [markRead, requestJson]);
+
+  const handleRealtimeMessage = useCallback((
+    row: Record<string, unknown>,
+    eventType: RealtimeMessageEvent
+  ) => {
+    const messageId = String(row.id || "");
+    const senderId = String(row.sender_id || "");
+    const recipientId = String(row.recipient_id || "");
+    const currentUserId = session.user.id;
+
+    if (
+      !messageId
+      || (senderId !== currentUserId && recipientId !== currentUserId)
+    ) {
+      return;
+    }
+
+    const peerId = senderId === currentUserId ? recipientId : senderId;
+    if (!peerId) return;
+
+    const isSelectedConversation = selectedPeerId === peerId;
+    if (isSelectedConversation) {
+      setMessages((current) => {
+        const existing = current.find((message) => message.id === messageId);
+        return upsertMessage(current, realtimeRowToMessage(row, existing));
+      });
+    }
+
+    if (eventType === "INSERT" && recipientId === currentUserId) {
+      if (open && isSelectedConversation) {
+        setPeers((current) => current.map((peer) =>
+          peer.id === peerId ? { ...peer, unreadCount: 0 } : peer
+        ));
+        void markRead(peerId);
+      } else {
+        setPeers((current) => current.map((peer) =>
+          peer.id === peerId
+            ? { ...peer, unreadCount: peer.unreadCount + 1 }
+            : peer
+        ));
+      }
+    }
+
+    if (
+      eventType === "INSERT"
+      && isSelectedConversation
+      && String(row.message_type || "") !== "text"
+    ) {
+      void loadMessages(peerId, false, false);
+    }
+  }, [loadMessages, markRead, open, selectedPeerId, session.user.id]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -423,20 +533,19 @@ export function CommunicationHub() {
       .channel(`communication-hub-${session.user.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "communication_messages" },
-        (payload) => {
-          void loadPeers();
-          const row = (payload.new && Object.keys(payload.new).length ? payload.new : payload.old) as Record<string, unknown>;
-          const senderId = String(row?.sender_id || "");
-          const recipientId = String(row?.recipient_id || "");
-          if (
-            selectedPeerId
-            && ((senderId === selectedPeerId && recipientId === session.user.id)
-              || (senderId === session.user.id && recipientId === selectedPeerId))
-          ) {
-            void loadMessages(selectedPeerId, open);
-          }
-        }
+        { event: "INSERT", schema: "public", table: "communication_messages" },
+        (payload) => handleRealtimeMessage(
+          payload.new as Record<string, unknown>,
+          "INSERT"
+        )
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "communication_messages" },
+        (payload) => handleRealtimeMessage(
+          payload.new as Record<string, unknown>,
+          "UPDATE"
+        )
       )
       .on(
         "postgres_changes",
@@ -454,7 +563,7 @@ export function CommunicationHub() {
       window.clearTimeout(initialRefreshTimer);
       void supabase.removeChannel(channel);
     };
-  }, [canUse, loadActiveCalls, loadMessages, loadPeers, open, processSignal, selectedPeerId, session.user.id]);
+  }, [canUse, handleRealtimeMessage, loadActiveCalls, processSignal, session.user.id]);
 
   useEffect(() => () => cleanupPeerConnection(), [cleanupPeerConnection]);
 
@@ -463,13 +572,15 @@ export function CommunicationHub() {
     setSending(true);
     setErrorMessage("");
     try {
-      await requestJson("/api/communications/messages", {
+      const data = await requestJson("/api/communications/messages", {
         method: "POST",
         body: JSON.stringify({ peerId: selectedPeerId, body: draft }),
       });
+      const message = data?.message as ChatMessage | undefined;
+      if (message?.id) {
+        setMessages((current) => upsertMessage(current, message));
+      }
       setDraft("");
-      await loadMessages(selectedPeerId, false);
-      await loadPeers();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "訊息傳送失敗。");
     } finally {
