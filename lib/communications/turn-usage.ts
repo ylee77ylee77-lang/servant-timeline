@@ -20,6 +20,8 @@ export type TurnUsageGuard = TurnCostEvaluation & {
     | "free-tier-95-percent"
     | "cost-guard-unconfigured"
     | "cost-guard-unavailable";
+  // Short non-sensitive code only, for troubleshooting without leaking API credentials.
+  diagnostic: string | null;
   checkedAt: string;
   billingPeriodStart: string | null;
   billingPeriodEnd: string | null;
@@ -28,8 +30,11 @@ export type TurnUsageGuard = TurnCostEvaluation & {
 let cachedGuard: { expiresAt: number; value: TurnUsageGuard } | null = null;
 
 function failClosed(
-  reason: "cost-guard-unconfigured" | "cost-guard-unavailable"
+  reason: "cost-guard-unconfigured" | "cost-guard-unavailable",
+  diagnostic: string
 ): TurnUsageGuard {
+  // Do not log IDs, API tokens, upstream bodies, or user identifiers.
+  console.warn("TURN cost guard fail-closed", { diagnostic });
   return {
     egressBytes: 0,
     egressGb: 0,
@@ -38,6 +43,7 @@ function failClosed(
     blocked: true,
     allowed: false,
     reason,
+    diagnostic,
     checkedAt: new Date().toISOString(),
     billingPeriodStart: null,
     billingPeriodEnd: null,
@@ -45,10 +51,7 @@ function failClosed(
 }
 
 function cache(value: TurnUsageGuard) {
-  cachedGuard = {
-    expiresAt: Date.now() + CACHE_TTL_MS,
-    value,
-  };
+  cachedGuard = { expiresAt: Date.now() + CACHE_TTL_MS, value };
   return value;
 }
 
@@ -56,10 +59,11 @@ function isoDate(value: Date) {
   return value.toISOString().slice(0, 10);
 }
 
-async function fetchJson(url: string, token: string, init?: RequestInit) {
+type ApiResult = { payload: unknown; failure: null } | { payload: null; failure: string };
+
+async function fetchJson(url: string, token: string, init?: RequestInit): Promise<ApiResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
   try {
     const response = await fetch(url, {
       ...init,
@@ -70,43 +74,74 @@ async function fetchJson(url: string, token: string, init?: RequestInit) {
       cache: "no-store",
       signal: controller.signal,
     });
-    if (!response.ok) return null;
-    return await response.json().catch(() => null);
-  } catch {
-    return null;
+    if (!response.ok) return { payload: null, failure: `http-${response.status}` };
+    const payload = await response.json().catch(() => undefined);
+    if (!payload || typeof payload !== "object") {
+      return { payload: null, failure: "invalid-json" };
+    }
+    return { payload, failure: null };
+  } catch (error) {
+    return {
+      payload: null,
+      failure: error instanceof Error && error.name === "AbortError" ? "timeout" : "network-error",
+    };
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function getCurrentBillingWindow(accountId: string, token: string) {
-  const payload = await fetchJson(
+type BillingWindow = { start: Date; end: Date; now: Date };
+type BillingResult =
+  | { billing: BillingWindow; failure: null }
+  | { billing: null; failure: string };
+
+async function getCurrentBillingWindow(accountId: string, token: string): Promise<BillingResult> {
+  const result = await fetchJson(
     `${CLOUDFLARE_API_BASE}/accounts/${encodeURIComponent(accountId)}/billing/profile`,
     token
-  ) as {
+  );
+  if (result.failure) return { billing: null, failure: `billing-${result.failure}` };
+
+  const payload = result.payload as {
     success?: boolean;
     result?: { next_bill_date?: string | null };
-  } | null;
+  };
+  if (!payload.success || !payload.result) {
+    return { billing: null, failure: "billing-response-invalid" };
+  }
 
-  const rawNextBillDate = payload?.success ? payload.result?.next_bill_date : null;
-  if (!rawNextBillDate) return null;
+  // next_bill_date is optional in Cloudflare's Billing API. Free accounts may not have it.
+  const raw = payload.result.next_bill_date;
+  if (typeof raw !== "string" || !raw) {
+    return { billing: null, failure: "billing-date-missing" };
+  }
 
-  const end = new Date(rawNextBillDate);
+  const end = new Date(raw);
   const now = new Date();
-  if (!Number.isFinite(end.getTime()) || end.getTime() <= now.getTime()) return null;
+  if (!Number.isFinite(end.getTime())) {
+    return { billing: null, failure: "billing-date-invalid" };
+  }
+  if (end.getTime() <= now.getTime()) {
+    return { billing: null, failure: "billing-date-expired" };
+  }
 
   const start = previousMonthlyBillingDate(end);
-  if (!Number.isFinite(start.getTime()) || start.getTime() > now.getTime()) return null;
-
-  return { start, end, now };
+  if (!Number.isFinite(start.getTime()) || start.getTime() > now.getTime()) {
+    return { billing: null, failure: "billing-period-unverified" };
+  }
+  return { billing: { start, end, now }, failure: null };
 }
+
+type UsageResult =
+  | { egressBytes: number; failure: null }
+  | { egressBytes: null; failure: string };
 
 async function getTurnEgressBytes(
   accountId: string,
   token: string,
   dateFrom: string,
   dateTo: string
-) {
+): Promise<UsageResult> {
   const query = `
     query TurnUsageGuard($accountId: string!, $dateFrom: Date!, $dateTo: Date!) {
       viewer {
@@ -115,48 +150,62 @@ async function getTurnEgressBytes(
             limit: 10000
             filter: { date_geq: $dateFrom, date_leq: $dateTo }
           ) {
-            sum {
-              egressBytes
-            }
+            sum { egressBytes }
           }
         }
       }
     }
   `;
 
-  const payload = await fetchJson(CLOUDFLARE_GRAPHQL_ENDPOINT, token, {
+  const result = await fetchJson(CLOUDFLARE_GRAPHQL_ENDPOINT, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query,
-      variables: { accountId, dateFrom, dateTo },
-    }),
-  }) as {
+    body: JSON.stringify({ query, variables: { accountId, dateFrom, dateTo } }),
+  });
+  if (result.failure) return { egressBytes: null, failure: `analytics-${result.failure}` };
+
+  const payload = result.payload as {
     data?: {
       viewer?: {
         accounts?: Array<{
-          callsTurnUsageAdaptiveGroups?: Array<{
-            sum?: { egressBytes?: number | string | null };
-          }>;
+          callsTurnUsageAdaptiveGroups?: Array<{ sum?: { egressBytes?: number | string | null } }>;
         }>;
       };
     };
-    errors?: unknown[];
-  } | null;
+    errors?: unknown[] | null;
+  };
 
-  if (!payload || (Array.isArray(payload.errors) && payload.errors.length > 0)) return null;
-
-  const accounts = payload.data?.viewer?.accounts ?? [];
-  if (!accounts.length) return null;
+  if (Array.isArray(payload.errors) && payload.errors.length) {
+    return { egressBytes: null, failure: "analytics-query-rejected" };
+  }
+  const accounts = payload.data?.viewer?.accounts;
+  if (!Array.isArray(accounts) || accounts.length !== 1) {
+    return { egressBytes: null, failure: "analytics-account-missing" };
+  }
+  const groups = accounts[0].callsTurnUsageAdaptiveGroups;
+  if (!Array.isArray(groups)) {
+    return { egressBytes: null, failure: "analytics-response-invalid" };
+  }
+  // Never treat a potentially truncated series as the complete billed usage.
+  if (groups.length >= 10000) {
+    return { egressBytes: null, failure: "analytics-result-truncated" };
+  }
 
   let total = 0;
-  for (const account of accounts) {
-    for (const group of account.callsTurnUsageAdaptiveGroups ?? []) {
-      const value = Number(group.sum?.egressBytes ?? 0);
-      if (Number.isFinite(value) && value > 0) total += value;
+  for (const group of groups) {
+    if (group.sum?.egressBytes === null || group.sum?.egressBytes === undefined) {
+      return { egressBytes: null, failure: "analytics-egress-missing" };
     }
+    const count = Number(group.sum.egressBytes);
+    if (!Number.isFinite(count) || count < 0) {
+      return { egressBytes: null, failure: "analytics-egress-invalid" };
+    }
+    total += count;
   }
-  return total;
+  if (!Number.isFinite(total)) {
+    return { egressBytes: null, failure: "analytics-egress-invalid" };
+  }
+  return { egressBytes: total, failure: null };
 }
 
 export async function getTurnUsageGuard(): Promise<TurnUsageGuard> {
@@ -165,37 +214,39 @@ export async function getTurnUsageGuard(): Promise<TurnUsageGuard> {
   }
 
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
-  const costGuardToken = process.env.CLOUDFLARE_COST_GUARD_API_TOKEN?.trim();
-
-  if (!accountId || !/^[a-f0-9]{32}$/i.test(accountId) || !costGuardToken) {
-    return cache(failClosed("cost-guard-unconfigured"));
+  const token = process.env.CLOUDFLARE_COST_GUARD_API_TOKEN?.trim();
+  if (!accountId || !token) {
+    return cache(failClosed("cost-guard-unconfigured", "missing-configuration"));
+  }
+  if (!/^[a-f0-9]{32}$/i.test(accountId)) {
+    return cache(failClosed("cost-guard-unconfigured", "invalid-account-id-format"));
   }
 
-  const billing = await getCurrentBillingWindow(accountId, costGuardToken);
-  if (!billing) return cache(failClosed("cost-guard-unavailable"));
-
-  const egressBytes = await getTurnEgressBytes(
+  const cycle = await getCurrentBillingWindow(accountId, token);
+  if (!cycle.billing) {
+    return cache(failClosed("cost-guard-unavailable", cycle.failure));
+  }
+  const usage = await getTurnEgressBytes(
     accountId,
-    costGuardToken,
-    isoDate(billing.start),
-    isoDate(billing.now)
+    token,
+    isoDate(cycle.billing.start),
+    isoDate(cycle.billing.now)
   );
-  if (egressBytes == null) return cache(failClosed("cost-guard-unavailable"));
+  if (usage.egressBytes === null) {
+    return cache(failClosed("cost-guard-unavailable", usage.failure));
+  }
 
-  const evaluation = evaluateTurnCost(egressBytes);
-  const reason = evaluation.blocked
-    ? "free-tier-95-percent"
-    : evaluation.warning
-      ? "free-tier-warning"
-      : "within-free-tier";
-
+  const evaluation = evaluateTurnCost(usage.egressBytes);
   return cache({
     ...evaluation,
     allowed: !evaluation.blocked,
-    reason,
+    reason: evaluation.blocked
+      ? "free-tier-95-percent"
+      : evaluation.warning ? "free-tier-warning" : "within-free-tier",
+    diagnostic: null,
     checkedAt: new Date().toISOString(),
-    billingPeriodStart: billing.start.toISOString(),
-    billingPeriodEnd: billing.end.toISOString(),
+    billingPeriodStart: cycle.billing.start.toISOString(),
+    billingPeriodEnd: cycle.billing.end.toISOString(),
   });
 }
 
