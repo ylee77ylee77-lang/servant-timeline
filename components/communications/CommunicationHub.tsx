@@ -515,12 +515,13 @@ export function CommunicationHub() {
           setCallState("connecting");
           setActiveCall(latest);
           activeCallRef.current = latest;
+          void loadCallSignals(latest.id);
         }
       }
     } catch {
       // Realtime/poll refresh failures should not block the rest of the app.
     }
-  }, [callState, canUse, cleanupPeerConnection, requestJson, session.user.id]);
+  }, [callState, canUse, cleanupPeerConnection, loadCallSignals, requestJson, session.user.id]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -612,7 +613,7 @@ export function CommunicationHub() {
     };
   }, [canUse, handleRealtimeMessage, loadActiveCalls, session.user.id]);
 
-  const signalCallId = activeCall?.id ?? incomingCall?.id ?? "";
+  const signalCallId = activeCall?.id ?? "";
 
   useEffect(() => {
     if (!canUse || !signalCallId) return;
