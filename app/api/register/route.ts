@@ -4,6 +4,7 @@ import {
   isValidAccountCode,
   normalizeAccountCode,
 } from "@/lib/auth/account-code";
+import { normalizeAvatarConfig } from "@/lib/profile/avatar";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
 export const runtime = "nodejs";
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
     const accountCode = normalizeAccountCode(body.accountCode);
     const displayName = String(body.displayName ?? "").normalize("NFKC").trim();
     const password = String(body.password ?? "");
+    const avatarConfig = normalizeAvatarConfig(body.avatarConfig);
 
     if (!isValidAccountCode(accountCode)) {
       return NextResponse.json(
@@ -68,6 +70,7 @@ export async function POST(request: NextRequest) {
           id: createdUserId,
           account_code: accountCode,
           display_name: displayName,
+          avatar_config: avatarConfig,
           is_active: false,
         },
         { onConflict: "id" }

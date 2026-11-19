@@ -35,6 +35,8 @@ import { BrowserQRCodeReader } from '@zxing/browser';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { MyServiceDashboard } from '@/components/service/MyServiceDashboard';
 import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStatusDashboard';
+import { AvatarSettingsCard } from '@/components/profile/AvatarSettingsCard';
+import { CommunicationHub } from '@/components/communications/CommunicationHub';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
@@ -4474,6 +4476,10 @@ export default function App() {
           </p>
         </div>
 
+        <div className="mb-6">
+          <AvatarSettingsCard accessToken={session.access_token} />
+        </div>
+
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 space-y-6">
           <div className="p-4 rounded-[18px] bg-[#FFF9F3] border border-[#E6EAF0]">
             <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">語音風格</div>
@@ -5440,6 +5446,8 @@ export default function App() {
         ) : (
           renderAdminView()
         )}
+
+        <CommunicationHub />
 
         {/* 全新品牌風格 - 彈跳視窗 */}
         {detailModal.isOpen && (
