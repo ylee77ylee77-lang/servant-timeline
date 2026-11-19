@@ -17,6 +17,8 @@ import { accountCodeToInternalEmail, normalizeAccountCode } from "@/lib/auth/acc
 import { getPublicSupabaseConfig } from "@/lib/supabase/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { requiresPasswordChange } from "@/lib/auth/password-reset";
+import { AvatarEditor } from "@/components/profile/AvatarEditor";
+import { getDefaultAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 
 export type AppRole = "volunteer" | "coordinator" | "admin";
 
@@ -58,6 +60,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [registrationAccountCode, setRegistrationAccountCode] = useState("");
   const [registrationPassword, setRegistrationPassword] = useState("");
   const [registrationPasswordConfirm, setRegistrationPasswordConfirm] = useState("");
+  const [registrationAvatar, setRegistrationAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
   const [registrationMessage, setRegistrationMessage] = useState("");
   const [registrationIsError, setRegistrationIsError] = useState(false);
   const [isRegistrationSubmitting, setIsRegistrationSubmitting] = useState(false);
@@ -267,6 +270,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
           displayName: registrationDisplayName,
           accountCode: normalizedCode,
           password: registrationPassword,
+          avatarConfig: registrationAvatar,
         }),
       });
       const data = await response.json().catch(() => null);
@@ -281,6 +285,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setRegistrationAccountCode("");
       setRegistrationPassword("");
       setRegistrationPasswordConfirm("");
+      setRegistrationAvatar(getDefaultAvatarConfig());
     } catch (error) {
       setRegistrationIsError(true);
       setRegistrationMessage(error instanceof Error ? error.message : "註冊失敗，請稍後再試。");
@@ -464,6 +469,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
               required
             />
+
+            <div className="mt-5">
+              <div className="mb-2 text-sm font-black text-[#1F2937]">大頭圖（選填）</div>
+              <div className="rounded-[22px] border border-[#E6EAF0] bg-[#FFF9F3]/60 p-4">
+                <AvatarEditor value={registrationAvatar} onChange={setRegistrationAvatar} compact />
+              </div>
+            </div>
 
             <PasswordInput
               id="registration-password"
