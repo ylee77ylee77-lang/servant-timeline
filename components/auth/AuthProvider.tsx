@@ -48,6 +48,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [loginCode, setLoginCode] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [loginNotice, setLoginNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [passwordResetMessage, setPasswordResetMessage] = useState("");
@@ -192,6 +193,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const handleLogin = async (event: FormEvent) => {
     event.preventDefault();
     setErrorMessage("");
+    setLoginNotice("");
     setIsSubmitting(true);
 
     try {
@@ -317,7 +319,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setForcedPasswordConfirm("");
       setForcedPasswordMessage("");
       setMustChangePassword(false);
-      await getSupabaseBrowserClient().auth.refreshSession();
+      setLoginCode(accountCode);
+      setLoginNotice("密碼已更新，請使用新密碼重新登入。");
+      await getSupabaseBrowserClient().auth.signOut();
     } catch (error) {
       setForcedPasswordIsError(true);
       setForcedPasswordMessage(
@@ -592,6 +596,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               className="mt-5"
             />
 
+            {loginNotice && <p role="status" className="mt-4 text-sm font-bold text-[#008A7A]">{loginNotice}</p>}
             {errorMessage && <p role="alert" className="mt-4 text-sm font-bold text-[#D73A49]">{errorMessage}</p>}
 
             <button
