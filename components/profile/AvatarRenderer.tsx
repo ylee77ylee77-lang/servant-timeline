@@ -12,6 +12,8 @@ import {
  * One renderer for editor, saved profile, service roster and communication UI.
  * Full-canvas assets share the exact same artboard, so every layer scales
  * together at any display size (including mobile and compact chat avatars).
+ * The existing companion art is clipped inside the circular frame; the old
+ * paw / talon foreground overlay is deliberately absent.
  */
 export function AvatarRenderer({
   config,
@@ -55,14 +57,14 @@ export function AvatarRenderer({
       <circle cx={cx} cy={cy} r={radius} fill={`url(#${gradientId})`} />
 
       <g clipPath={`url(#${clipId})`}>
-        {/* 2. Portrait and 3. companion's rear silhouette stay inside the frame. */}
+        {/* 2. Portrait and 3. animal head/upper body stay inside the frame. */}
         <image href={portrait} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
         {companion && (
           <image href={companion.behind} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
         )}
       </g>
 
-      {/* 4. White rim passes in front of the companion's body. */}
+      {/* 4. White rim conceals the lower body. No separate feet/claw layer. */}
       <circle
         cx={cx}
         cy={cy}
@@ -72,10 +74,6 @@ export function AvatarRenderer({
         strokeWidth={stroke}
       />
 
-      {/* 5. Only the paws / claws / ear passing over the rim go in front. */}
-      {companion && (
-        <image href={companion.inFront} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
-      )}
     </svg>
   );
 }

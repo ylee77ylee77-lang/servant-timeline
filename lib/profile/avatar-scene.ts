@@ -3,7 +3,8 @@ import { normalizeAvatarConfig, type AvatarConfig, type AvatarPet } from "./avat
 /**
  * Stable, versioned full-canvas artwork contract.
  * Every asset is a 512x512 transparent WebP aligned to this same artboard.
- * The canvas, NOT per-device CSS offsets, determines how animals touch the frame.
+ * The canvas, NOT per-device CSS offsets, determines where the animal rests.
+ * Only existing animal head/upper-body artwork is rendered; feet are not drawn.
  */
 export const AVATAR_CANVAS_SIZE = 512;
 export const AVATAR_FRAME = Object.freeze({ cx: 256, cy: 256, radius: 236, stroke: 16 });
@@ -12,7 +13,6 @@ export const AVATAR_LAYER_ORDER = [
   "portrait",
   "companion-behind-frame",
   "white-frame",
-  "companion-in-front-of-frame",
 ] as const;
 
 export const AVATAR_ART_DIR = "/avatar/scenes/v2";
@@ -33,27 +33,22 @@ export type CompanionKind = Exclude<AvatarPet, "none">;
 export const AVATAR_COMPANIONS: Record<CompanionKind, {
   name: string;
   behind: string;
-  inFront: string;
 }> = {
   sheep: {
     name: "綿羊",
     behind: `${AVATAR_ART_DIR}/sheep-behind.webp`,
-    inFront: `${AVATAR_ART_DIR}/sheep-front.webp`,
   },
   doe: {
     name: "母鹿",
     behind: `${AVATAR_ART_DIR}/doe-behind.webp`,
-    inFront: `${AVATAR_ART_DIR}/doe-front.webp`,
   },
   lion: {
     name: "獅子",
     behind: `${AVATAR_ART_DIR}/lion-behind.webp`,
-    inFront: `${AVATAR_ART_DIR}/lion-front.webp`,
   },
   eagle: {
     name: "老鷹",
     behind: `${AVATAR_ART_DIR}/eagle-behind.webp`,
-    inFront: `${AVATAR_ART_DIR}/eagle-front.webp`,
   },
 };
 

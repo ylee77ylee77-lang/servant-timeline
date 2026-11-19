@@ -56,7 +56,7 @@ export function AvatarEditor({
         <div className="min-w-0">
           <div className="text-base font-black text-[#1F2937]">即時預覽</div>
           <div className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-            所有選項都使用相同的 3D 分層頭像；動物與白色圓框互動，人物五官保持清楚。
+            所有選項共用同一套 3D 頭像。動物只露頭部與上半身，靠近圓框，不顯示腳爪。
           </div>
         </div>
       </div>
@@ -121,7 +121,7 @@ export function AvatarEditor({
       <section>
         <div className="mb-1 text-xs font-black tracking-widest text-[#7B7B74]">陪伴動物（選填）</div>
         <p className="mb-3 text-xs font-medium leading-5 text-[#7B7B74]">
-          可以不選。選擇動物後會即時看到牠如何依附在白色圓框上。
+          可以不選。動物僅露頭部與上半身，靠在圓框內側，不顯示腳或爪子。
         </p>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
           {petOptions.map((option) => {

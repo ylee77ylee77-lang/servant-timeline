@@ -2,7 +2,7 @@
 
 Usage: python3 scripts/verify-avatar-artwork.py
 Requires Pillow and numpy. Verifies all canvas dimensions, transparency, and
-measurable front-layer overlap with the fixed white frame, then writes a QA contact sheet.
+the animal head/upper-body composition without visible feet, then writes a QA contact sheet.
 """
 from pathlib import Path
 import math
@@ -27,15 +27,12 @@ FRAME=(R>=228)&(R<=244)
 FACE=(X>=225)&(X<=355)&(Y>=155)&(Y<=355)
 for name in KINDS:
     back=Image.open(ART/f'{name}-behind.webp').convert('RGBA')
-    front=Image.open(ART/f'{name}-front.webp').convert('RGBA')
-    assert back.size==front.size==(ARTBOARD,ARTBOARD)
-    assert back.getchannel('A').getextrema()[0]==0 and front.getchannel('A').getextrema()[0]==0, f'{name}: opaque background'
-    fa=np.array(front.getchannel('A'))>40
+    assert back.size==(ARTBOARD,ARTBOARD)
+    assert back.getchannel('A').getextrema()[0]==0, f'{name}: opaque background'
     ba=np.array(back.getchannel('A'))>40
-    ring_pixels=np.count_nonzero(fa&FRAME)
-    assert ring_pixels>=80, f'{name}: front anatomy does not touch the white rim'
     assert np.count_nonzero(ba&FACE)<400, f'{name}: companion hides the face'
-    print(name, 'front-on-ring pixels:', ring_pixels)
+    assert not (ART/f'{name}-front.webp').exists(), f'{name}: obsolete paws/claws asset remains'
+    print(name, 'visible animal pixels within frame:', np.count_nonzero(ba&(R<=236)))
 
 # QA previews intentionally reuse identical layer dimensions/order (not CSS or separate layouts).
 colors={'lavender':'#e8daf9','peach':'#fbe2d6','mint':'#d9f2e4','sky':'#d5e9ff','sand':'#f5e4c9'}
@@ -53,7 +50,7 @@ for row,person in enumerate(('male','female-glasses')):
             obj.putalpha(ImageChops.multiply(alpha,clip));canvas.alpha_composite(obj)
         white=Image.new('RGBA',(512,512));ImageDraw.Draw(white).ellipse((20,20,492,492),outline='white',width=16)
         canvas.alpha_composite(white)
-        if animal: canvas.alpha_composite(Image.open(ART/f'{animal}-front.webp').convert('RGBA'))
+
         small=canvas.resize((217,217),Image.Resampling.LANCZOS)
         x=col*240+11;y=row*258+10
         qa.paste(small,(x,y),small)
