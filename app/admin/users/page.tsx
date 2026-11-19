@@ -148,7 +148,7 @@ export default function AdminUsersPage() {
 
       setResetIsError(false);
       setResetMessage(
-        `已重設 ${data.user.displayName}（${data.user.accountCode}）的密碼。`
+        `已設定 ${data.user.displayName}（${data.user.accountCode}）的臨時密碼。請安全轉交本人；下次登入時系統會要求他自行設定新密碼。`
       );
       setResetAccountCode("");
       setResetPassword("");
@@ -324,7 +324,7 @@ export default function AdminUsersPage() {
               重設既有帳號密碼
             </h2>
             <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
-              可處理上方申請，也可直接輸入既有服事帳號。新密碼不會寫入活動紀錄。
+              可處理上方申請，也可直接選擇既有服事帳號。設定後會成為臨時密碼，使用者下次登入必須自行設定新密碼。
             </p>
           </div>
 
@@ -347,12 +347,12 @@ export default function AdminUsersPage() {
             自行註冊後會自動出現在此清單，不必手動輸入帳號。
           </p>
           <Field
-            label="新密碼"
+            label="臨時密碼"
             value={resetPassword}
             onChange={setResetPassword}
             type="password"
             autoComplete="new-password"
-            hint="8–72 字元，請用安全方式交給本人"
+            hint="至少 8 位、最多 72 位字元，請用安全方式交給本人"
           />
 
           {resetMessage && (
@@ -367,7 +367,7 @@ export default function AdminUsersPage() {
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
           >
             {isResetting ? <Loader2 className="h-5 w-5 animate-spin" /> : <KeyRound className="h-5 w-5" />}
-            {isResetting ? "重設中" : "設定新密碼"}
+            {isResetting ? "重設中" : "設定臨時密碼"}
           </button>
         </form>
 
