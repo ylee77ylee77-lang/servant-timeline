@@ -439,7 +439,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     return (
       <main className="min-h-screen bg-[#FFF9F3] px-5 py-10 flex items-center justify-center">
         {showRegistration ? (
-          <form onSubmit={handleRegistration} className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
+          <form onSubmit={handleRegistration} className="max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
             <div className="mb-7">
               <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
               <h1 className="mt-2 text-2xl font-black text-[#1F2937]">註冊新帳號</h1>
