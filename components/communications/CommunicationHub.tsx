@@ -310,7 +310,11 @@ export function CommunicationHub() {
       stopRingtone();
       return;
     }
-    void playRingtone();
+    // Begin playback on the next task so the effect does not synchronously
+    // update React state when iOS blocks autoplay.
+    const playbackTimer = window.setTimeout(() => {
+      void playRingtone();
+    }, 0);
 
     const resumeWhenVisible = () => {
       if (document.visibilityState === "visible") {
@@ -321,6 +325,7 @@ export function CommunicationHub() {
     };
     document.addEventListener("visibilitychange", resumeWhenVisible);
     return () => {
+      window.clearTimeout(playbackTimer);
       document.removeEventListener("visibilitychange", resumeWhenVisible);
       stopRingtone();
     };
