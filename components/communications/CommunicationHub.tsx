@@ -1225,7 +1225,7 @@ export function CommunicationHub() {
             </button>
           )}
           <div className="mt-5 grid grid-cols-2 gap-3">
-            <button type="button" onClick={() => void declineCall() className="flex items-center justify-center gap-2 rounded-2xl bg-[#FFF2F4] py-3 font-black text-[#D73A49]">
+            <button type="button" onClick={() => void declineCall()} className="flex items-center justify-center gap-2 rounded-2xl bg-[#FFF2F4] py-3 font-black text-[#D73A49]">
               <PhoneOff className="h-5 w-5" /> 拒接
             </button>
             <button type="button" onClick={() => void acceptCall()} disabled={preparingCall} className="flex items-center justify-center gap-2 rounded-2xl bg-[#008A7A] py-3 font-black text-white">
