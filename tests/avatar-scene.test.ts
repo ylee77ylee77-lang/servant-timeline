@@ -31,6 +31,12 @@ test("head-only artwork reuses eight existing transparent WebP assets", () => {
     const bytes = fs.readFileSync(file);
     assert.equal(bytes.toString("ascii", 0, 4), "RIFF", `${webPath} must be WebP`);
     assert.equal(bytes.toString("ascii", 8, 12), "WEBP", `${webPath} must be WebP`);
+    // VP8X exposes the alpha flag and 24-bit canvas dimensions without
+    // adding an image decoder dependency to the CI test environment.
+    assert.equal(bytes.toString("ascii", 12, 16), "VP8X", `${webPath} must use extended WebP`);
+    assert.ok((bytes[20] & 0x10) !== 0, `${webPath} must have an alpha channel`);
+    assert.equal(bytes.readUIntLE(24, 3) + 1, AVATAR_CANVAS_SIZE, `${webPath} width must match artboard`);
+    assert.equal(bytes.readUIntLE(27, 3) + 1, AVATAR_CANVAS_SIZE, `${webPath} height must match artboard`);
   }
 });
 
