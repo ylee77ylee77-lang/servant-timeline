@@ -39,7 +39,6 @@ export function SystemAvatar({
 }) {
   const a = normalizeAvatarConfig(config);
   const faceWidth = a.style === "masculine" ? 54 : a.style === "feminine" ? 50 : 52;
-  const faceX = (100 - faceWidth) / 2;
   const browY = a.style === "masculine" ? 43 : 45;
   const mouthCurve = a.style === "feminine" ? "M43 62 Q50 67 57 62" : "M43 62 Q50 65 57 62";
 
