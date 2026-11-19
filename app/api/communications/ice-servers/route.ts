@@ -5,11 +5,15 @@ import {
   hasTurnRelay,
   sanitizeCloudflareIceServers,
 } from "@/lib/communications/ice-servers";
+import {
+  TURN_BLOCK_PERCENT,
+  getTurnUsageGuard,
+} from "@/lib/communications/turn-usage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TURN_CREDENTIAL_TTL_SECONDS = 4 * 60 * 60;
+const TURN_CREDENTIAL_TTL_SECONDS = 60 * 60;
 const CLOUDFLARE_TIMEOUT_MS = 4_000;
 
 function response(body: Record<string, unknown>, status = 200) {
@@ -25,6 +29,21 @@ function response(body: Record<string, unknown>, status = 200) {
 export async function GET(request: NextRequest) {
   try {
     await requireCommunicationActor(request);
+
+    const usageGuard = await getTurnUsageGuard();
+    if (!usageGuard.allowed) {
+      return response({
+        iceServers: FALLBACK_ICE_SERVERS,
+        relayAvailable: false,
+        source: "stun-cost-guard",
+        relayReason: usageGuard.reason,
+        turnUsagePercent: usageGuard.usagePercent,
+        turnUsageGb: usageGuard.egressGb,
+        turnLimitPercent: TURN_BLOCK_PERCENT,
+        billingPeriodStart: usageGuard.billingPeriodStart,
+        billingPeriodEnd: usageGuard.billingPeriodEnd,
+      });
+    }
 
     const keyId = process.env.CLOUDFLARE_TURN_KEY_ID?.trim();
     const apiToken = process.env.CLOUDFLARE_TURN_KEY_API_TOKEN?.trim();
@@ -87,6 +106,14 @@ export async function GET(request: NextRequest) {
         relayAvailable: true,
         source: "cloudflare-turn",
         expiresInSeconds: TURN_CREDENTIAL_TTL_SECONDS,
+        turnUsagePercent: usageGuard.usagePercent,
+        turnUsageGb: usageGuard.egressGb,
+        turnLimitPercent: TURN_BLOCK_PERCENT,
+        billingPeriodStart: usageGuard.billingPeriodStart,
+        billingPeriodEnd: usageGuard.billingPeriodEnd,
+        warning: usageGuard.warning
+          ? `TURN 免費額度約已使用 ${usageGuard.usagePercent.toFixed(1)}%，95% 時會自動停止 TURN relay。`
+          : undefined,
       });
     } catch (error) {
       console.warn("Cloudflare TURN credential request unavailable", {

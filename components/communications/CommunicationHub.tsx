@@ -55,6 +55,9 @@ type CallRow = {
 type IceServerResponse = {
   iceServers?: RTCIceServer[];
   relayAvailable?: boolean;
+  relayReason?: string;
+  turnUsagePercent?: number;
+  warning?: string;
 };
 
 type CallSignal = {
@@ -419,6 +422,18 @@ export function CommunicationHub() {
   const loadIceServers = useCallback(async (): Promise<RTCIceServer[]> => {
     try {
       const data = await requestJson("/api/communications/ice-servers") as IceServerResponse;
+
+      if (data.warning) {
+        setErrorMessage(data.warning);
+      } else if (!data.relayAvailable && data.relayReason === "free-tier-95-percent") {
+        setErrorMessage("TURN 已達免費額度 95% 保護門檻，已自動改用 P2P／STUN，避免產生費用。");
+      } else if (
+        !data.relayAvailable
+        && ["cost-guard-unconfigured", "cost-guard-unavailable"].includes(data.relayReason || "")
+      ) {
+        setErrorMessage("TURN 成本保護已啟用：目前無法確認免費額度，因此暫停 TURN relay，改用 P2P／STUN。");
+      }
+
       if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
         return data.iceServers;
       }
