@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { communicationErrorResponse, getCommunicationPeer, requireCommunicationActor } from "@/lib/communications/access";
+import { broadcastCommunicationMessage } from "@/lib/communications/broadcast";
 import { COMMUNICATION_BUCKET } from "@/lib/communications/storage";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
@@ -81,7 +82,10 @@ export async function POST(request: NextRequest) {
       .single();
     if (error) throw error;
 
-    return NextResponse.json({ message: (await serializeMessages([data]))[0] }, { status: 201 });
+    const message = (await serializeMessages([data]))[0];
+    await broadcastCommunicationMessage(data as unknown as Record<string, unknown>);
+
+    return NextResponse.json({ message }, { status: 201 });
   } catch (error) {
     const resolved = communicationErrorResponse(error);
     return NextResponse.json({ error: resolved.message }, { status: resolved.status });

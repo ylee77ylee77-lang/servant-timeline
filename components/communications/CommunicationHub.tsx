@@ -68,6 +68,10 @@ type CallSignal = {
   payload: Record<string, unknown>;
 };
 
+type AudioWindow = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 function apiHeaders(accessToken: string, json = false) {
   return {
     Authorization: `Bearer ${accessToken}`,
@@ -190,9 +194,12 @@ export function CommunicationHub() {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ringtoneContextRef = useRef<AudioContext | null>(null);
+  const ringtoneTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeCallRef = useRef<CallRow | null>(null);
   const isCallerRef = useRef(false);
   const processedSignalsRef = useRef(new Set<number>());
+  const processedMessageInsertIdsRef = useRef(new Set<string>());
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
   const ringTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -213,6 +220,127 @@ export function CommunicationHub() {
     if (!response.ok) throw new Error(data?.error || "目前無法完成操作。");
     return data;
   }, [session.access_token]);
+
+  const ensureRingtoneAudio = useCallback(async () => {
+    if (typeof window === "undefined") return null;
+
+    const audioWindow = window as AudioWindow;
+    const AudioContextClass = window.AudioContext ?? audioWindow.webkitAudioContext;
+    if (!AudioContextClass) return null;
+
+    let context = ringtoneContextRef.current;
+    if (!context || context.state === "closed") {
+      context = new AudioContextClass();
+      ringtoneContextRef.current = context;
+    }
+
+    if (context.state !== "running") {
+      await context.resume().catch(() => undefined);
+    }
+
+    return context.state === "running" ? context : null;
+  }, []);
+
+  const playRingtonePulse = useCallback(async () => {
+    const context = await ensureRingtoneAudio();
+    if (!context) return;
+
+    const now = context.currentTime;
+    const gain = context.createGain();
+    const firstTone = context.createOscillator();
+    const secondTone = context.createOscillator();
+
+    firstTone.type = "sine";
+    secondTone.type = "sine";
+    firstTone.frequency.setValueAtTime(523.25, now);
+    secondTone.frequency.setValueAtTime(659.25, now);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.075, now + 0.025);
+    gain.gain.setValueAtTime(0.075, now + 0.22);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+
+    firstTone.connect(gain);
+    secondTone.connect(gain);
+    gain.connect(context.destination);
+
+    firstTone.start(now);
+    secondTone.start(now);
+    firstTone.stop(now + 0.45);
+    secondTone.stop(now + 0.45);
+
+    window.setTimeout(() => {
+      firstTone.disconnect();
+      secondTone.disconnect();
+      gain.disconnect();
+    }, 650);
+
+    if ("vibrate" in navigator) {
+      navigator.vibrate([180, 90, 180]);
+    }
+  }, [ensureRingtoneAudio]);
+
+  const stopRingtone = useCallback(() => {
+    if (ringtoneTimerRef.current) {
+      clearInterval(ringtoneTimerRef.current);
+      ringtoneTimerRef.current = null;
+    }
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(0);
+    }
+  }, []);
+
+  const startRingtone = useCallback(() => {
+    stopRingtone();
+    void playRingtonePulse();
+    ringtoneTimerRef.current = setInterval(() => {
+      void playRingtonePulse();
+    }, 1600);
+  }, [playRingtonePulse, stopRingtone]);
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      void ensureRingtoneAudio();
+    };
+
+    window.addEventListener("pointerdown", unlockAudio, { capture: true, once: true });
+    window.addEventListener("keydown", unlockAudio, { capture: true, once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio, true);
+      window.removeEventListener("keydown", unlockAudio, true);
+    };
+  }, [ensureRingtoneAudio]);
+
+  useEffect(() => {
+    if (!incomingCall) {
+      stopRingtone();
+      return;
+    }
+
+    startRingtone();
+
+    const resumeWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void ensureRingtoneAudio().then(() => startRingtone());
+      }
+    };
+    document.addEventListener("visibilitychange", resumeWhenVisible);
+
+    return () => {
+      document.removeEventListener("visibilitychange", resumeWhenVisible);
+      stopRingtone();
+    };
+  }, [ensureRingtoneAudio, incomingCall?.id, startRingtone, stopRingtone]);
+
+  useEffect(() => () => {
+    stopRingtone();
+    const context = ringtoneContextRef.current;
+    ringtoneContextRef.current = null;
+    if (context && context.state !== "closed") {
+      void context.close().catch(() => undefined);
+    }
+  }, [stopRingtone]);
 
   const loadPeers = useCallback(async () => {
     if (!canUse) return;
@@ -283,6 +411,14 @@ export function CommunicationHub() {
 
     const peerId = senderId === currentUserId ? recipientId : senderId;
     if (!peerId) return;
+
+    if (eventType === "INSERT") {
+      if (processedMessageInsertIdsRef.current.has(messageId)) return;
+      if (processedMessageInsertIdsRef.current.size >= 500) {
+        processedMessageInsertIdsRef.current.clear();
+      }
+      processedMessageInsertIdsRef.current.add(messageId);
+    }
 
     const isSelectedConversation = selectedPeerId === peerId;
     if (isSelectedConversation) {
@@ -564,19 +700,6 @@ export function CommunicationHub() {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
-          schema: "public",
-          table: "communication_messages",
-          filter: `sender_id=eq.${userId}`,
-        },
-        (payload) => handleRealtimeMessage(
-          payload.new as Record<string, unknown>,
-          "INSERT"
-        )
-      )
-      .on(
-        "postgres_changes",
-        {
           event: "UPDATE",
           schema: "public",
           table: "communication_messages",
@@ -627,6 +750,41 @@ export function CommunicationHub() {
       void supabase.removeChannel(channel);
     };
   }, [canUse, handleRealtimeMessage, loadActiveCalls, session.user.id]);
+
+  useEffect(() => {
+    if (!canUse) return;
+
+    const supabase = getSupabaseBrowserClient();
+    let disposed = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    void requestJson("/api/communications/broadcast-topic")
+      .then((data) => {
+        if (disposed || typeof data?.topic !== "string" || !data.topic) return;
+
+        channel = supabase
+          .channel(data.topic)
+          .on(
+            "broadcast",
+            { event: "message-insert" },
+            (event) => {
+              const row = (
+                event && typeof event === "object" && "payload" in event
+                  ? event.payload
+                  : event
+              ) as Record<string, unknown>;
+              handleRealtimeMessage(row, "INSERT");
+            }
+          )
+          .subscribe();
+      })
+      .catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [canUse, handleRealtimeMessage, requestJson]);
 
   const signalCallId = activeCall?.id ?? "";
 
@@ -744,6 +902,7 @@ export function CommunicationHub() {
   const acceptCall = async () => {
     if (!incomingCall) return;
     const call = incomingCall;
+    stopRingtone();
     setIncomingCall(null);
     setOpen(true);
     const peerId = call.caller_id;
@@ -763,6 +922,7 @@ export function CommunicationHub() {
   const declineCall = async () => {
     if (!incomingCall) return;
     const callId = incomingCall.id;
+    stopRingtone();
     setIncomingCall(null);
     await requestJson("/api/communications/calls", {
       method: "POST",
