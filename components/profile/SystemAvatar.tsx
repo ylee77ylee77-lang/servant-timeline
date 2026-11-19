@@ -1,8 +1,9 @@
 "use client";
 
 import type { AvatarConfig } from "@/lib/profile/avatar";
-import { Avatar3DPortrait } from "@/components/profile/Avatar3DPortrait";
+import { AvatarRenderer } from "@/components/profile/AvatarRenderer";
 
+/** Backward-compatible application entry point. Delegates to the sole renderer. */
 export function SystemAvatar({
   config,
   size = 48,
@@ -12,5 +13,5 @@ export function SystemAvatar({
   size?: number;
   className?: string;
 }) {
-  return <Avatar3DPortrait config={config} size={size} className={className} />;
+  return <AvatarRenderer config={config} size={size} className={className} />;
 }
