@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     const { data: profiles, error: profileError } = ids.length
       ? await supabase
           .from("profiles")
-          .select("id,display_name,account_code,avatar_config,is_active")
+          .select("id,display_name,avatar_config,is_active")
           .in("id", ids)
           .eq("is_active", true)
       : { data: [], error: null };
@@ -46,7 +46,6 @@ export async function GET(request: NextRequest) {
       .map((profile) => ({
         id: String(profile.id),
         displayName: String(profile.display_name || "同工"),
-        accountCode: String(profile.account_code || ""),
         avatarConfig: normalizeAvatarConfig(profile.avatar_config),
         unreadCount: unreadByPeer.get(String(profile.id)) ?? 0,
       }))
