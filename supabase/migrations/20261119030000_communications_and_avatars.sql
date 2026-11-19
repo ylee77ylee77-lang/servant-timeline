@@ -29,6 +29,8 @@ create table if not exists public.communication_messages (
   updated_at timestamptz not null default now(),
   check (sender_id <> recipient_id),
   check (
+    retracted_at is not null
+    or
     (message_type = 'text' and body is not null and char_length(trim(body)) >= 1 and attachment_path is null)
     or
     (message_type in ('image', 'file') and attachment_path is not null)
