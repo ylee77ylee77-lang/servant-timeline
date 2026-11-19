@@ -1,18 +1,28 @@
+import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { isValidAccountCode, normalizeAccountCode } from "@/lib/auth/account-code";
 import {
-  derivePendingPasswordResets,
-  isValidResetPassword,
+  ACCOUNT_RECOVERY_COMPLETED_EVENT,
+  ACCOUNT_RECOVERY_REQUESTED_EVENT,
+  ACCOUNT_RECOVERY_SUBJECT_TYPE,
+  derivePendingAccountRecoveries,
   MUST_CHANGE_PASSWORD_APP_METADATA_KEY,
-  PASSWORD_RESET_COMPLETED_EVENT,
-  PASSWORD_RESET_REQUESTED_EVENT,
+  maskContactEmail,
   withPasswordChangeRequired,
 } from "@/lib/auth/password-reset";
+import { sendAccountRecoveryEmail, ACCOUNT_RECOVERY_EMAIL_DAILY_LIMIT } from "@/lib/email/brevo";
 import { getAuthErrorResponse, requireAdmin } from "@/lib/auth/require-admin";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function createTemporaryPassword() {
+  return "Sk!7" + randomBytes(12).toString("base64url");
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,42 +31,21 @@ export async function GET(request: NextRequest) {
 
     const { data: auditRows, error: auditError } = await supabase
       .from("activity_logs")
-      .select("id,subject_id,event_type,occurred_at")
-      .eq("subject_type", "user")
+      .select("id,event_type,occurred_at,metadata")
+      .eq("subject_type", ACCOUNT_RECOVERY_SUBJECT_TYPE)
       .in("event_type", [
-        PASSWORD_RESET_REQUESTED_EVENT,
-        PASSWORD_RESET_COMPLETED_EVENT,
+        ACCOUNT_RECOVERY_REQUESTED_EVENT,
+        ACCOUNT_RECOVERY_COMPLETED_EVENT,
       ])
       .order("occurred_at", { ascending: false })
       .limit(500);
     if (auditError) throw auditError;
 
-    const pending = derivePendingPasswordResets(auditRows ?? []);
-    if (!pending.length) {
-      return NextResponse.json({ requests: [] });
-    }
-
-    const { data: profiles, error: profileError } = await supabase
-      .from("profiles")
-      .select("id,account_code,display_name,is_active")
-      .in("id", pending.map((item) => item.subjectId));
-    if (profileError) throw profileError;
-
-    const profileById = new Map(
-      (profiles ?? []).map((profile) => [String(profile.id), profile])
-    );
-
-    const requests = pending.flatMap((item) => {
-      const profile = profileById.get(item.subjectId);
-      if (!profile) return [];
-      return [{
-        userId: item.subjectId,
-        accountCode: String(profile.account_code || ""),
-        displayName: String(profile.display_name || "同工"),
-        isActive: Boolean(profile.is_active),
-        requestedAt: item.requestedAt,
-      }];
-    });
+    const requests = derivePendingAccountRecoveries(auditRows ?? []).map((item) => ({
+      requestLogId: String(item.requestLogId),
+      requestedName: item.requestedName,
+      requestedAt: item.requestedAt,
+    }));
 
     return NextResponse.json({ requests });
   } catch (error) {
@@ -69,33 +58,86 @@ export async function POST(request: NextRequest) {
   try {
     const admin = await requireAdmin(request);
     const body = await request.json().catch(() => ({}));
-    const accountCode = normalizeAccountCode(body.accountCode);
-    const password = String(body.password ?? "");
+    const requestLogId = String(body.requestLogId ?? "").trim();
+    const userId = String(body.userId ?? "").trim();
 
-    if (!isValidAccountCode(accountCode)) {
-      return NextResponse.json({ error: "服事帳號格式無效。" }, { status: 400 });
+    if (!/^\d+$/.test(requestLogId)) {
+      return NextResponse.json({ error: "申請識別資料無效。" }, { status: 400 });
     }
-    if (!isValidResetPassword(password)) {
-      return NextResponse.json({ error: "新密碼需為 8–72 字元。" }, { status: 400 });
+    if (!isUuid(userId)) {
+      return NextResponse.json({ error: "服事帳號識別資料無效。" }, { status: 400 });
     }
 
     const supabase = getSupabaseAdminClient();
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("id,account_code,display_name,is_active")
-      .eq("account_code", accountCode)
-      .maybeSingle();
+    const { data: auditRows, error: auditError } = await supabase
+      .from("activity_logs")
+      .select("id,event_type,occurred_at,metadata")
+      .eq("subject_type", ACCOUNT_RECOVERY_SUBJECT_TYPE)
+      .in("event_type", [
+        ACCOUNT_RECOVERY_REQUESTED_EVENT,
+        ACCOUNT_RECOVERY_COMPLETED_EVENT,
+      ])
+      .order("occurred_at", { ascending: false })
+      .limit(500);
+    if (auditError) throw auditError;
+
+    const pendingRequest = derivePendingAccountRecoveries(auditRows ?? [])
+      .find((item) => String(item.requestLogId) === requestLogId);
+    if (!pendingRequest) {
+      return NextResponse.json(
+        { error: "這份申請已處理或已不存在，請重新整理。" },
+        { status: 409 }
+      );
+    }
+
+    const [{ data: profile, error: profileError }, { data: contact, error: contactError }] =
+      await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id,account_code,display_name,is_active")
+          .eq("id", userId)
+          .maybeSingle(),
+        supabase
+          .from("account_recovery_contacts")
+          .select("contact_email")
+          .eq("user_id", userId)
+          .maybeSingle(),
+      ]);
     if (profileError) throw profileError;
+    if (contactError) throw contactError;
     if (!profile) {
       return NextResponse.json({ error: "找不到這個服事帳號。" }, { status: 404 });
     }
     if (!profile.is_active) {
-      return NextResponse.json({ error: "此帳號尚未啟用，請先處理帳號狀態。" }, { status: 409 });
+      return NextResponse.json(
+        { error: "此帳號尚未啟用，請先處理帳號狀態。" },
+        { status: 409 }
+      );
+    }
+    if (!contact?.contact_email) {
+      return NextResponse.json(
+        { error: "此帳號尚未設定救援 Email，請先在帳號管理中補上 Email。" },
+        { status: 409 }
+      );
     }
 
-    const { data: authUserData, error: authUserError } = await supabase.auth.admin.getUserById(
-      profile.id
-    );
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count: sentCount, error: sentCountError } = await supabase
+      .from("activity_logs")
+      .select("id", { count: "exact", head: true })
+      .eq("subject_type", ACCOUNT_RECOVERY_SUBJECT_TYPE)
+      .eq("event_type", ACCOUNT_RECOVERY_COMPLETED_EVENT)
+      .gte("occurred_at", since);
+    if (sentCountError) throw sentCountError;
+    if ((sentCount ?? 0) >= ACCOUNT_RECOVERY_EMAIL_DAILY_LIMIT) {
+      return NextResponse.json(
+        { error: "今日帳號救援寄信已達免費安全上限，請稍後再處理。" },
+        { status: 429 }
+      );
+    }
+
+    const { data: authUserData, error: authUserError } =
+      await supabase.auth.admin.getUserById(profile.id);
     if (authUserError || !authUserData.user) {
       return NextResponse.json(
         { error: "無法讀取帳號狀態，請稍後再試。" },
@@ -103,10 +145,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const temporaryPassword = createTemporaryPassword();
     const { error: updateError } = await supabase.auth.admin.updateUserById(
       profile.id,
       {
-        password,
+        password: temporaryPassword,
         app_metadata: withPasswordChangeRequired(
           authUserData.user.app_metadata,
           true
@@ -115,18 +158,39 @@ export async function POST(request: NextRequest) {
     );
     if (updateError) {
       return NextResponse.json(
-        { error: "重設密碼失敗，請稍後再試。" },
+        { error: "重設登入資料失敗，請稍後再試。" },
         { status: 500 }
+      );
+    }
+
+    let messageId = "";
+    try {
+      const sent = await sendAccountRecoveryEmail({
+        toEmail: String(contact.contact_email),
+        accountCode: String(profile.account_code || ""),
+        temporaryPassword,
+      });
+      messageId = sent.messageId;
+    } catch {
+      return NextResponse.json(
+        {
+          error: "臨時密碼已重設，但 Email 寄送失敗。申請仍保留，請確認 Brevo 設定後重新處理；再次處理會產生新的臨時密碼。",
+        },
+        { status: 502 }
       );
     }
 
     const { error: logError } = await supabase.from("activity_logs").insert({
       actor_user_id: admin.userId,
       service_id: null,
-      event_type: PASSWORD_RESET_COMPLETED_EVENT,
-      subject_type: "user",
+      event_type: ACCOUNT_RECOVERY_COMPLETED_EVENT,
+      subject_type: ACCOUNT_RECOVERY_SUBJECT_TYPE,
       subject_id: profile.id,
       metadata: {
+        request_log_id: requestLogId,
+        delivery: "brevo_email",
+        recipient: maskContactEmail(String(contact.contact_email)),
+        provider_message_id: messageId,
         source: "admin_users_page",
         [MUST_CHANGE_PASSWORD_APP_METADATA_KEY]: true,
       },
@@ -135,9 +199,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      user: {
-        accountCode: String(profile.account_code || accountCode),
+      delivery: {
         displayName: String(profile.display_name || "同工"),
+        accountCode: String(profile.account_code || ""),
+        emailMasked: maskContactEmail(String(contact.contact_email)),
       },
     });
   } catch (error) {

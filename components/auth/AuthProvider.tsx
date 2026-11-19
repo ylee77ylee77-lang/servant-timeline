@@ -16,7 +16,7 @@ import { Eye, EyeOff, KeyRound, LogIn, LogOut, Loader2 } from "lucide-react";
 import { accountCodeToInternalEmail, normalizeAccountCode } from "@/lib/auth/account-code";
 import { getPublicSupabaseConfig } from "@/lib/supabase/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { requiresPasswordChange } from "@/lib/auth/password-reset";
+import { normalizeRecoveryName, requiresPasswordChange } from "@/lib/auth/password-reset";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
 import { getDefaultAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 
@@ -53,11 +53,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [loginNotice, setLoginNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [recoveryDisplayName, setRecoveryDisplayName] = useState("");
   const [passwordResetMessage, setPasswordResetMessage] = useState("");
   const [isPasswordResetSubmitting, setIsPasswordResetSubmitting] = useState(false);
   const [showRegistration, setShowRegistration] = useState(false);
   const [registrationDisplayName, setRegistrationDisplayName] = useState("");
   const [registrationAccountCode, setRegistrationAccountCode] = useState("");
+  const [registrationContactEmail, setRegistrationContactEmail] = useState("");
   const [registrationPassword, setRegistrationPassword] = useState("");
   const [registrationPasswordConfirm, setRegistrationPasswordConfirm] = useState("");
   const [registrationAvatar, setRegistrationAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
@@ -217,9 +219,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     setPasswordResetMessage("");
     setErrorMessage("");
 
-    const normalizedCode = normalizeAccountCode(loginCode);
-    if (!normalizedCode) {
-      setPasswordResetMessage("請先輸入你的服事帳號。");
+    const normalizedName = normalizeRecoveryName(recoveryDisplayName);
+    if (!normalizedName) {
+      setPasswordResetMessage("請先輸入你的姓名。");
       return;
     }
 
@@ -228,20 +230,20 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const response = await fetch("/api/password-reset-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountCode: normalizedCode }),
+        body: JSON.stringify({ displayName: normalizedName }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(data?.error || "目前無法送出密碼重設申請。");
+        throw new Error(data?.error || "目前無法送出帳號／密碼協助申請。");
       }
 
-      setLoginCode(normalizedCode);
+      setRecoveryDisplayName(normalizedName);
       setPasswordResetMessage(
-        data?.message || "密碼重設申請已送出。待管理員提供臨時密碼後，請用臨時密碼登入並設定自己的新密碼。"
+        data?.message || "申請已送出。管理員確認本人後，系統會將登入資料寄到你登記的 Email。"
       );
     } catch (error) {
       setPasswordResetMessage(
-        error instanceof Error ? error.message : "目前無法送出密碼重設申請。"
+        error instanceof Error ? error.message : "目前無法送出帳號／密碼協助申請。"
       );
     } finally {
       setIsPasswordResetSubmitting(false);
@@ -269,6 +271,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           displayName: registrationDisplayName,
           accountCode: normalizedCode,
+          contactEmail: registrationContactEmail,
           password: registrationPassword,
           avatarConfig: registrationAvatar,
         }),
@@ -283,6 +286,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setLoginCode(normalizedCode);
       setRegistrationDisplayName("");
       setRegistrationAccountCode("");
+      setRegistrationContactEmail("");
       setRegistrationPassword("");
       setRegistrationPasswordConfirm("");
       setRegistrationAvatar(getDefaultAvatarConfig());
@@ -470,6 +474,18 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               required
             />
 
+            <label htmlFor="registration-email" className="mt-5 block text-sm font-black text-[#1F2937]">聯絡 Email</label>
+            <input
+              id="registration-email"
+              type="email"
+              autoComplete="email"
+              value={registrationContactEmail}
+              onChange={(event) => setRegistrationContactEmail(event.target.value)}
+              placeholder="用於忘記帳號／密碼時收取登入資料"
+              className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
+              required
+            />
+
             <div className="mt-5">
               <div className="mb-2 text-sm font-black text-[#1F2937]">大頭圖（選填）</div>
               <div className="rounded-[22px] border border-[#E6EAF0] bg-[#FFF9F3]/60 p-4">
@@ -535,19 +551,18 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
           >
             <div className="mb-7">
               <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
-              <h1 className="mt-2 text-2xl font-black text-[#1F2937]">密碼重設申請</h1>
+              <h1 className="mt-2 text-2xl font-black text-[#1F2937]">帳號／密碼協助申請</h1>
               <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
-                請輸入您的服事帳號並送出申請。待管理員完成重設並將臨時密碼提供給您後，請用臨時密碼登入，再設定自己的新密碼。
+                不論忘記服事帳號或密碼，都只要填姓名。管理員確認本人後，系統會把原服事帳號與新的臨時密碼寄到你登記的 Email。
               </p>
             </div>
 
-            <label htmlFor="reset-account-code" className="text-sm font-black text-[#1F2937]">服事帳號</label>
+            <label htmlFor="recovery-display-name" className="text-sm font-black text-[#1F2937]">姓名（中文全名）</label>
             <input
-              id="reset-account-code"
-              autoCapitalize="none"
-              autoComplete="username"
-              value={loginCode}
-              onChange={(event) => setLoginCode(event.target.value)}
+              id="recovery-display-name"
+              autoComplete="name"
+              value={recoveryDisplayName}
+              onChange={(event) => setRecoveryDisplayName(event.target.value)}
               className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
               required
             />
@@ -564,7 +579,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
             >
               {isPasswordResetSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <KeyRound className="h-5 w-5" />}
-              {isPasswordResetSubmitting ? "送出中" : "送出密碼重設申請"}
+              {isPasswordResetSubmitting ? "送出中" : "送出帳號／密碼協助申請"}
             </button>
 
             <button
@@ -624,12 +639,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               type="button"
               onClick={() => {
                 setShowPasswordReset(true);
+                setRecoveryDisplayName("");
                 setPasswordResetMessage("");
                 setErrorMessage("");
               }}
               className="mt-4 w-full text-center text-sm font-black text-[#6D55A3]"
             >
-              忘記密碼？
+              忘記帳號或密碼？
             </button>
 
             <div className="mt-5 border-t border-[#E6EAF0] pt-5">

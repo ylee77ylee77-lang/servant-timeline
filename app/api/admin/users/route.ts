@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { accountCodeToInternalEmail, isValidAccountCode, normalizeAccountCode } from "@/lib/auth/account-code";
+import { isValidContactEmail, normalizeContactEmail } from "@/lib/auth/password-reset";
 import { getAuthErrorResponse, requireAdmin } from "@/lib/auth/require-admin";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
@@ -13,8 +14,11 @@ export async function GET(request: NextRequest) {
     await requireAdmin(request);
     const supabase = getSupabaseAdminClient();
 
-    const [{ data: profiles, error: profileError }, { data: roleRows, error: roleError }] =
-      await Promise.all([
+    const [
+      { data: profiles, error: profileError },
+      { data: roleRows, error: roleError },
+      { data: contactRows, error: contactError },
+    ] = await Promise.all([
         supabase
           .from("profiles")
           .select("id,account_code,display_name,is_active")
@@ -22,10 +26,14 @@ export async function GET(request: NextRequest) {
         supabase
           .from("user_roles")
           .select("user_id,role"),
+        supabase
+          .from("account_recovery_contacts")
+          .select("user_id,contact_email"),
       ]);
 
     if (profileError) throw profileError;
     if (roleError) throw roleError;
+    if (contactError) throw contactError;
 
     const roleMap = new Map<string, string[]>();
     for (const row of roleRows ?? []) {
@@ -35,12 +43,17 @@ export async function GET(request: NextRequest) {
       roleMap.set(userId, current);
     }
 
+    const contactMap = new Map(
+      (contactRows ?? []).map((row) => [String(row.user_id), String(row.contact_email || "")])
+    );
+
     const users = (profiles ?? [])
       .filter((profile) => Boolean(profile.account_code))
       .map((profile) => ({
         id: String(profile.id),
         accountCode: String(profile.account_code ?? ""),
         displayName: String(profile.display_name ?? "同工"),
+        contactEmail: contactMap.get(String(profile.id)) ?? "",
         isActive: Boolean(profile.is_active),
         roles: roleMap.get(String(profile.id)) ?? [],
       }));
@@ -69,11 +82,47 @@ export async function PATCH(request: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "缺少帳號識別資料。" }, { status: 400 });
     }
+    const supabase = getSupabaseAdminClient();
+
+    if (action === "update-recovery-email") {
+      const contactEmail = normalizeContactEmail(body.contactEmail);
+      if (!isValidContactEmail(contactEmail)) {
+        return NextResponse.json({ error: "請輸入有效的聯絡 Email。" }, { status: 400 });
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("id,account_code,display_name")
+        .eq("id", userId)
+        .maybeSingle();
+      if (profileError) throw profileError;
+      if (!profile) {
+        return NextResponse.json({ error: "找不到這個服事帳號。" }, { status: 404 });
+      }
+
+      const { error: contactError } = await supabase
+        .from("account_recovery_contacts")
+        .upsert({
+          user_id: userId,
+          contact_email: contactEmail,
+          updated_at: new Date().toISOString(),
+        });
+      if (contactError) throw contactError;
+
+      return NextResponse.json({
+        ok: true,
+        user: {
+          id: String(profile.id),
+          accountCode: String(profile.account_code ?? ""),
+          displayName: String(profile.display_name ?? "同工"),
+          contactEmail,
+        },
+      });
+    }
+
     if (action !== "activate-coordinator") {
       return NextResponse.json({ error: "無效的帳號操作。" }, { status: 400 });
     }
-
-    const supabase = getSupabaseAdminClient();
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("id,account_code,display_name,is_active")
@@ -140,6 +189,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const accountCode = normalizeAccountCode(body.accountCode);
     const displayName = String(body.displayName ?? "").normalize("NFKC").trim();
+    const contactEmail = normalizeContactEmail(body.contactEmail);
     const password = String(body.password ?? "");
     const role = String(body.role ?? "volunteer");
 
@@ -151,6 +201,9 @@ export async function POST(request: NextRequest) {
     }
     if (!displayName || displayName.length > 80) {
       return NextResponse.json({ error: "姓名需為 1–80 字元。" }, { status: 400 });
+    }
+    if (!isValidContactEmail(contactEmail)) {
+      return NextResponse.json({ error: "請輸入有效的聯絡 Email。" }, { status: 400 });
     }
     if (password.length < 8 || password.length > 72) {
       return NextResponse.json({ error: "密碼需為 8–72 字元。" }, { status: 400 });
@@ -195,6 +248,15 @@ export async function POST(request: NextRequest) {
         { onConflict: "id" }
       );
     if (profileError) throw profileError;
+
+    const { error: contactError } = await supabase
+      .from("account_recovery_contacts")
+      .upsert({
+        user_id: createdUserId,
+        contact_email: contactEmail,
+        updated_at: new Date().toISOString(),
+      });
+    if (contactError) throw contactError;
 
     const { error: deleteRolesError } = await supabase
       .from("user_roles")
