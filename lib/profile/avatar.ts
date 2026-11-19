@@ -1,9 +1,12 @@
 export type AvatarStyle = "masculine" | "feminine" | "neutral";
 export type AvatarSkinTone = "light" | "warm" | "medium" | "deep";
 export type AvatarHair = "short" | "side" | "wave" | "bob" | "long" | "bun";
-export type AvatarHairColor = "dark" | "brown" | "gray";
+export type AvatarHairColor = "dark" | "brown" | "auburn" | "gray" | "blonde";
 export type AvatarOutfit = "shirt" | "polo" | "knit" | "jacket";
 export type AvatarBackground = "lavender" | "peach" | "mint" | "sky" | "sand";
+export type AvatarEyeStyle = "soft" | "bright" | "smile";
+export type AvatarAccessory = "none" | "earrings" | "hairclip" | "cap";
+export type AvatarPet = "none" | "dog" | "cat" | "bird";
 
 export type AvatarConfig = {
   style: AvatarStyle;
@@ -12,7 +15,10 @@ export type AvatarConfig = {
   hairColor: AvatarHairColor;
   outfit: AvatarOutfit;
   background: AvatarBackground;
+  eyeStyle: AvatarEyeStyle;
   glasses: boolean;
+  accessory: AvatarAccessory;
+  pet: AvatarPet;
 };
 
 export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
@@ -23,7 +29,10 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     hairColor: "dark",
     outfit: "polo",
     background: "sky",
+    eyeStyle: "bright",
     glasses: false,
+    accessory: "none",
+    pet: "none",
   },
   feminine: {
     style: "feminine",
@@ -32,7 +41,10 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     hairColor: "brown",
     outfit: "knit",
     background: "peach",
+    eyeStyle: "bright",
     glasses: false,
+    accessory: "none",
+    pet: "none",
   },
   neutral: {
     style: "neutral",
@@ -41,16 +53,22 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     hairColor: "dark",
     outfit: "shirt",
     background: "lavender",
+    eyeStyle: "soft",
     glasses: false,
+    accessory: "none",
+    pet: "none",
   },
 };
 
 const styles = new Set<AvatarStyle>(["masculine", "feminine", "neutral"]);
 const skins = new Set<AvatarSkinTone>(["light", "warm", "medium", "deep"]);
 const hairs = new Set<AvatarHair>(["short", "side", "wave", "bob", "long", "bun"]);
-const hairColors = new Set<AvatarHairColor>(["dark", "brown", "gray"]);
+const hairColors = new Set<AvatarHairColor>(["dark", "brown", "auburn", "gray", "blonde"]);
 const outfits = new Set<AvatarOutfit>(["shirt", "polo", "knit", "jacket"]);
 const backgrounds = new Set<AvatarBackground>(["lavender", "peach", "mint", "sky", "sand"]);
+const eyeStyles = new Set<AvatarEyeStyle>(["soft", "bright", "smile"]);
+const accessories = new Set<AvatarAccessory>(["none", "earrings", "hairclip", "cap"]);
+const pets = new Set<AvatarPet>(["none", "dog", "cat", "bird"]);
 
 export function getDefaultAvatarConfig(style: AvatarStyle = "neutral"): AvatarConfig {
   return { ...AVATAR_DEFAULTS[style] };
@@ -84,6 +102,32 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
     background: backgrounds.has(input.background as AvatarBackground)
       ? (input.background as AvatarBackground)
       : base.background,
+    eyeStyle: eyeStyles.has(input.eyeStyle as AvatarEyeStyle)
+      ? (input.eyeStyle as AvatarEyeStyle)
+      : base.eyeStyle,
     glasses: input.glasses === true,
+    accessory: accessories.has(input.accessory as AvatarAccessory)
+      ? (input.accessory as AvatarAccessory)
+      : base.accessory,
+    pet: pets.has(input.pet as AvatarPet)
+      ? (input.pet as AvatarPet)
+      : base.pet,
   };
+}
+
+export function isAvatarPersonalized(value: unknown) {
+  const avatar = normalizeAvatarConfig(value);
+  const base = getDefaultAvatarConfig();
+  return (
+    avatar.style !== base.style
+    || avatar.skinTone !== base.skinTone
+    || avatar.hair !== base.hair
+    || avatar.hairColor !== base.hairColor
+    || avatar.outfit !== base.outfit
+    || avatar.background !== base.background
+    || avatar.eyeStyle !== base.eyeStyle
+    || avatar.glasses !== base.glasses
+    || avatar.accessory !== base.accessory
+    || avatar.pet !== base.pet
+  );
 }
