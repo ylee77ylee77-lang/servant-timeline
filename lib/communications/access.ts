@@ -35,7 +35,7 @@ export async function getCommunicationPeer(actor: CommunicationActor, peerId: st
     await Promise.all([
       supabase
         .from("profiles")
-        .select("id,display_name,account_code,is_active,avatar_config")
+        .select("id,display_name,is_active,avatar_config")
         .eq("id", peerId)
         .maybeSingle(),
       supabase.from("user_roles").select("role").eq("user_id", peerId),
@@ -54,7 +54,6 @@ export async function getCommunicationPeer(actor: CommunicationActor, peerId: st
   return {
     id: String(profile.id),
     displayName: String(profile.display_name || "同工"),
-    accountCode: String(profile.account_code || ""),
     avatarConfig: profile.avatar_config,
     roles: peerRoles,
   };
