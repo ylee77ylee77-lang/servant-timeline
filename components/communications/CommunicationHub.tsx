@@ -200,13 +200,19 @@ export function CommunicationHub() {
   }, [loadPeers, markRead, requestJson]);
 
   useEffect(() => {
-    if (canUse) void loadPeers();
+    if (!canUse) return;
+    const timer = window.setTimeout(() => {
+      void loadPeers();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [canUse, loadPeers]);
 
   useEffect(() => {
-    if (open && selectedPeerId) {
+    if (!open || !selectedPeerId) return;
+    const timer = window.setTimeout(() => {
       void loadMessages(selectedPeerId);
-    }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [open, selectedPeerId, loadMessages]);
 
   useEffect(() => {
@@ -387,7 +393,9 @@ export function CommunicationHub() {
 
   useEffect(() => {
     if (!canUse) return;
-    void loadActiveCalls();
+    const initialRefreshTimer = window.setTimeout(() => {
+      void loadActiveCalls();
+    }, 0);
 
     const supabase = getSupabaseBrowserClient();
     const channel = supabase
@@ -422,6 +430,7 @@ export function CommunicationHub() {
       .subscribe();
 
     return () => {
+      window.clearTimeout(initialRefreshTimer);
       void supabase.removeChannel(channel);
     };
   }, [canUse, loadActiveCalls, loadMessages, loadPeers, open, processSignal, selectedPeerId, session.user.id]);
