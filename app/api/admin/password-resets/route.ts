@@ -3,8 +3,10 @@ import { isValidAccountCode, normalizeAccountCode } from "@/lib/auth/account-cod
 import {
   derivePendingPasswordResets,
   isValidResetPassword,
+  MUST_CHANGE_PASSWORD_APP_METADATA_KEY,
   PASSWORD_RESET_COMPLETED_EVENT,
   PASSWORD_RESET_REQUESTED_EVENT,
+  withPasswordChangeRequired,
 } from "@/lib/auth/password-reset";
 import { getAuthErrorResponse, requireAdmin } from "@/lib/auth/require-admin";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
@@ -91,9 +93,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "此帳號尚未啟用，請先處理帳號狀態。" }, { status: 409 });
     }
 
+    const { data: authUserData, error: authUserError } = await supabase.auth.admin.getUserById(
+      profile.id
+    );
+    if (authUserError || !authUserData.user) {
+      return NextResponse.json(
+        { error: "無法讀取帳號狀態，請稍後再試。" },
+        { status: 500 }
+      );
+    }
+
     const { error: updateError } = await supabase.auth.admin.updateUserById(
       profile.id,
-      { password }
+      {
+        password,
+        app_metadata: withPasswordChangeRequired(
+          authUserData.user.app_metadata,
+          true
+        ),
+      }
     );
     if (updateError) {
       return NextResponse.json(
@@ -108,7 +126,10 @@ export async function POST(request: NextRequest) {
       event_type: PASSWORD_RESET_COMPLETED_EVENT,
       subject_type: "user",
       subject_id: profile.id,
-      metadata: { source: "admin_users_page" },
+      metadata: {
+        source: "admin_users_page",
+        [MUST_CHANGE_PASSWORD_APP_METADATA_KEY]: true,
+      },
     });
     if (logError) throw logError;
 
