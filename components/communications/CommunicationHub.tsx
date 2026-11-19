@@ -219,7 +219,7 @@ export function CommunicationHub() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const ringtoneAudioRef = useRef<HTMLAudioElement | null>(null);
-  const ringtoneTestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ringtoneTestTimerRef = useRef<number | null>(null);
   const activeCallRef = useRef<CallRow | null>(null);
   const isCallerRef = useRef(false);
   const processedSignalsRef = useRef(new Set<number>());
