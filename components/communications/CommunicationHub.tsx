@@ -224,6 +224,7 @@ export function CommunicationHub() {
   const openRef = useRef(open);
   const callStateRef = useRef(callState);
   const pendingMessagesRef = useRef(new Map<string, ChatMessage>());
+  const refreshedAudioIdsRef = useRef(new Set<string>());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -1251,7 +1252,11 @@ export function CommunicationHub() {
                                     <Mic className="h-4 w-4" /> 語音留言
                                   </div>
                                   {message.attachmentUrl ? (
-                                    <audio controls preload="none" src={message.attachmentUrl} className="w-full max-w-[250px]" onError={() => void loadMessages(selectedPeerIdRef.current, false, false)} />
+                                    <audio controls preload="none" src={message.attachmentUrl} className="w-full max-w-[250px]" onError={() => {
+                                      if (refreshedAudioIdsRef.current.has(message.id)) return;
+                                      refreshedAudioIdsRef.current.add(message.id);
+                                      void loadMessages(selectedPeerIdRef.current, false, false);
+                                    }} />
                                   ) : <span className="text-xs text-[#7B7B74]">載入語音中…</span>}
                                 </div>
                               ) : message.messageType === "image" ? (
