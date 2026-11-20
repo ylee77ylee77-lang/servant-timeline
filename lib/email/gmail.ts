@@ -178,7 +178,10 @@ export async function sendAccountRecoveryEmail({
       `服事帳號：${accountCode}`,
       `臨時密碼：${temporaryPassword}`,
       "",
-      "請使用以上資料登入。登入後系統會要求你立即設定自己的新密碼。",
+      "請使用以上資料登入：",
+      "https://servant-timeline.vercel.app",
+      "",
+      "登入後系統會要求你立即設定自己的新密碼。",
       "若你沒有提出這項申請，請直接聯絡管理員。",
     ].join("\r\n");
 

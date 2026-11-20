@@ -16,8 +16,14 @@ import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const TEMPORARY_PASSWORD_CHARS =
+  "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+
 function createTemporaryPassword() {
-  return "Sk!7" + randomBytes(12).toString("base64url");
+  const bytes = randomBytes(10);
+  return Array.from(bytes, (byte) =>
+    TEMPORARY_PASSWORD_CHARS[byte % TEMPORARY_PASSWORD_CHARS.length]
+  ).join("");
 }
 
 function isUuid(value: string) {
