@@ -18,6 +18,7 @@ import { getPublicSupabaseConfig } from "@/lib/supabase/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeRecoveryName, requiresPasswordChange } from "@/lib/auth/password-reset";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
+import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { AvatarLivePreview, AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { AVATAR_DISPLAY_LABELS, getDefaultAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
@@ -493,7 +494,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               required
             />
 
-            <div className="mt-5 rounded-[22px] border border-[#E6EAF0] bg-[#FFF9F3]/60 p-4">
+            <div className="mt-5">
+              <div className="mb-2 text-sm font-black text-[#1F2937]">大頭貼（選填）</div>
+              <div className="rounded-[22px] border border-[#E6EAF0] bg-[#FFF9F3]/60 p-4">
               <button
                 type="button"
                 aria-expanded={registrationAvatarOpen}
@@ -503,7 +506,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               >
                 <SystemAvatar config={registrationAvatar} displayName={registrationDisplayName} size={52} />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-black text-[#1F2937]">大頭貼（選填）</span>
+                  <span className="block text-sm font-black text-[#1F2937]">{AVATAR_DISPLAY_LABELS[registrationAvatar.displayMode]}</span>
                   <span className="mt-1 block truncate text-xs font-medium text-[#7B7B74]">
                     {AVATAR_DISPLAY_LABELS[registrationAvatar.displayMode]}
                   </span>
@@ -517,6 +520,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
                     onChange={(mode) => setRegistrationAvatar((avatar) => ({ ...avatar, displayMode: mode }))}
                     disabled={isRegistrationSubmitting}
                   />
+                  {registrationAvatar.displayMode === "default" && (
+                    <AvatarIconPicker
+                      value={registrationAvatar}
+                      onChange={setRegistrationAvatar}
+                      disabled={isRegistrationSubmitting}
+                    />
+                  )}
                   {registrationAvatar.displayMode === "custom" && (
                     <div className="mt-5">
                       <AvatarEditor value={registrationAvatar} onChange={setRegistrationAvatar} showPreview={false} />
@@ -524,6 +534,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
                   )}
                 </div>
               )}
+              </div>
             </div>
 
             <PasswordInput

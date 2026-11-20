@@ -12,6 +12,8 @@ import {
   AVATAR_BACKGROUNDS,
   getAvatarScene,
 } from "../lib/profile/avatar-scene.ts";
+import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "../lib/profile/avatar-icon.ts";
+import type { AvatarIconTone } from "../lib/profile/avatar.ts";
 
 test("avatar uses a single canonical four-layer head-only composition", () => {
   assert.deepEqual(AVATAR_LAYER_ORDER, [
@@ -113,7 +115,7 @@ test("display mode is enforced by the canonical scene, not by page-specific CSS"
   assert.equal(name.companion, null);
   assert.equal(neutral.avatar.pet, "eagle");
   assert.equal(name.avatar.style, "feminine");
-  assert.deepEqual(neutral.gradient, AVATAR_BACKGROUNDS.lavender);
+  assert.deepEqual(neutral.gradient, AVATAR_ICON_TONES.lavender.gradient);
   assert.deepEqual(name.gradient, AVATAR_BACKGROUNDS.lavender);
 });
 
@@ -135,4 +137,50 @@ test("default avatar fallback has a clearly visible high-contrast silhouette", (
   const renderer = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarRenderer.tsx"), "utf8");
   assert.match(renderer, /aria-hidden="true" fill="#6D55A3"/);
   assert.doesNotMatch(renderer, /fill="#FFFFFF" opacity="0.72"/);
+});
+
+
+test("six symbol choices and six gray-based tonal palettes use one scene contract", () => {
+  assert.deepEqual(AVATAR_ICON_OPTIONS.map((item) => item.label), ["十字架", "聖經", "禱告", "天使", "棕樹枝", "教會"]);
+  assert.deepEqual(Object.values(AVATAR_ICON_TONES).map((tone) => tone.label), ["暖灰", "冷灰", "炭灰", "米灰", "藍灰", "薰衣草灰"]);
+  for (const item of AVATAR_ICON_OPTIONS) {
+    for (const iconTone of Object.keys(AVATAR_ICON_TONES) as AvatarIconTone[]) {
+      const scene = getAvatarScene({ displayMode: "default", iconType: item.value, iconTone, style: "feminine", pet: "eagle" });
+      assert.equal(scene.portrait, null);
+      assert.equal(scene.companion, null);
+      assert.deepEqual(scene.gradient, AVATAR_ICON_TONES[iconTone].gradient);
+      assert.equal(scene.avatar.iconType, item.value);
+      assert.equal(scene.avatar.iconTone, iconTone);
+      assert.equal(scene.avatar.pet, "eagle");
+      assert.equal(scene.avatar.style, "feminine");
+    }
+  }
+});
+
+test("church mask is an RGBA PNG created from the user-supplied Shekinah building", () => {
+  const file = path.join(process.cwd(), "public", "avatar", "icons", "shekinah-silhouette-mask.png");
+  assert.ok(fs.existsSync(file), "the reference building image must exist");
+  const bytes = fs.readFileSync(file);
+  assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  assert.equal(bytes.toString("ascii", 12, 16), "IHDR");
+  assert.equal(bytes.readUInt32BE(16), 512);
+  assert.equal(bytes.readUInt32BE(20), 512);
+  assert.equal(bytes[25], 6, "church mask should preserve transparency");
+  const renderer = fs.readFileSync(path.join(process.cwd(), "components/profile/SystemIconArtwork.tsx"), "utf8");
+  assert.match(renderer, /shekinah-silhouette-mask.png/);
+  assert.match(renderer, /maskType: "alpha"/);
+});
+
+test("registration and profile share the final short display labels and icon picker", () => {
+  const controls = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarControls.tsx"), "utf8");
+  const registration = fs.readFileSync(path.join(process.cwd(), "components/auth/AuthProvider.tsx"), "utf8");
+  const settings = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarSettingsCard.tsx"), "utf8");
+  const picker = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarIconPicker.tsx"), "utf8");
+  assert.match(controls, /AvatarDisplayModeSelector/);
+  assert.match(registration, /AvatarIconPicker/);
+  assert.match(settings, /AvatarIconPicker/);
+  assert.match(picker, /選擇圖示/);
+  assert.match(picker, /色調/);
+  assert.match(registration, /大頭貼（選填）/);
+  assert.doesNotMatch(registration, /系統預設圖示|自訂3D大頭貼/);
 });

@@ -1,4 +1,5 @@
 import { normalizeAvatarConfig, type AvatarConfig, type AvatarPet } from "./avatar.ts";
+import { AVATAR_ICON_TONES } from "./avatar-icon.ts";
 
 /**
  * Stable, versioned full-canvas artwork contract.
@@ -78,6 +79,8 @@ export function getAvatarScene(input: unknown) {
     avatar,
     portrait: portraits ? (avatar.glasses ? portraits.glasses : portraits.plain) : null,
     companion,
-    gradient: AVATAR_BACKGROUNDS[custom ? avatar.background : "lavender"],
+    gradient: avatar.displayMode === "default"
+      ? AVATAR_ICON_TONES[avatar.iconTone].gradient
+      : AVATAR_BACKGROUNDS[custom ? avatar.background : "lavender"],
   };
 }

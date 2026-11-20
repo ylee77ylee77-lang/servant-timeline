@@ -2,6 +2,7 @@
 
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { AVATAR_DISPLAY_LABELS, type AvatarConfig, type AvatarDisplayMode } from "@/lib/profile/avatar";
+import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "@/lib/profile/avatar-icon";
 import { getAvatarScene } from "@/lib/profile/avatar-scene";
 
 /** The same full-sized sticky live preview in registration and profile editing. */
@@ -19,7 +20,12 @@ export function AvatarLivePreview({
         avatar.glasses ? "眼鏡" : null,
         companion?.name,
       ].filter(Boolean).join("・")
-    : AVATAR_DISPLAY_LABELS[avatar.displayMode];
+    : avatar.displayMode === "default"
+      ? [
+          AVATAR_ICON_OPTIONS.find((option) => option.value === avatar.iconType)?.label,
+          AVATAR_ICON_TONES[avatar.iconTone].label,
+        ].filter(Boolean).join("・")
+      : AVATAR_DISPLAY_LABELS[avatar.displayMode];
 
   return (
     <div className="sticky top-0 z-30 flex items-center gap-5 rounded-[22px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3]/95 to-[#F7F4FF]/95 p-4 shadow-sm backdrop-blur-sm">
@@ -44,19 +50,21 @@ export function AvatarDisplayModeSelector({
 }) {
   return (
     <fieldset className="mt-4 space-y-2" disabled={disabled}>
-      <legend className="mb-2 text-sm font-black text-[#1F2937]">大頭貼顯示方式</legend>
-      {(["custom", "default", "name"] as const).map((mode) => (
-        <label key={mode} className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-[#E6EAF0] px-3 py-2 text-sm font-medium text-[#1F2937]">
-          <input
-            type="radio"
-            name="avatar-display-mode"
-            checked={value === mode}
-            onChange={() => onChange(mode)}
-            className="h-4 w-4 accent-[#6D55A3]"
-          />
-          {AVATAR_DISPLAY_LABELS[mode]}
-        </label>
-      ))}
+      <legend className="mb-2 text-sm font-black text-[#1F2937]">顯示方式</legend>
+      <div className="grid grid-cols-3 gap-1.5">
+        {(["custom", "default", "name"] as const).map((mode) => (
+          <label key={mode} className={`flex min-h-11 cursor-pointer items-center justify-center gap-1 rounded-xl border px-1 text-[11px] font-bold sm:text-sm ${value === mode ? "border-[#7751B8] bg-[#F8F5FF] text-[#624394]" : "border-[#E6EAF0] text-[#52545B]"}`}>
+            <input
+              type="radio"
+              name="avatar-display-mode"
+              checked={value === mode}
+              onChange={() => onChange(mode)}
+              className="h-3.5 w-3.5 shrink-0 accent-[#6D55A3]"
+            />
+            {AVATAR_DISPLAY_LABELS[mode]}
+          </label>
+        ))}
+      </div>
     </fieldset>
   );
 }

@@ -89,3 +89,21 @@ Existing registration `avatarConfig` submission remains unchanged.
 
 The default/person-shaped placeholder now uses a visible purple silhouette instead
 of near-white artwork against a pale gradient. No new image assets or paid services.
+
+
+## Six system icons and six soft grayscale-tinged color themes
+
+Display mode names are **大頭貼**, **圖示**, and **姓名識別**. The icon choices
+are 十字架、聖經、禱告、天使、棕樹枝、教會, displayed as six compact
+illustration cards with no lengthy technical descriptions. The six **色調**
+options are 暖灰、冷灰、炭灰、米灰、藍灰、薰衣草灰, intentionally soft
+with warmer or cooler gray undertones.
+
+The 教會 artwork is generated from the user-provided 夏凱納 building silhouette,
+not a generic church; it is a single transparent raster mask tinted by the same
+palette used for the other icons. The six symbolic icons live in one
+SystemIconArtwork renderer, and the AvatarIconPicker is used in both registration
+and the authenticated profile settings. Save the chosen icon and tone in the
+existing JSONB avatar_config as validated iconType and iconTone values, defaulting
+to cross and lavender for old profiles. No schema migration, paid image service,
+role permission change, or new API endpoint is necessary.

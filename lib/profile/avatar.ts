@@ -8,10 +8,12 @@ export type AvatarEyeStyle = "soft" | "bright" | "smile";
 export type AvatarAccessory = "none" | "earrings" | "hairclip" | "cap";
 export type AvatarPet = "none" | "sheep" | "doe" | "lion" | "eagle";
 export type AvatarDisplayMode = "custom" | "default" | "name";
+export type AvatarIconType = "cross" | "bible" | "prayer" | "angel" | "palm" | "church";
+export type AvatarIconTone = "warm" | "cool" | "charcoal" | "beige" | "blue" | "lavender";
 
 export const AVATAR_DISPLAY_LABELS: Record<AvatarDisplayMode, string> = {
-  custom: "自訂大頭貼",
-  default: "系統預設圖示",
+  custom: "大頭貼",
+  default: "圖示",
   name: "姓名識別",
 };
 
@@ -27,6 +29,8 @@ export type AvatarConfig = {
   accessory: AvatarAccessory;
   pet: AvatarPet;
   displayMode: AvatarDisplayMode;
+  iconType: AvatarIconType;
+  iconTone: AvatarIconTone;
 };
 
 export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
@@ -42,6 +46,8 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     accessory: "none",
     pet: "none",
     displayMode: "custom",
+    iconType: "cross",
+    iconTone: "lavender",
   },
   feminine: {
     style: "feminine",
@@ -55,6 +61,8 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     accessory: "none",
     pet: "none",
     displayMode: "custom",
+    iconType: "cross",
+    iconTone: "lavender",
   },
   neutral: {
     style: "neutral",
@@ -68,6 +76,8 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     accessory: "none",
     pet: "none",
     displayMode: "custom",
+    iconType: "cross",
+    iconTone: "lavender",
   },
 };
 
@@ -81,6 +91,8 @@ const eyeStyles = new Set<AvatarEyeStyle>(["soft", "bright", "smile"]);
 const accessories = new Set<AvatarAccessory>(["none", "earrings", "hairclip", "cap"]);
 const pets = new Set<AvatarPet>(["none", "sheep", "doe", "lion", "eagle"]);
 const displayModes = new Set<AvatarDisplayMode>(["custom", "default", "name"]);
+const iconTypes = new Set<AvatarIconType>(["cross", "bible", "prayer", "angel", "palm", "church"]);
+const iconTones = new Set<AvatarIconTone>(["warm", "cool", "charcoal", "beige", "blue", "lavender"]);
 
 export function getDefaultAvatarConfig(style: AvatarStyle = "neutral"): AvatarConfig {
   return { ...AVATAR_DEFAULTS[style] };
@@ -127,6 +139,12 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
     displayMode: displayModes.has(input.displayMode as AvatarDisplayMode)
       ? (input.displayMode as AvatarDisplayMode)
       : base.displayMode,
+    iconType: iconTypes.has(input.iconType as AvatarIconType)
+      ? (input.iconType as AvatarIconType)
+      : base.iconType,
+    iconTone: iconTones.has(input.iconTone as AvatarIconTone)
+      ? (input.iconTone as AvatarIconTone)
+      : base.iconTone,
   };
 }
 

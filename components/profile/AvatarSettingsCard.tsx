@@ -13,7 +13,8 @@ import {
   UserRound,
 } from "lucide-react";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
-import { AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
+import { AvatarDisplayModeSelector, AvatarLivePreview } from "@/components/profile/AvatarControls";
+import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import {
   AVATAR_DEFAULTS,
@@ -40,6 +41,7 @@ export function AvatarSettingsCard({
 }) {
   const [avatar, setAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
   const [savedAvatar, setSavedAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
+  const [pendingAvatar, setPendingAvatar] = useState<AvatarConfig | null>(null);
   const [view, setView] = useState<AvatarView>("summary");
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -85,8 +87,10 @@ export function AvatarSettingsCard({
   }, [photoPreview]);
 
   const personalized = useMemo(() => isAvatarPersonalized(savedAvatar), [savedAvatar]);
+  const visibleAvatar = pendingAvatar ?? savedAvatar;
 
   const save = async (nextConfig: AvatarConfig = avatar) => {
+    setPendingAvatar(nextConfig);
     setSaving(true);
     setMessage("");
     setMessageIsError(false);
@@ -110,6 +114,7 @@ export function AvatarSettingsCard({
       setMessageIsError(true);
       setMessage(error instanceof Error ? error.message : "儲存大頭貼失敗。");
     } finally {
+      setPendingAvatar(null);
       setSaving(false);
     }
   };
@@ -117,6 +122,11 @@ export function AvatarSettingsCard({
   const changeDisplayMode = (mode: AvatarDisplayMode) => {
     if (saving || savedAvatar.displayMode === mode) return;
     void save({ ...savedAvatar, displayMode: mode });
+  };
+
+  const changeSystemIcon = (next: AvatarConfig) => {
+    if (saving) return;
+    void save(next);
   };
 
   const cancelEdit = () => {
@@ -190,25 +200,25 @@ export function AvatarSettingsCard({
       </button>
       {expanded && (
       <div id="avatar-settings-panel" className="mt-4 border-t border-[#E6EAF0] pt-4">
+      <AvatarLivePreview
+        config={view === "manual-edit" ? { ...avatar, displayMode: "custom" } : visibleAvatar}
+        displayName={displayName}
+      />
       {view === "summary" && (
         <>
-          <div className="flex items-center gap-4 rounded-[24px] bg-gradient-to-br from-[#FFF9F3] to-[#F3EEFF] p-4">
-            <div className="shrink-0 rounded-full bg-white p-1 shadow-md shadow-[#6D55A3]/10">
-              <SystemAvatar config={savedAvatar} displayName={displayName} size={88} />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-base font-black text-[#1F2937]">我的大頭貼</h3>
-              <p className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-                顯示在訊息與通話畫面，可隨時修改，不作為身分驗證依據。
-              </p>
-            </div>
-          </div>
-
           <AvatarDisplayModeSelector
-            value={savedAvatar.displayMode}
+            value={visibleAvatar.displayMode}
             onChange={changeDisplayMode}
             disabled={saving}
           />
+
+          {visibleAvatar.displayMode === "default" && (
+            <AvatarIconPicker
+              value={visibleAvatar}
+              onChange={changeSystemIcon}
+              disabled={saving}
+            />
+          )}
 
           <button
             type="button"
@@ -349,7 +359,7 @@ export function AvatarSettingsCard({
             </button>
           </div>
 
-          <AvatarEditor value={avatar} onChange={setAvatar} />
+          <AvatarEditor value={avatar} onChange={setAvatar} showPreview={false} />
 
           <button
             type="button"

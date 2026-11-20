@@ -20,6 +20,8 @@ test("avatar defaults keep a clear neutral fallback", () => {
     accessory: "none",
     pet: "none",
     displayMode: "custom",
+    iconType: "cross",
+    iconTone: "lavender",
   });
 });
 
@@ -37,6 +39,8 @@ test("avatar normalization preserves valid masculine and feminine choices", () =
       accessory: "cap",
       pet: "eagle",
       displayMode: "name",
+      iconType: "church",
+      iconTone: "blue",
     }),
     {
       style: "masculine",
@@ -50,6 +54,8 @@ test("avatar normalization preserves valid masculine and feminine choices", () =
       accessory: "cap",
       pet: "eagle",
       displayMode: "name",
+      iconType: "church",
+      iconTone: "blue",
     }
   );
 
@@ -89,6 +95,8 @@ test("old avatar JSON gains safe defaults for newly added fields", () => {
       accessory: "none",
       pet: "none",
       displayMode: "custom",
+      iconType: "cross",
+      iconTone: "lavender",
     }
   );
 });
@@ -102,6 +110,8 @@ test("avatar normalization rejects unknown values without storing arbitrary data
     accessory: "unsafe",
     pet: "tiger",
     displayMode: "javascript:",
+    iconType: "<script>",
+    iconTone: "transparent",
     glasses: "yes",
   });
 
@@ -113,6 +123,8 @@ test("avatar normalization rejects unknown values without storing arbitrary data
   assert.equal(normalized.pet, "none");
   assert.equal(normalized.glasses, false);
   assert.equal(normalized.displayMode, "custom");
+  assert.equal(normalized.iconType, "cross");
+  assert.equal(normalized.iconTone, "lavender");
 });
 
 test("personalization detects either a chosen base role or optional pet", () => {
@@ -165,4 +177,20 @@ test("name identifiers use existing profile display names only", () => {
   assert.equal(getAvatarNameMark(" Alice "), "A");
   assert.equal(getAvatarNameMark(""), "");
   assert.equal(getAvatarNameMark(null), "");
+});
+
+
+test("six faith icons and six muted tones have allowlisted persisted values", () => {
+  for (const iconType of ["cross", "bible", "prayer", "angel", "palm", "church"]) {
+    assert.equal(normalizeAvatarConfig({ displayMode: "default", iconType }).iconType, iconType);
+  }
+  for (const iconTone of ["warm", "cool", "charcoal", "beige", "blue", "lavender"]) {
+    assert.equal(normalizeAvatarConfig({ displayMode: "default", iconTone }).iconTone, iconTone);
+  }
+  const saved = normalizeAvatarConfig({ style: "feminine", glasses: true, pet: "doe", displayMode: "default", iconType: "church", iconTone: "blue" });
+  const restored = normalizeAvatarConfig({ ...saved, displayMode: "custom" });
+  assert.equal(restored.iconType, "church");
+  assert.equal(restored.iconTone, "blue");
+  assert.equal(restored.pet, "doe");
+  assert.equal(restored.style, "feminine");
 });

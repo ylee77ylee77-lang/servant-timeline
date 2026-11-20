@@ -2,6 +2,8 @@
 
 import { useId } from "react";
 import { getAvatarNameMark, type AvatarConfig } from "@/lib/profile/avatar";
+import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "@/lib/profile/avatar-icon";
+import { SystemIconArtwork } from "@/components/profile/SystemIconArtwork";
 import {
   AVATAR_CANVAS_SIZE,
   AVATAR_FRAME,
@@ -36,10 +38,12 @@ export function AvatarRenderer({
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
-  const label = nameMark
-    ? `姓名識別：${nameMark}`
-    : avatar.displayMode === "default" ? "系統預設圖示"
-    : `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，陪伴動物：${companion.name}` : ""}`;
+  const iconLabel = AVATAR_ICON_OPTIONS.find((option) => option.value === avatar.iconType)?.label || "十字架";
+  const label = avatar.displayMode === "default"
+    ? `圖示：${iconLabel}・${AVATAR_ICON_TONES[avatar.iconTone].label}`
+    : nameMark
+      ? `姓名識別：${nameMark}`
+      : `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，陪伴動物：${companion.name}` : ""}`;
 
   return (
     <svg
@@ -68,7 +72,9 @@ export function AvatarRenderer({
 
       <g clipPath={`url(#${clipId})`}>
         {/* 2. Portrait and 3. animal head/upper body stay inside the frame. */}
-        {portrait ? (
+        {avatar.displayMode === "default" ? (
+          <SystemIconArtwork icon={avatar.iconType} tone={avatar.iconTone} x={82} y={82} size={348} />
+        ) : portrait ? (
           <image
             href={portrait}
             x={AVATAR_PORTRAIT_BOUNDS.x}
