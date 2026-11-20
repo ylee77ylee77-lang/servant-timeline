@@ -12,7 +12,7 @@ import {
   AVATAR_BACKGROUNDS,
   getAvatarScene,
 } from "../lib/profile/avatar-scene.ts";
-import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "../lib/profile/avatar-icon.ts";
+import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES, AVATAR_ICON_ARTWORK } from "../lib/profile/avatar-icon.ts";
 import type { AvatarIconTone } from "../lib/profile/avatar.ts";
 
 test("avatar uses a single canonical four-layer head-only composition", () => {
@@ -183,4 +183,28 @@ test("registration and profile share the final short display labels and icon pic
   assert.match(picker, /色調/);
   assert.match(registration, /大頭貼（選填）/);
   assert.doesNotMatch(registration, /系統預設圖示|自訂3D大頭貼/);
+});
+
+
+test("five revised 3D icons use real transparent, aligned illustrations", () => {
+  assert.deepEqual(Object.keys(AVATAR_ICON_ARTWORK).sort(), ["angel", "bible", "cross", "palm", "prayer"]);
+  for (const [icon, assetPath] of Object.entries(AVATAR_ICON_ARTWORK)) {
+    assert.match(assetPath, /^\/avatar\/icons\/v3\/[a-z]+\.webp$/);
+    const file = path.join(process.cwd(), "public", assetPath.replace(/^\//, ""));
+    assert.ok(fs.existsSync(file), `${icon} artwork missing`);
+    const bytes = fs.readFileSync(file);
+    assert.equal(bytes.toString("ascii", 0, 4), "RIFF", `${icon} must be WebP`);
+    assert.equal(bytes.toString("ascii", 8, 12), "WEBP", `${icon} must be WebP`);
+    assert.equal(bytes.toString("ascii", 12, 16), "VP8X", `${icon} must be extended WebP`);
+    assert.ok((bytes[20] & 0x10) !== 0, `${icon} must preserve alpha`);
+    assert.equal(bytes.readUIntLE(24, 3) + 1, 512, `${icon} width`);
+    assert.equal(bytes.readUIntLE(27, 3) + 1, 512, `${icon} height`);
+    assert.ok(bytes.length < 180 * 1024, `${icon} should remain mobile-friendly`);
+  }
+  const source = fs.readFileSync(path.join(process.cwd(), "components/profile/SystemIconArtwork.tsx"), "utf8");
+  assert.match(source, /AVATAR_ICON_ARTWORK\[icon\]/);
+  assert.match(source, /feColorMatrix/);
+  assert.match(source, /shekinah-silhouette-mask.png/);
+  assert.doesNotMatch(source, /icon === "cross" &&/);
+  assert.doesNotMatch(source, /icon === "prayer" &&/);
 });

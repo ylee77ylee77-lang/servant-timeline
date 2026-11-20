@@ -101,8 +101,16 @@ with warmer or cooler gray undertones.
 
 The 教會 artwork is generated from the user-provided 夏凱納 building silhouette,
 not a generic church; it is a single transparent raster mask tinted by the same
-palette used for the other icons. The six symbolic icons live in one
-SystemIconArtwork renderer, and the AvatarIconPicker is used in both registration
+palette used for the other icons. The five non-church icons are genuine soft-lit 3D illustrations exported as
+independent, transparent, aligned 512×512 WebP artboards under
+`public/avatar/icons/v3/`. They replace the five former flat SVG path drawings
+rather than layering new graphics on top of them. The original Shekinah church
+mask is retained and its rendering is unchanged. `SystemIconArtwork` is the
+single renderer for all six images and uses a subtle, shared tonal SVG filter
+on the illustrated images to preserve volume and shading across the six muted
+palettes. The image assets are static and do not require any external calls.
+
+The AvatarIconPicker is used in both registration
 and the authenticated profile settings. Save the chosen icon and tone in the
 existing JSONB avatar_config as validated iconType and iconTone values, defaulting
 to cross and lavender for old profiles. No schema migration, paid image service,

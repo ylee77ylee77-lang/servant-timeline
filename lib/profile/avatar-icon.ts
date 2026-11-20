@@ -10,6 +10,18 @@ export const AVATAR_ICON_OPTIONS: ReadonlyArray<{ value: AvatarIconType; label: 
   { value: "church", label: "教會" },
 ];
 
+/**
+ * The five transparent 3D illustrations use one common 512px artboard;
+ * the church remains the existing Shekinah silhouette mask.
+ */
+export const AVATAR_ICON_ARTWORK: Readonly<Record<Exclude<AvatarIconType, "church">, string>> = {
+  cross: "/avatar/icons/v3/cross.webp",
+  bible: "/avatar/icons/v3/bible.webp",
+  prayer: "/avatar/icons/v3/prayer.webp",
+  angel: "/avatar/icons/v3/angel.webp",
+  palm: "/avatar/icons/v3/palm.webp",
+};
+
 export type IconTonePalette = {
   label: string;
   swatch: string;
