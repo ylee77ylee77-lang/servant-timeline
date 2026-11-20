@@ -225,6 +225,9 @@ export function CommunicationHub() {
   const callStateRef = useRef(callState);
   const pendingMessagesRef = useRef(new Map<string, ChatMessage>());
   const refreshedAudioIdsRef = useRef(new Set<string>());
+  const peersRequestRef = useRef<Promise<void> | null>(null);
+  const peersFetchedAtRef = useRef(0);
+  const peersLoadedRef = useRef(false);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -369,24 +372,44 @@ export function CommunicationHub() {
     }
   }, []);
 
-  const loadPeers = useCallback(async () => {
-    if (!canUse) return;
-    setLoadingPeers(true);
-    try {
-      const data = await requestJson("/api/communications/peers");
-      setPeers(
-        Array.isArray(data?.peers)
-          ? data.peers.map((peer: Peer) => ({
-              ...peer,
-              avatarConfig: normalizeAvatarConfig(peer.avatarConfig),
-            }))
-          : []
-      );
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "無法讀取聯絡人。");
-    } finally {
-      setLoadingPeers(false);
+  const loadPeers = useCallback((force = false): Promise<void> => {
+    if (!canUse) return Promise.resolve();
+    // Multiple startup subscriptions and the chat button can request peers at
+    // nearly the same instant. Reuse one request rather than issuing duplicates.
+    if (peersRequestRef.current) return peersRequestRef.current;
+    if (!force && peersLoadedRef.current && Date.now() - peersFetchedAtRef.current < 5_000) {
+      return Promise.resolve();
     }
+
+    // Once the list has loaded, keep it visible while the latest unread counts
+    // and profile information are refreshed in the background.
+    if (!peersLoadedRef.current) setLoadingPeers(true);
+
+    const task = (async () => {
+      try {
+        const data = await requestJson("/api/communications/peers");
+        setPeers(
+          Array.isArray(data?.peers)
+            ? data.peers.map((peer: Peer) => ({
+                ...peer,
+                avatarConfig: normalizeAvatarConfig(peer.avatarConfig),
+              }))
+            : []
+        );
+        peersLoadedRef.current = true;
+        peersFetchedAtRef.current = Date.now();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "無法讀取聯絡人。");
+      } finally {
+        setLoadingPeers(false);
+      }
+    })();
+
+    peersRequestRef.current = task;
+    void task.then(() => {
+      if (peersRequestRef.current === task) peersRequestRef.current = null;
+    });
+    return task;
   }, [canUse, requestJson]);
 
   const markRead = useCallback(async (peerId: string) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronDown,
@@ -14,6 +14,7 @@ import { AvatarEditor } from "@/components/profile/AvatarEditor";
 import { AvatarDisplayModeSelector, AvatarLivePreview } from "@/components/profile/AvatarControls";
 import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
+import { useAuth } from "@/components/auth/AuthProvider";
 import {
   AVATAR_DEFAULTS,
   getDefaultAvatarConfig,
@@ -37,43 +38,16 @@ export function AvatarSettingsCard({
   /** Mount the live preview in the page's actual scrolling region. */
   previewHost?: HTMLDivElement | null;
 }) {
-  const [avatar, setAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
-  const [savedAvatar, setSavedAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
+  const { avatarConfig: initialAvatar, updateAvatarConfig } = useAuth();
+  // The authenticated profile already contains the saved avatar. Reuse it
+  // immediately instead of blocking the settings card on another API request.
+  const [avatar, setAvatar] = useState<AvatarConfig>(() => initialAvatar);
+  const [savedAvatar, setSavedAvatar] = useState<AvatarConfig>(() => initialAvatar);
   const [view, setView] = useState<AvatarView>("summary");
   const [expanded, setExpanded] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [messageIsError, setMessageIsError] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    void fetch("/api/profile/avatar", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
-    })
-      .then(async (response) => {
-        const data = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(data?.error || "無法讀取頭像設定。");
-        if (alive) {
-          const next = normalizeAvatarConfig(data?.avatarConfig);
-          setAvatar(next);
-          setSavedAvatar(next);
-        }
-      })
-      .catch((error) => {
-        if (alive) {
-          setMessageIsError(true);
-          setMessage(error instanceof Error ? error.message : "無法讀取頭像設定。");
-        }
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [accessToken]);
 
   const personalized = useMemo(() => isAvatarPersonalized(savedAvatar), [savedAvatar]);
   // One local draft powers instant preview. Network writes occur only when
@@ -103,6 +77,7 @@ export function AvatarSettingsCard({
       const next = normalizeAvatarConfig(data.avatarConfig);
       setAvatar(next);
       setSavedAvatar(next);
+      updateAvatarConfig(next);
       setView("summary");
       setMessage("大頭貼已儲存，之後可隨時再修改。");
     } catch (error) {
@@ -153,16 +128,6 @@ export function AvatarSettingsCard({
   };
 
 
-  if (loading) {
-    return (
-      <div className="rounded-[24px] border border-[#E6EAF0] bg-white p-6 shadow-lg shadow-[#6D55A3]/5">
-        <div className="flex items-center justify-center py-10 text-[#6D55A3]">
-          <Loader2 className="h-5 w-5 animate-spin" />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
       {expanded && previewHost && createPortal(
@@ -188,9 +153,7 @@ export function AvatarSettingsCard({
             {displayDirty ? "尚未儲存・" : ""}{AVATAR_DISPLAY_LABELS[visibleAvatar.displayMode]}
           </span>
         </span>
-        {loading ? <Loader2 className="h-4 w-4 animate-spin text-[#6D55A3]" /> : (
-          <ChevronDown className={`h-5 w-5 shrink-0 text-[#6D55A3] transition-transform ${expanded ? "rotate-180" : ""}`} />
-        )}
+        <ChevronDown className={`h-5 w-5 shrink-0 text-[#6D55A3] transition-transform ${expanded ? "rotate-180" : ""}`} />
       </button>
       {expanded && (
       <div id="avatar-settings-panel" className="mt-4 border-t border-[#E6EAF0] pt-4">
