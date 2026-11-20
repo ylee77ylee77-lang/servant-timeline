@@ -128,3 +128,21 @@ authorized `/api/profile/avatar` endpoint; `取消變更` discards the draft.
 If saving fails, the local draft remains for retry. The collapsed card indicates
 unsaved settings; unrelated 3D editor navigation is disabled while unsaved
 presentation changes exist. No new endpoints, schema migrations, or timers.
+
+
+## Removed intermediary creation method and fixed profile sticky preview
+
+The unavailable `選擇建立方式` / photo-conversion P2 teaser
+is removed from the P1 profile editing path. Users select a male or
+female character directly, then edit glasses/background/companion.
+When changing the person template, the independent system icon and
+tone preference are retained.
+
+A single `AvatarLivePreview` is attached to a sticky host which is a
+**direct child of the real personal-settings scroll container**.
+`AvatarSettingsCard` owns the avatar state and portals the visual
+into that host only while expanded. Since the host is not inside the
+short avatar card, the preview stays visible as the entire settings
+page scrolls, while preserving the full 104px size.
+Registration continues using its own sticky preview within its form.
+There are no device-specific position offsets or duplicated renderers.

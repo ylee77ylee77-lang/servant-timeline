@@ -227,3 +227,28 @@ test("profile icon and tone selection updates a local draft without a network re
   assert.match(source, /取消變更/);
   assert.match(source, /onClick=\{\(\) => void save\(avatar\)\}/);
 });
+
+
+test("avatar creation leads directly to manual male/female choice", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarSettingsCard.tsx"), "utf8");
+  assert.doesNotMatch(source, /選擇建立方式|使用照片建立|setView\("choose"\)|view === "choose"/);
+  assert.doesNotMatch(source, /view === "photo"|handlePhoto|photoPreview|photoName/);
+  assert.match(source, /setView\(personalized \? "manual-edit" : "manual-base"\)/);
+  assert.match(source, /setView\("manual-base"\)/);
+  assert.match(source, /onClick=\{\(\) => setView\("summary"\)\}/);
+  assert.match(source, /iconType: current.iconType/);
+  assert.match(source, /iconTone: current.iconTone/);
+});
+
+test("profile live preview is sticky at the settings page scroll root", () => {
+  const page = fs.readFileSync(path.join(process.cwd(), "app/page.tsx"), "utf8");
+  const card = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarSettingsCard.tsx"), "utf8");
+  const controls = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarControls.tsx"), "utf8");
+  assert.match(page, /ref=\{setAvatarPreviewHost\} className="sticky top-0 z-30"/);
+  assert.match(page, /previewHost=\{avatarPreviewHost\}/);
+  assert.match(card, /createPortal\(/);
+  assert.match(card, /sticky=\{false\}/);
+  assert.match(controls, /sticky = true/);
+  assert.match(controls, /sticky \? "sticky top-0 z-30 "/);
+  assert.match(controls, /size=\{104\}/);
+});

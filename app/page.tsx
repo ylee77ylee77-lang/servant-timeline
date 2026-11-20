@@ -388,6 +388,10 @@ export default function App() {
     ? [...baseRoleOptions, "聖餐助手"]
     : baseRoleOptions;
 
+  // A sticky host at the correct settings scroll level. The avatar card
+  // portals its live preview here without lifting avatar state into app/page.
+  const [avatarPreviewHost, setAvatarPreviewHost] = useState<HTMLDivElement | null>(null);
+
   const [personalSettings, setPersonalSettings] = useState({
     name: "",
     role: "總招",
@@ -4476,8 +4480,13 @@ export default function App() {
           </p>
         </div>
 
+        <div ref={setAvatarPreviewHost} className="sticky top-0 z-30" />
         <div className="mb-6">
-          <AvatarSettingsCard accessToken={session.access_token} displayName={authDisplayName} />
+          <AvatarSettingsCard
+            accessToken={session.access_token}
+            displayName={authDisplayName}
+            previewHost={avatarPreviewHost}
+          />
         </div>
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 space-y-6">

@@ -9,9 +9,11 @@ import { getAvatarScene } from "@/lib/profile/avatar-scene";
 export function AvatarLivePreview({
   config,
   displayName,
+  sticky = true,
 }: {
   config: AvatarConfig;
   displayName?: string | null;
+  sticky?: boolean;
 }) {
   const { avatar, companion } = getAvatarScene(config);
   const description = avatar.displayMode === "custom"
@@ -28,7 +30,7 @@ export function AvatarLivePreview({
       : AVATAR_DISPLAY_LABELS[avatar.displayMode];
 
   return (
-    <div className="sticky top-0 z-30 flex items-center gap-5 rounded-[22px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3]/95 to-[#F7F4FF]/95 p-4 shadow-sm backdrop-blur-sm">
+    <div className={`${sticky ? "sticky top-0 z-30 " : ""}flex items-center gap-5 rounded-[22px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3]/95 to-[#F7F4FF]/95 p-4 shadow-sm backdrop-blur-sm`}>
       <SystemAvatar config={avatar} displayName={displayName} size={104} />
       <div className="min-w-0">
         <div className="text-base font-black text-[#1F2937]">即時預覽</div>

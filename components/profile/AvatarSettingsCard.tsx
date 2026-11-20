@@ -1,16 +1,14 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
-  Camera,
   ChevronDown,
   ChevronLeft,
-  ImagePlus,
   Loader2,
   Pencil,
   Save,
   Sparkles,
-  UserRound,
 } from "lucide-react";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
 import { AvatarDisplayModeSelector, AvatarLivePreview } from "@/components/profile/AvatarControls";
@@ -27,17 +25,17 @@ import {
   type AvatarStyle,
 } from "@/lib/profile/avatar";
 
-type AvatarView = "summary" | "choose" | "manual-base" | "manual-edit" | "photo";
-
-const ALLOWED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
+type AvatarView = "summary" | "manual-base" | "manual-edit";
 
 export function AvatarSettingsCard({
   accessToken,
   displayName,
+  previewHost,
 }: {
   accessToken: string;
   displayName?: string | null;
+  /** Mount the live preview in the page's actual scrolling region. */
+  previewHost?: HTMLDivElement | null;
 }) {
   const [avatar, setAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
   const [savedAvatar, setSavedAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
@@ -47,8 +45,6 @@ export function AvatarSettingsCard({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [messageIsError, setMessageIsError] = useState(false);
-  const [photoPreview, setPhotoPreview] = useState("");
-  const [photoName, setPhotoName] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -78,12 +74,6 @@ export function AvatarSettingsCard({
       alive = false;
     };
   }, [accessToken]);
-
-  useEffect(() => {
-    return () => {
-      if (photoPreview) URL.revokeObjectURL(photoPreview);
-    };
-  }, [photoPreview]);
 
   const personalized = useMemo(() => isAvatarPersonalized(savedAvatar), [savedAvatar]);
   // One local draft powers instant preview. Network writes occur only when
@@ -151,36 +141,17 @@ export function AvatarSettingsCard({
   };
 
   const chooseManualBase = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
-    setAvatar(getDefaultAvatarConfig(style));
+    setAvatar((current) => ({
+      ...getDefaultAvatarConfig(style),
+      // System icon preferences are independent of the 3D portrait.
+      iconType: current.iconType,
+      iconTone: current.iconTone,
+    }));
     setView("manual-edit");
     setMessage("");
     setMessageIsError(false);
   };
 
-  const handlePhoto = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setMessage("");
-    setMessageIsError(false);
-
-    if (!ALLOWED_PHOTO_TYPES.has(file.type)) {
-      setMessageIsError(true);
-      setMessage("照片格式請使用 JPG、PNG 或 WebP。");
-      event.target.value = "";
-      return;
-    }
-    if (file.size > MAX_PHOTO_SIZE) {
-      setMessageIsError(true);
-      setMessage("照片檔案請小於 8 MB。");
-      event.target.value = "";
-      return;
-    }
-
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
-    setPhotoPreview(URL.createObjectURL(file));
-    setPhotoName(file.name);
-  };
 
   if (loading) {
     return (
@@ -193,7 +164,16 @@ export function AvatarSettingsCard({
   }
 
   return (
-    <div className="rounded-[24px] border border-[#E6EAF0] bg-white p-4 shadow-lg shadow-[#6D55A3]/5 sm:p-5">
+    <>
+      {expanded && previewHost && createPortal(
+        <AvatarLivePreview
+          config={view === "manual-edit" ? { ...avatar, displayMode: "custom" } : visibleAvatar}
+          displayName={displayName}
+          sticky={false}
+        />,
+        previewHost
+      )}
+      <div className="rounded-[24px] border border-[#E6EAF0] bg-white p-4 shadow-lg shadow-[#6D55A3]/5 sm:p-5">
       <button
         type="button"
         aria-expanded={expanded}
@@ -214,10 +194,12 @@ export function AvatarSettingsCard({
       </button>
       {expanded && (
       <div id="avatar-settings-panel" className="mt-4 border-t border-[#E6EAF0] pt-4">
-      <AvatarLivePreview
-        config={view === "manual-edit" ? { ...avatar, displayMode: "custom" } : visibleAvatar}
-        displayName={displayName}
-      />
+      {!previewHost && (
+        <AvatarLivePreview
+          config={view === "manual-edit" ? { ...avatar, displayMode: "custom" } : visibleAvatar}
+          displayName={displayName}
+        />
+      )}
       {view === "summary" && (
         <>
           <AvatarDisplayModeSelector
@@ -263,7 +245,7 @@ export function AvatarSettingsCard({
             onClick={() => {
               setMessage("");
               setMessageIsError(false);
-              setView(personalized ? "manual-edit" : "choose");
+              setView(personalized ? "manual-edit" : "manual-base");
             }}
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-4 py-3.5 text-sm font-black text-white disabled:opacity-50"
           >
@@ -279,7 +261,7 @@ export function AvatarSettingsCard({
               onClick={() => {
                 setMessage("");
                 setMessageIsError(false);
-                setView("choose");
+                setView("manual-base");
               }}
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#6D55A3]/20 bg-[#F8F5FF] px-4 py-3 text-sm font-black text-[#6D55A3] disabled:opacity-50"
             >
@@ -290,69 +272,11 @@ export function AvatarSettingsCard({
         </>
       )}
 
-      {view === "choose" && (
-        <>
-          <button
-            type="button"
-            onClick={() => setView("summary")}
-            className="mb-4 flex items-center gap-1 text-sm font-black text-[#6D55A3]"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            返回
-          </button>
-          <h3 className="text-lg font-black text-[#1F2937]">選擇建立方式</h3>
-          <p className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-            上傳照片不是必要條件，也不影響任何系統功能。
-          </p>
-
-          <div className="mt-5 grid gap-3">
-            <button
-              type="button"
-              onClick={() => setView("photo")}
-              className="rounded-[22px] border border-[#E6EAF0] bg-white p-4 text-left transition hover:border-[#6D55A3]/30"
-            >
-              <div className="flex items-start gap-3">
-                <div className="rounded-2xl bg-[#F3EEFF] p-3 text-[#6D55A3]">
-                  <Camera className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="text-sm font-black text-[#1F2937]">使用照片建立</div>
-                  <div className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-                    上傳照片 → 產生 3 張候選 → 三選一 → 繼續微調特徵。
-                  </div>
-                  <div className="mt-2 inline-flex rounded-full bg-[#FFF4D8] px-2.5 py-1 text-[11px] font-black text-[#8A6416]">
-                    影像生成服務尚未啟用
-                  </div>
-                </div>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setView("manual-base")}
-              className="rounded-[22px] border border-[#6D55A3]/20 bg-[#F8F5FF] p-4 text-left transition hover:border-[#6D55A3]/40"
-            >
-              <div className="flex items-start gap-3">
-                <div className="rounded-2xl bg-white p-3 text-[#6D55A3]">
-                  <UserRound className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="text-sm font-black text-[#1F2937]">不用照片建立</div>
-                  <div className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-                    選男生或女生，再調整眼鏡、背景與陪伴動物；其他 3D 特徵逐步開放。
-                  </div>
-                </div>
-              </div>
-            </button>
-          </div>
-        </>
-      )}
-
       {view === "manual-base" && (
         <>
           <button
             type="button"
-            onClick={() => setView("choose")}
+            onClick={() => setView("summary")}
             className="mb-4 flex items-center gap-1 text-sm font-black text-[#6D55A3]"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -413,76 +337,6 @@ export function AvatarSettingsCard({
         </>
       )}
 
-      {view === "photo" && (
-        <>
-          <button
-            type="button"
-            onClick={() => setView("choose")}
-            className="mb-4 flex items-center gap-1 text-sm font-black text-[#6D55A3]"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            返回
-          </button>
-          <h3 className="text-lg font-black text-[#1F2937]">使用照片建立</h3>
-          <p className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-            預定流程：上傳 1 張照片 → 產生 3 張 3D 候選 → 三選一 → 再微調。
-          </p>
-
-          <label className="mt-5 flex min-h-48 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[24px] border border-dashed border-[#6D55A3]/30 bg-[#F8F5FF] p-4 text-center">
-            {photoPreview ? (
-              // eslint-disable-next-line @next/next/no-img-element -- Local object URL preview only; file is not uploaded.
-              <img
-                src={photoPreview}
-                alt="待建立大頭貼的本機照片預覽"
-                className="h-44 w-44 rounded-[22px] object-cover shadow-md"
-              />
-            ) : (
-              <>
-                <div className="rounded-2xl bg-white p-3 text-[#6D55A3] shadow-sm">
-                  <ImagePlus className="h-6 w-6" />
-                </div>
-                <div className="mt-3 text-sm font-black text-[#1F2937]">選擇照片</div>
-                <div className="mt-1 text-xs font-medium text-[#7B7B74]">JPG、PNG、WebP，最大 8 MB</div>
-              </>
-            )}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={handlePhoto}
-              className="sr-only"
-            />
-          </label>
-
-          {photoName && (
-            <p className="mt-2 truncate text-center text-xs font-medium text-[#7B7B74]">{photoName}</p>
-          )}
-
-          <div className="mt-4 rounded-2xl border border-[#E8D9A2] bg-[#FFF9E8] p-4">
-            <div className="text-xs font-black text-[#7A5A11]">照片目前不會上傳伺服器</div>
-            <p className="mt-1 text-xs font-medium leading-5 text-[#7B6A45]">
-              真正的 3 張 AI 候選需要影像生成服務。為避免未經確認產生費用，目前只提供本機照片預覽，尚未啟用生成按鈕。
-            </p>
-          </div>
-
-          <button
-            type="button"
-            disabled
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#D7D0E4] px-4 py-3.5 text-sm font-black text-white"
-          >
-            <Sparkles className="h-4 w-4" />
-            產生 3 張候選
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setView("manual-base")}
-            className="mt-3 w-full rounded-2xl border border-[#6D55A3]/20 bg-white px-4 py-3 text-sm font-black text-[#6D55A3]"
-          >
-            改用不用照片建立
-          </button>
-        </>
-      )}
-
       {message && (
         <p
           role="status"
@@ -493,6 +347,7 @@ export function AvatarSettingsCard({
       )}
       </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
