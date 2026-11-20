@@ -4,6 +4,7 @@ import {
   isValidAccountCode,
   normalizeAccountCode,
 } from "@/lib/auth/account-code";
+import { isValidContactEmail, normalizeContactEmail } from "@/lib/auth/password-reset";
 import { normalizeAvatarConfig } from "@/lib/profile/avatar";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const accountCode = normalizeAccountCode(body.accountCode);
     const displayName = String(body.displayName ?? "").normalize("NFKC").trim();
+    const contactEmail = normalizeContactEmail(body.contactEmail);
     const password = String(body.password ?? "");
     const avatarConfig = normalizeAvatarConfig(body.avatarConfig);
 
@@ -28,6 +30,9 @@ export async function POST(request: NextRequest) {
     }
     if (!displayName || displayName.length > 80) {
       return NextResponse.json({ error: "姓名需為 1–80 字元。" }, { status: 400 });
+    }
+    if (!isValidContactEmail(contactEmail)) {
+      return NextResponse.json({ error: "請輸入有效的聯絡 Email。" }, { status: 400 });
     }
     if (password.length < 8 || password.length > 72) {
       return NextResponse.json({ error: "密碼需為 8–72 字元。" }, { status: 400 });
@@ -76,6 +81,15 @@ export async function POST(request: NextRequest) {
         { onConflict: "id" }
       );
     if (profileError) throw profileError;
+
+    const { error: contactError } = await supabase
+      .from("account_recovery_contacts")
+      .upsert({
+        user_id: createdUserId,
+        contact_email: contactEmail,
+        updated_at: new Date().toISOString(),
+      });
+    if (contactError) throw contactError;
 
     // The auth-user trigger creates a default volunteer role. Self-registered
     // trial accounts must remain unauthorized until an admin approves them.
