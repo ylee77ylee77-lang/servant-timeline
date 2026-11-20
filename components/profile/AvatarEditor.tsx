@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import {
   AVATAR_DEFAULTS,
@@ -39,31 +38,6 @@ export function AvatarEditor({
   compact?: boolean;
 }) {
   const avatar = normalizeAvatarConfig(value);
-  const previewAnchorRef = useRef<HTMLSpanElement>(null);
-  const [compactPreview, setCompactPreview] = useState(false);
-
-  useEffect(() => {
-    const anchor = previewAnchorRef.current;
-    if (!anchor || typeof IntersectionObserver === "undefined") return;
-
-    // Settings scrolls within a panel below the app header.
-    let root: HTMLElement | null = null;
-    for (let node = anchor.parentElement; node; node = node.parentElement) {
-      const overflow = window.getComputedStyle(node).overflowY;
-      if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 1) {
-        root = node;
-        break;
-      }
-    }
-
-    const observer = new IntersectionObserver(([entry]) => {
-      const top = entry.rootBounds?.top ?? 0;
-      setCompactPreview(!entry.isIntersecting && entry.boundingClientRect.top < top);
-    }, { root, threshold: 0 });
-    observer.observe(anchor);
-    return () => observer.disconnect();
-  }, []);
-
   const previewSummary = [
     avatar.style === "feminine" ? "女生" : avatar.style === "masculine" ? "男生" : "未選角色",
     avatar.glasses ? "眼鏡" : null,
@@ -82,12 +56,10 @@ export function AvatarEditor({
 
   return (
     <div className="relative">
-      <span ref={previewAnchorRef} aria-hidden="true"
-        className="pointer-events-none absolute left-0 top-0 h-px w-px" />
-      <div className={`sticky top-0 z-30 flex items-center rounded-[22px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3]/95 to-[#F7F4FF]/95 shadow-sm backdrop-blur-sm transition-[padding,gap] duration-150 ${compactPreview ? "gap-3 p-2.5" : "gap-5 p-4"}`}>
-        <AvatarRenderer config={avatar} size={compactPreview ? 60 : 104} />
+      <div className="sticky top-0 z-30 flex items-center gap-5 rounded-[22px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3]/95 to-[#F7F4FF]/95 p-4 shadow-sm backdrop-blur-sm">
+        <AvatarRenderer config={avatar} size={104} />
         <div className="min-w-0">
-          <div className={`font-black text-[#1F2937] ${compactPreview ? "text-sm" : "text-base"}`}>即時預覽</div>
+          <div className="text-base font-black text-[#1F2937]">即時預覽</div>
           <div className="mt-1 truncate text-xs font-medium text-[#7B7B74]">{previewSummary}</div>
         </div>
       </div>
