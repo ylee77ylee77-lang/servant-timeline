@@ -12,11 +12,21 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdminClient();
     const targetRole = actor.communicationRole === "admin" ? "coordinator" : "admin";
 
-    const { data: roleRows, error: roleError } = await supabase
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", targetRole);
-    if (roleError) throw roleError;
+    // Unread counts depend on the actor, not on the target roles. Query both
+    // concurrently, then fetch the eligible profiles once role IDs are known.
+    const [
+      { data: roleRows, error: roleError },
+      { data: unreadRows, error: unreadError },
+    ] = await Promise.all([
+      supabase.from("user_roles").select("user_id").eq("role", targetRole),
+      supabase
+        .from("communication_messages")
+        .select("sender_id")
+        .eq("recipient_id", actor.userId)
+        .is("read_at", null)
+        .is("retracted_at", null),
+    ]);
+    if (roleError || unreadError) throw roleError || unreadError;
 
     const ids = Array.from(new Set((roleRows ?? []).map((row) => String(row.user_id))));
     const { data: profiles, error: profileError } = ids.length
@@ -27,14 +37,6 @@ export async function GET(request: NextRequest) {
           .eq("is_active", true)
       : { data: [], error: null };
     if (profileError) throw profileError;
-
-    const { data: unreadRows, error: unreadError } = await supabase
-      .from("communication_messages")
-      .select("sender_id")
-      .eq("recipient_id", actor.userId)
-      .is("read_at", null)
-      .is("retracted_at", null);
-    if (unreadError) throw unreadError;
 
     const unreadByPeer = new Map<string, number>();
     for (const row of unreadRows ?? []) {
