@@ -407,9 +407,23 @@ export function CommunicationHub() {
       const data = await requestJson(`/api/communications/messages?peerId=${encodeURIComponent(peerId)}`);
       if (selectedPeerIdRef.current !== peerId) return;
       const savedMessages = (Array.isArray(data?.messages) ? data.messages : []) as ChatMessage[];
+      const confirmedIds = new Set(savedMessages.map((message) => message.id));
+      for (const id of confirmedIds) pendingMessagesRef.current.delete(id);
       const pending = Array.from(pendingMessagesRef.current.values())
         .filter((message) => message.senderId === session.user.id && message.recipientId === peerId);
-      setMessages(pending.reduce((current, item) => upsertMessage(current, item), savedMessages));
+      setMessages((current) => {
+        // An in-flight refresh must not erase a text message whose POST has
+        // already succeeded after the GET request began.
+        const unsynced = current.filter((message) =>
+          message.senderId === session.user.id
+          && message.recipientId === peerId
+          && !confirmedIds.has(message.id)
+        );
+        return [...pending, ...unsynced].reduce(
+          (all, item) => upsertMessage(all, item),
+          savedMessages
+        );
+      });
       if (markAsRead) {
         setPeers((current) => current.map((peer) =>
           peer.id === peerId ? { ...peer, unreadCount: 0 } : peer
