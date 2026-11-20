@@ -9,7 +9,7 @@ import {
   maskContactEmail,
   withPasswordChangeRequired,
 } from "@/lib/auth/password-reset";
-import { sendAccountRecoveryEmail, ACCOUNT_RECOVERY_EMAIL_DAILY_LIMIT } from "@/lib/email/brevo";
+import { sendAccountRecoveryEmail, ACCOUNT_RECOVERY_EMAIL_DAILY_LIMIT } from "@/lib/email/gmail";
 import { getAuthErrorResponse, requireAdmin } from "@/lib/auth/require-admin";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json(
         {
-          error: "臨時密碼已重設，但 Email 寄送失敗。申請仍保留，請確認 Brevo 設定後重新處理；再次處理會產生新的臨時密碼。",
+          error: "臨時密碼已重設，但 Email 寄送失敗。申請仍保留，請確認 Gmail App Password 設定後重新處理；再次處理會產生新的臨時密碼。",
         },
         { status: 502 }
       );
@@ -188,7 +188,7 @@ export async function POST(request: NextRequest) {
       subject_id: profile.id,
       metadata: {
         request_log_id: requestLogId,
-        delivery: "brevo_email",
+        delivery: "gmail_smtp",
         recipient: maskContactEmail(String(contact.contact_email)),
         provider_message_id: messageId,
         source: "admin_users_page",
