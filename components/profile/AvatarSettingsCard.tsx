@@ -41,7 +41,6 @@ export function AvatarSettingsCard({
 }) {
   const [avatar, setAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
   const [savedAvatar, setSavedAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
-  const [pendingAvatar, setPendingAvatar] = useState<AvatarConfig | null>(null);
   const [view, setView] = useState<AvatarView>("summary");
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -87,10 +86,16 @@ export function AvatarSettingsCard({
   }, [photoPreview]);
 
   const personalized = useMemo(() => isAvatarPersonalized(savedAvatar), [savedAvatar]);
-  const visibleAvatar = pendingAvatar ?? savedAvatar;
+  // One local draft powers instant preview. Network writes occur only when
+  // the volunteer explicitly saves, never on each icon or color tap.
+  const visibleAvatar = avatar;
+  const displayDirty = (
+    avatar.displayMode !== savedAvatar.displayMode
+    || avatar.iconType !== savedAvatar.iconType
+    || avatar.iconTone !== savedAvatar.iconTone
+  );
 
   const save = async (nextConfig: AvatarConfig = avatar) => {
-    setPendingAvatar(nextConfig);
     setSaving(true);
     setMessage("");
     setMessageIsError(false);
@@ -114,19 +119,28 @@ export function AvatarSettingsCard({
       setMessageIsError(true);
       setMessage(error instanceof Error ? error.message : "儲存大頭貼失敗。");
     } finally {
-      setPendingAvatar(null);
       setSaving(false);
     }
   };
 
   const changeDisplayMode = (mode: AvatarDisplayMode) => {
-    if (saving || savedAvatar.displayMode === mode) return;
-    void save({ ...savedAvatar, displayMode: mode });
+    if (saving) return;
+    setAvatar((current) => ({ ...current, displayMode: mode }));
+    setMessage("");
+    setMessageIsError(false);
   };
 
   const changeSystemIcon = (next: AvatarConfig) => {
     if (saving) return;
-    void save(next);
+    setAvatar(next);
+    setMessage("");
+    setMessageIsError(false);
+  };
+
+  const discardDisplayChanges = () => {
+    setAvatar(savedAvatar);
+    setMessage("");
+    setMessageIsError(false);
   };
 
   const cancelEdit = () => {
@@ -187,11 +201,11 @@ export function AvatarSettingsCard({
         onClick={() => setExpanded((open) => !open)}
         className="flex w-full items-center gap-3 rounded-2xl text-left"
       >
-        <SystemAvatar config={savedAvatar} displayName={displayName} size={52} />
+        <SystemAvatar config={visibleAvatar} displayName={displayName} size={52} />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-black text-[#1F2937]">我的大頭貼</span>
           <span className="mt-1 block truncate text-xs font-medium text-[#7B7B74]">
-            {AVATAR_DISPLAY_LABELS[savedAvatar.displayMode]}
+            {displayDirty ? "尚未儲存・" : ""}{AVATAR_DISPLAY_LABELS[visibleAvatar.displayMode]}
           </span>
         </span>
         {loading ? <Loader2 className="h-4 w-4 animate-spin text-[#6D55A3]" /> : (
@@ -220,14 +234,38 @@ export function AvatarSettingsCard({
             />
           )}
 
+          {displayDirty && (
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => void save(avatar)}
+                disabled={saving}
+                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-4 py-3 text-sm font-black text-white disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? "儲存中" : "儲存顯示設定"}
+              </button>
+              <button
+                type="button"
+                onClick={discardDisplayChanges}
+                disabled={saving}
+                className="min-h-10 w-full rounded-xl border border-[#E6EAF0] px-4 text-sm font-bold text-[#6D55A3] disabled:opacity-50"
+              >
+                取消變更
+              </button>
+            </div>
+          )}
+
           <button
             type="button"
+            disabled={saving || displayDirty}
+            title={displayDirty ? "請先儲存或取消顯示設定" : undefined}
             onClick={() => {
               setMessage("");
               setMessageIsError(false);
               setView(personalized ? "manual-edit" : "choose");
             }}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-4 py-3.5 text-sm font-black text-white"
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-4 py-3.5 text-sm font-black text-white disabled:opacity-50"
           >
             <Pencil className="h-4 w-4" />
             {personalized ? "修改大頭貼" : "建立我的大頭貼"}
@@ -236,12 +274,14 @@ export function AvatarSettingsCard({
           {personalized && (
             <button
               type="button"
+              disabled={saving || displayDirty}
+              title={displayDirty ? "請先儲存或取消顯示設定" : undefined}
               onClick={() => {
                 setMessage("");
                 setMessageIsError(false);
                 setView("choose");
               }}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#6D55A3]/20 bg-[#F8F5FF] px-4 py-3 text-sm font-black text-[#6D55A3]"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#6D55A3]/20 bg-[#F8F5FF] px-4 py-3 text-sm font-black text-[#6D55A3] disabled:opacity-50"
             >
               <Sparkles className="h-4 w-4" />
               重新建立

@@ -115,3 +115,16 @@ and the authenticated profile settings. Save the chosen icon and tone in the
 existing JSONB avatar_config as validated iconType and iconTone values, defaulting
 to cross and lavender for old profiles. No schema migration, paid image service,
 role permission change, or new API endpoint is necessary.
+
+
+## Icon-selection responsiveness (2026-11-20)
+
+The profile settings screen uses one local `avatar` draft for display
+mode, illustrated icon, and tone, just like the manual 3D editor. Taps update
+both the selected card and 104px sticky preview immediately. The previous
+per-tap PUT/temporary disabling flow has been removed. A visible
+`儲存顯示設定` action writes the final draft once through the unchanged
+authorized `/api/profile/avatar` endpoint; `取消變更` discards the draft.
+If saving fails, the local draft remains for retry. The collapsed card indicates
+unsaved settings; unrelated 3D editor navigation is disabled while unsaved
+presentation changes exist. No new endpoints, schema migrations, or timers.

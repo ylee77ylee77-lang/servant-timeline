@@ -208,3 +208,22 @@ test("five revised 3D icons use real transparent, aligned illustrations", () => 
   assert.doesNotMatch(source, /icon === "cross" &&/);
   assert.doesNotMatch(source, /icon === "prayer" &&/);
 });
+
+
+test("profile icon and tone selection updates a local draft without a network request per tap", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarSettingsCard.tsx"), "utf8");
+  const modeHandler = source.match(/const changeDisplayMode = \(mode: AvatarDisplayMode\) => \{([\s\S]*?)\n  \};/);
+  const iconHandler = source.match(/const changeSystemIcon = \(next: AvatarConfig\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(modeHandler, "display-mode handler is defined");
+  assert.ok(iconHandler, "icon and color handler is defined");
+  assert.match(modeHandler[1], /setAvatar/);
+  assert.match(iconHandler[1], /setAvatar\(next\)/);
+  assert.doesNotMatch(modeHandler[1], /save\(|fetch\(/);
+  assert.doesNotMatch(iconHandler[1], /save\(|fetch\(/);
+  assert.doesNotMatch(source, /pendingAvatar|setPendingAvatar/);
+  assert.match(source, /visibleAvatar = avatar/);
+  assert.match(source, /displayDirty/);
+  assert.match(source, /儲存顯示設定/);
+  assert.match(source, /取消變更/);
+  assert.match(source, /onClick=\{\(\) => void save\(avatar\)\}/);
+});
