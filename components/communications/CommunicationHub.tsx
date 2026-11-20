@@ -215,6 +215,10 @@ export function CommunicationHub() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const selectedPeerIdRef = useRef(selectedPeerId);
+  const openRef = useRef(open);
+  const callStateRef = useRef(callState);
+  const pendingMessagesRef = useRef(new Map<string, ChatMessage>());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -230,6 +234,12 @@ export function CommunicationHub() {
   useEffect(() => {
     activeCallRef.current = activeCall;
   }, [activeCall]);
+
+  useEffect(() => {
+    selectedPeerIdRef.current = selectedPeerId;
+    openRef.current = open;
+    callStateRef.current = callState;
+  }, [selectedPeerId, open, callState]);
 
   const requestJson = useCallback(async (url: string, init?: RequestInit) => {
     const response = await fetch(url, {
@@ -390,7 +400,11 @@ export function CommunicationHub() {
     if (showLoading) setLoadingMessages(true);
     try {
       const data = await requestJson(`/api/communications/messages?peerId=${encodeURIComponent(peerId)}`);
-      setMessages(Array.isArray(data?.messages) ? data.messages : []);
+      if (selectedPeerIdRef.current !== peerId) return;
+      const savedMessages = (Array.isArray(data?.messages) ? data.messages : []) as ChatMessage[];
+      const pending = Array.from(pendingMessagesRef.current.values())
+        .filter((message) => message.senderId === session.user.id && message.recipientId === peerId);
+      setMessages(pending.reduce((current, item) => upsertMessage(current, item), savedMessages));
       if (markAsRead) {
         setPeers((current) => current.map((peer) =>
           peer.id === peerId ? { ...peer, unreadCount: 0 } : peer
@@ -402,7 +416,7 @@ export function CommunicationHub() {
     } finally {
       if (showLoading) setLoadingMessages(false);
     }
-  }, [markRead, requestJson]);
+  }, [markRead, requestJson, session.user.id]);
 
   const handleRealtimeMessage = useCallback((
     row: Record<string, unknown>,
@@ -431,7 +445,7 @@ export function CommunicationHub() {
       processedMessageInsertIdsRef.current.add(messageId);
     }
 
-    const isSelectedConversation = selectedPeerId === peerId;
+    const isSelectedConversation = selectedPeerIdRef.current === peerId;
     if (isSelectedConversation) {
       setMessages((current) => {
         const existing = current.find((message) => message.id === messageId);
@@ -440,7 +454,7 @@ export function CommunicationHub() {
     }
 
     if (eventType === "INSERT" && recipientId === currentUserId) {
-      if (open && isSelectedConversation) {
+      if (openRef.current && isSelectedConversation) {
         setPeers((current) => current.map((peer) =>
           peer.id === peerId ? { ...peer, unreadCount: 0 } : peer
         ));
@@ -461,7 +475,7 @@ export function CommunicationHub() {
     ) {
       void loadMessages(peerId, false, false);
     }
-  }, [loadMessages, markRead, open, selectedPeerId, session.user.id]);
+  }, [loadMessages, markRead, session.user.id]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -679,7 +693,7 @@ export function CommunicationHub() {
         const latest = calls.find((call) => call.id === current.id);
         if (!latest || ["declined", "ended", "missed"].includes(latest.status)) {
           cleanupPeerConnection();
-        } else if (latest.status === "accepted" && isCallerRef.current && callState === "ringing") {
+        } else if (latest.status === "accepted" && isCallerRef.current && callStateRef.current === "ringing") {
           setCallState("connecting");
           setActiveCall(latest);
           activeCallRef.current = latest;
@@ -689,7 +703,7 @@ export function CommunicationHub() {
     } catch {
       // Realtime/poll refresh failures should not block the rest of the app.
     }
-  }, [callState, canUse, cleanupPeerConnection, loadCallSignals, requestJson, session.user.id]);
+  }, [canUse, cleanupPeerConnection, loadCallSignals, requestJson, session.user.id]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -760,13 +774,19 @@ export function CommunicationHub() {
         },
         () => void loadActiveCalls()
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          void loadPeers();
+          const peerId = selectedPeerIdRef.current;
+          if (openRef.current && peerId) void loadMessages(peerId, false, false);
+        }
+      });
 
     return () => {
       window.clearTimeout(initialRefreshTimer);
       void supabase.removeChannel(channel);
     };
-  }, [canUse, handleRealtimeMessage, loadActiveCalls, session.user.id]);
+  }, [canUse, handleRealtimeMessage, loadActiveCalls, loadMessages, loadPeers, session.user.id]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -793,7 +813,13 @@ export function CommunicationHub() {
               handleRealtimeMessage(row, "INSERT");
             }
           )
-          .subscribe();
+          .subscribe((status) => {
+            if (status === "SUBSCRIBED") {
+              const peerId = selectedPeerIdRef.current;
+              if (openRef.current && peerId) void loadMessages(peerId, false, false);
+              void loadPeers();
+            }
+          });
       })
       .catch(() => undefined);
 
@@ -801,7 +827,24 @@ export function CommunicationHub() {
       disposed = true;
       if (channel) void supabase.removeChannel(channel);
     };
-  }, [canUse, handleRealtimeMessage, requestJson]);
+  }, [canUse, handleRealtimeMessage, loadMessages, loadPeers, requestJson]);
+
+  // Reconcile after the page returns online/foreground; iOS can suspend sockets.
+  useEffect(() => {
+    if (!canUse) return;
+    const syncVisible = () => {
+      if (document.visibilityState !== "visible" || !navigator.onLine) return;
+      void loadPeers();
+      const peerId = selectedPeerIdRef.current;
+      if (openRef.current && peerId) void loadMessages(peerId, true, false);
+    };
+    window.addEventListener("online", syncVisible);
+    document.addEventListener("visibilitychange", syncVisible);
+    return () => {
+      window.removeEventListener("online", syncVisible);
+      document.removeEventListener("visibilitychange", syncVisible);
+    };
+  }, [canUse, loadMessages, loadPeers]);
 
   const signalCallId = activeCall?.id ?? "";
 
