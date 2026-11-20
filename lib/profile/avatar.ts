@@ -7,6 +7,13 @@ export type AvatarBackground = "lavender" | "peach" | "mint" | "sky" | "sand";
 export type AvatarEyeStyle = "soft" | "bright" | "smile";
 export type AvatarAccessory = "none" | "earrings" | "hairclip" | "cap";
 export type AvatarPet = "none" | "sheep" | "doe" | "lion" | "eagle";
+export type AvatarDisplayMode = "custom" | "default" | "name";
+
+export const AVATAR_DISPLAY_LABELS: Record<AvatarDisplayMode, string> = {
+  custom: "自訂大頭貼",
+  default: "系統預設圖示",
+  name: "姓名識別",
+};
 
 export type AvatarConfig = {
   style: AvatarStyle;
@@ -19,6 +26,7 @@ export type AvatarConfig = {
   glasses: boolean;
   accessory: AvatarAccessory;
   pet: AvatarPet;
+  displayMode: AvatarDisplayMode;
 };
 
 export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
@@ -33,6 +41,7 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     glasses: false,
     accessory: "none",
     pet: "none",
+    displayMode: "custom",
   },
   feminine: {
     style: "feminine",
@@ -45,6 +54,7 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     glasses: false,
     accessory: "none",
     pet: "none",
+    displayMode: "custom",
   },
   neutral: {
     style: "neutral",
@@ -57,6 +67,7 @@ export const AVATAR_DEFAULTS: Record<AvatarStyle, AvatarConfig> = {
     glasses: false,
     accessory: "none",
     pet: "none",
+    displayMode: "custom",
   },
 };
 
@@ -69,6 +80,7 @@ const backgrounds = new Set<AvatarBackground>(["lavender", "peach", "mint", "sky
 const eyeStyles = new Set<AvatarEyeStyle>(["soft", "bright", "smile"]);
 const accessories = new Set<AvatarAccessory>(["none", "earrings", "hairclip", "cap"]);
 const pets = new Set<AvatarPet>(["none", "sheep", "doe", "lion", "eagle"]);
+const displayModes = new Set<AvatarDisplayMode>(["custom", "default", "name"]);
 
 export function getDefaultAvatarConfig(style: AvatarStyle = "neutral"): AvatarConfig {
   return { ...AVATAR_DEFAULTS[style] };
@@ -112,6 +124,9 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
     pet: pets.has(input.pet as AvatarPet)
       ? (input.pet as AvatarPet)
       : base.pet,
+    displayMode: displayModes.has(input.displayMode as AvatarDisplayMode)
+      ? (input.displayMode as AvatarDisplayMode)
+      : base.displayMode,
   };
 }
 
@@ -130,4 +145,23 @@ export function isAvatarPersonalized(value: unknown) {
     || avatar.accessory !== base.accessory
     || avatar.pet !== base.pet
   );
+}
+
+
+/** Short, user-chosen profile name mark for the communication avatar.
+ * Not an identity or authorization token. Empty names fall back to a generic icon.
+ */
+export function getAvatarNameMark(displayName?: string | null): string {
+  const name = typeof displayName === "string" ? displayName.trim().replace(/\s+/g, " ") : "";
+  if (!name) return "";
+
+  const words = name.split(" ");
+  if (words.length >= 2 && /[A-Za-z]/.test(name) && !/\p{Script=Han}/u.test(name)) {
+    return words.slice(0, 2).map((word) => Array.from(word)[0]?.toUpperCase() || "").join("");
+  }
+
+  const characters = Array.from(name.replace(/\s/g, ""));
+  return /\p{Script=Han}/u.test(name)
+    ? characters.slice(-2).join("")
+    : (characters[0] || "").toUpperCase();
 }

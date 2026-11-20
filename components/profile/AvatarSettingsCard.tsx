@@ -3,6 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import {
   Camera,
+  ChevronDown,
   ChevronLeft,
   ImagePlus,
   Loader2,
@@ -18,6 +19,8 @@ import {
   getDefaultAvatarConfig,
   isAvatarPersonalized,
   normalizeAvatarConfig,
+  AVATAR_DISPLAY_LABELS,
+  type AvatarDisplayMode,
   type AvatarConfig,
   type AvatarStyle,
 } from "@/lib/profile/avatar";
@@ -27,10 +30,17 @@ type AvatarView = "summary" | "choose" | "manual-base" | "manual-edit" | "photo"
 const ALLOWED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
 
-export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
+export function AvatarSettingsCard({
+  accessToken,
+  displayName,
+}: {
+  accessToken: string;
+  displayName?: string | null;
+}) {
   const [avatar, setAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
   const [savedAvatar, setSavedAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
   const [view, setView] = useState<AvatarView>("summary");
+  const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -75,7 +85,7 @@ export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
 
   const personalized = useMemo(() => isAvatarPersonalized(savedAvatar), [savedAvatar]);
 
-  const save = async () => {
+  const save = async (nextConfig: AvatarConfig = avatar) => {
     setSaving(true);
     setMessage("");
     setMessageIsError(false);
@@ -86,7 +96,7 @@ export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ avatarConfig: avatar }),
+        body: JSON.stringify({ avatarConfig: nextConfig }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || "儲存大頭貼失敗。");
@@ -101,6 +111,11 @@ export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const changeDisplayMode = (mode: AvatarDisplayMode) => {
+    if (saving || savedAvatar.displayMode === mode) return;
+    void save({ ...savedAvatar, displayMode: mode });
   };
 
   const cancelEdit = () => {
@@ -153,12 +168,32 @@ export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
   }
 
   return (
-    <div className="rounded-[24px] border border-[#E6EAF0] bg-white p-5 shadow-lg shadow-[#6D55A3]/5 sm:p-6">
+    <div className="rounded-[24px] border border-[#E6EAF0] bg-white p-4 shadow-lg shadow-[#6D55A3]/5 sm:p-5">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls="avatar-settings-panel"
+        onClick={() => setExpanded((open) => !open)}
+        className="flex w-full items-center gap-3 rounded-2xl text-left"
+      >
+        <SystemAvatar config={savedAvatar} displayName={displayName} size={52} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-black text-[#1F2937]">我的大頭貼</span>
+          <span className="mt-1 block truncate text-xs font-medium text-[#7B7B74]">
+            {AVATAR_DISPLAY_LABELS[savedAvatar.displayMode]}
+          </span>
+        </span>
+        {loading ? <Loader2 className="h-4 w-4 animate-spin text-[#6D55A3]" /> : (
+          <ChevronDown className={`h-5 w-5 shrink-0 text-[#6D55A3] transition-transform ${expanded ? "rotate-180" : ""}`} />
+        )}
+      </button>
+      {expanded && (
+      <div id="avatar-settings-panel" className="mt-4 border-t border-[#E6EAF0] pt-4">
       {view === "summary" && (
         <>
           <div className="flex items-center gap-4 rounded-[24px] bg-gradient-to-br from-[#FFF9F3] to-[#F3EEFF] p-4">
             <div className="shrink-0 rounded-full bg-white p-1 shadow-md shadow-[#6D55A3]/10">
-              <SystemAvatar config={savedAvatar} size={88} />
+              <SystemAvatar config={savedAvatar} displayName={displayName} size={88} />
             </div>
             <div className="min-w-0">
               <h3 className="text-base font-black text-[#1F2937]">我的大頭貼</h3>
@@ -167,6 +202,23 @@ export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
               </p>
             </div>
           </div>
+
+          <fieldset className="mt-4 space-y-2">
+            <legend className="mb-2 text-sm font-black text-[#1F2937]">大頭貼顯示方式</legend>
+            {(["custom", "default", "name"] as const).map((mode) => (
+              <label key={mode} className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-[#E6EAF0] px-3 py-2 text-sm font-medium text-[#1F2937]">
+                <input
+                  type="radio"
+                  name="avatar-display-mode"
+                  checked={savedAvatar.displayMode === mode}
+                  disabled={saving}
+                  onChange={() => changeDisplayMode(mode)}
+                  className="h-4 w-4 accent-[#6D55A3]"
+                />
+                {AVATAR_DISPLAY_LABELS[mode]}
+              </label>
+            ))}
+          </fieldset>
 
           <button
             type="button"
@@ -398,6 +450,8 @@ export function AvatarSettingsCard({ accessToken }: { accessToken: string }) {
         >
           {message}
         </p>
+      )}
+      </div>
       )}
     </div>
   );

@@ -8,10 +8,12 @@ export function SystemAvatar({
   config,
   size = 48,
   className = "",
+  displayName,
 }: {
   config?: AvatarConfig | null;
   size?: number;
   className?: string;
+  displayName?: string | null;
 }) {
-  return <AvatarRenderer config={config} size={size} className={className} />;
+  return <AvatarRenderer config={config} size={size} className={className} displayName={displayName} />;
 }

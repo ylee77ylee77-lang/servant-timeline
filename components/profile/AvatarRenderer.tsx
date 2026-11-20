@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import type { AvatarConfig } from "@/lib/profile/avatar";
+import { getAvatarNameMark, type AvatarConfig } from "@/lib/profile/avatar";
 import {
   AVATAR_CANVAS_SIZE,
   AVATAR_FRAME,
@@ -23,17 +23,23 @@ export function AvatarRenderer({
   config,
   size = 48,
   className = "",
+  displayName,
 }: {
   config?: AvatarConfig | null;
   size?: number;
   className?: string;
+  displayName?: string | null;
 }) {
-  const { portrait, companion, gradient } = getAvatarScene(config);
+  const { avatar, portrait, companion, gradient } = getAvatarScene(config);
+  const nameMark = avatar.displayMode === "name" ? getAvatarNameMark(displayName) : "";
   const id = useId().replace(/:/g, "");
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
-  const label = `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，陪伴動物：${companion.name}` : ""}`;
+  const label = nameMark
+    ? `姓名識別：${nameMark}`
+    : avatar.displayMode === "default" ? "系統預設圖示"
+    : `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，陪伴動物：${companion.name}` : ""}`;
 
   return (
     <svg
@@ -70,6 +76,18 @@ export function AvatarRenderer({
             width={AVATAR_PORTRAIT_BOUNDS.size}
             height={AVATAR_PORTRAIT_BOUNDS.size}
           />
+        ) : nameMark ? (
+          <text
+            x={cx}
+            y={cy}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize="140"
+            fontWeight="800"
+            fill="#6D55A3"
+          >
+            {nameMark}
+          </text>
         ) : (
           <g aria-hidden="true" fill="#FFFFFF" opacity="0.72">
             <circle cx="256" cy="205" r="81" />

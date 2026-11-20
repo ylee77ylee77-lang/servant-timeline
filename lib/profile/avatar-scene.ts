@@ -70,13 +70,14 @@ export const AVATAR_BACKGROUNDS: Record<AvatarConfig["background"], AvatarGradie
 export function getAvatarScene(input: unknown) {
   const avatar = normalizeAvatarConfig(input);
   // Neutral means the user has not selected a base portrait.
-  const base = avatar.style === "neutral" ? null : avatar.style;
+  const custom = avatar.displayMode === "custom";
+  const base = custom && avatar.style !== "neutral" ? avatar.style : null;
   const portraits = base ? AVATAR_PORTRAITS[base] : null;
-  const companion = avatar.pet === "none" ? null : AVATAR_COMPANIONS[avatar.pet];
+  const companion = custom && avatar.pet !== "none" ? AVATAR_COMPANIONS[avatar.pet] : null;
   return {
     avatar,
     portrait: portraits ? (avatar.glasses ? portraits.glasses : portraits.plain) : null,
     companion,
-    gradient: AVATAR_BACKGROUNDS[avatar.background],
+    gradient: AVATAR_BACKGROUNDS[custom ? avatar.background : "lavender"],
   };
 }

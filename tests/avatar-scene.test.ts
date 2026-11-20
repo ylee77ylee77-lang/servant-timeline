@@ -93,3 +93,23 @@ test("editor keeps only user-facing copy and animal thumbnails", () => {
   assert.match(source, /sticky top-0/);
   assert.match(source, /AvatarCompanionThumbnail/);
 });
+
+
+test("display mode is enforced by the canonical scene, not by page-specific CSS", () => {
+  const saved = {
+    style: "feminine", glasses: true, background: "mint", pet: "eagle",
+  };
+  const original = getAvatarScene({ ...saved, displayMode: "custom" });
+  const neutral = getAvatarScene({ ...saved, displayMode: "default" });
+  const name = getAvatarScene({ ...saved, displayMode: "name" });
+  assert.ok(original.portrait);
+  assert.ok(original.companion);
+  assert.equal(neutral.portrait, null);
+  assert.equal(neutral.companion, null);
+  assert.equal(name.portrait, null);
+  assert.equal(name.companion, null);
+  assert.equal(neutral.avatar.pet, "eagle");
+  assert.equal(name.avatar.style, "feminine");
+  assert.deepEqual(neutral.gradient, AVATAR_BACKGROUNDS.lavender);
+  assert.deepEqual(name.gradient, AVATAR_BACKGROUNDS.lavender);
+});

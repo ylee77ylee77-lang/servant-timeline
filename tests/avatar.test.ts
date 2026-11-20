@@ -4,6 +4,7 @@ import {
   getDefaultAvatarConfig,
   isAvatarPersonalized,
   normalizeAvatarConfig,
+  getAvatarNameMark,
 } from "../lib/profile/avatar.ts";
 
 test("avatar defaults keep a clear neutral fallback", () => {
@@ -18,6 +19,7 @@ test("avatar defaults keep a clear neutral fallback", () => {
     glasses: false,
     accessory: "none",
     pet: "none",
+    displayMode: "custom",
   });
 });
 
@@ -34,6 +36,7 @@ test("avatar normalization preserves valid masculine and feminine choices", () =
       glasses: true,
       accessory: "cap",
       pet: "eagle",
+      displayMode: "name",
     }),
     {
       style: "masculine",
@@ -46,6 +49,7 @@ test("avatar normalization preserves valid masculine and feminine choices", () =
       glasses: true,
       accessory: "cap",
       pet: "eagle",
+      displayMode: "name",
     }
   );
 
@@ -84,6 +88,7 @@ test("old avatar JSON gains safe defaults for newly added fields", () => {
       glasses: false,
       accessory: "none",
       pet: "none",
+      displayMode: "custom",
     }
   );
 });
@@ -96,6 +101,7 @@ test("avatar normalization rejects unknown values without storing arbitrary data
     eyeStyle: "giant",
     accessory: "unsafe",
     pet: "tiger",
+    displayMode: "javascript:",
     glasses: "yes",
   });
 
@@ -106,6 +112,7 @@ test("avatar normalization rejects unknown values without storing arbitrary data
   assert.equal(normalized.accessory, "none");
   assert.equal(normalized.pet, "none");
   assert.equal(normalized.glasses, false);
+  assert.equal(normalized.displayMode, "custom");
 });
 
 test("personalization detects either a chosen base role or optional pet", () => {
@@ -133,4 +140,29 @@ test("changing the background does not change avatar identity or companion", () 
   assert.equal(updated.glasses, true);
   assert.equal(updated.pet, "eagle");
   assert.equal(updated.background, "mint");
+});
+
+
+test("display settings persist without erasing a configured portrait", () => {
+  const saved = normalizeAvatarConfig({
+    style: "feminine", glasses: true, pet: "eagle",
+    background: "mint", displayMode: "custom",
+  });
+  const hidden = normalizeAvatarConfig({ ...saved, displayMode: "default" });
+  const named = normalizeAvatarConfig({ ...hidden, displayMode: "name" });
+  const restored = normalizeAvatarConfig({ ...named, displayMode: "custom" });
+  assert.equal(isAvatarPersonalized(hidden), true);
+  assert.equal(isAvatarPersonalized(named), true);
+  assert.equal(hidden.displayMode, "default");
+  assert.equal(named.displayMode, "name");
+  assert.deepEqual(restored, saved);
+});
+
+test("name identifiers use existing profile display names only", () => {
+  assert.equal(getAvatarNameMark("王小明"), "小明");
+  assert.equal(getAvatarNameMark("夏"), "夏");
+  assert.equal(getAvatarNameMark("Alice Brown"), "AB");
+  assert.equal(getAvatarNameMark(" Alice "), "A");
+  assert.equal(getAvatarNameMark(""), "");
+  assert.equal(getAvatarNameMark(null), "");
 });

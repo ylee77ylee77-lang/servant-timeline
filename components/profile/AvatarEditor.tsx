@@ -51,13 +51,14 @@ export function AvatarEditor({
       background: avatar.background,
       pet: avatar.pet,
       glasses: avatar.glasses,
+      displayMode: avatar.displayMode,
     });
   };
 
   return (
     <div className="relative">
       <div className="sticky top-0 z-30 flex items-center gap-5 rounded-[22px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3]/95 to-[#F7F4FF]/95 p-4 shadow-sm backdrop-blur-sm">
-        <AvatarRenderer config={avatar} size={104} />
+        <AvatarRenderer config={{ ...avatar, displayMode: "custom" }} size={104} />
         <div className="min-w-0">
           <div className="text-base font-black text-[#1F2937]">即時預覽</div>
           <div className="mt-1 truncate text-xs font-medium text-[#7B7B74]">{previewSummary}</div>

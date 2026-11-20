@@ -63,3 +63,15 @@ shrinking when the editor's top marker scrolls above the visible area. It remain
 within the editor and does not become a global fixed overlay. The animal picker
 shows a common crop into each **existing animal file**, plus a short name; no
 new images or long technical explanations are shown.
+
+## P1: display preferences and collapsed settings
+
+The profile avatar settings card defaults to collapsed on each mount and opens
+on user request. A single `displayMode` field in the existing JSONB
+`avatar_config` selects `custom`, `default` or `name`. Missing or invalid
+legacy values normalize to `custom`. Switching modes preserves the stored
+3D character settings and does not delete assets. The `SystemAvatar` facade
+passes the existing profile display name through the canonical renderer for
+name-mark mode in the settings page, chat list, chat header, incoming calls and
+active calls. Missing names use the neutral system icon. No schema migration,
+new image assets, image-generation service or storage API is needed.

@@ -4477,7 +4477,7 @@ export default function App() {
         </div>
 
         <div className="mb-6">
-          <AvatarSettingsCard accessToken={session.access_token} />
+          <AvatarSettingsCard accessToken={session.access_token} displayName={authDisplayName} />
         </div>
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 space-y-6">

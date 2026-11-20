@@ -8,6 +8,7 @@ import {
   MessageCircle,
   Mic,
   MicOff,
+  Volume2,
   Paperclip,
   Phone,
   PhoneOff,
@@ -18,6 +19,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
+import { createRingtoneWav } from "@/lib/communications/ringtone-wave";
 
 type Peer = {
   id: string;
@@ -56,6 +58,7 @@ type IceServerResponse = {
   iceServers?: RTCIceServer[];
   relayAvailable?: boolean;
   relayReason?: string;
+  costGuardDiagnostic?: string | null;
   turnUsagePercent?: number;
   warning?: string;
 };
@@ -68,9 +71,28 @@ type CallSignal = {
   payload: Record<string, unknown>;
 };
 
-type AudioWindow = Window & {
-  webkitAudioContext?: typeof AudioContext;
-};
+
+// Set an upper bound for waiting on Cloudflare before negotiating WebRTC.
+// When the free-tier guard is slow/unavailable, use STUN only; never issue
+// unrestricted TURN credentials.
+function resolveIceServersForCall(
+  pending: Promise<RTCIceServer[]>,
+  waitMs = 1_800
+): Promise<RTCIceServer[]> {
+  const stunOnly: RTCIceServer[] = [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (servers: RTCIceServer[]) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      resolve(servers);
+    };
+    timer = setTimeout(() => finish(stunOnly), waitMs);
+    void pending.then(finish, () => finish(stunOnly));
+  });
+}
 
 function apiHeaders(accessToken: string, json = false) {
   return {
@@ -182,6 +204,8 @@ export function CommunicationHub() {
   const [activeCall, setActiveCall] = useState<CallRow | null>(null);
   const [callState, setCallState] = useState<"idle" | "ringing" | "connecting" | "connected">("idle");
   const [muted, setMuted] = useState(false);
+  const [ringtoneBlocked, setRingtoneBlocked] = useState(false);
+  const [preparingCall, setPreparingCall] = useState(false);
 
   const selectedPeer = peers.find((peer) => peer.id === selectedPeerId) ?? null;
   const totalUnread = useMemo(
@@ -194,8 +218,8 @@ export function CommunicationHub() {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  const ringtoneContextRef = useRef<AudioContext | null>(null);
-  const ringtoneTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ringtoneAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ringtoneTestTimerRef = useRef<number | null>(null);
   const activeCallRef = useRef<CallRow | null>(null);
   const isCallerRef = useRef(false);
   const processedSignalsRef = useRef(new Set<number>());
@@ -221,126 +245,113 @@ export function CommunicationHub() {
     return data;
   }, [session.access_token]);
 
-  const ensureRingtoneAudio = useCallback(async () => {
-    if (typeof window === "undefined") return null;
-
-    const audioWindow = window as AudioWindow;
-    const AudioContextClass = window.AudioContext ?? audioWindow.webkitAudioContext;
-    if (!AudioContextClass) return null;
-
-    let context = ringtoneContextRef.current;
-    if (!context || context.state === "closed") {
-      context = new AudioContextClass();
-      ringtoneContextRef.current = context;
-    }
-
-    if (context.state !== "running") {
-      await context.resume().catch(() => undefined);
-    }
-
-    return context.state === "running" ? context : null;
+  // A real media element is more reliable than an AudioContext for iOS Safari/PWA.
+  // Browsers still require a user gesture to authorize sound playback.
+  useEffect(() => {
+    const audio = ringtoneAudioRef.current;
+    if (!audio) return;
+    const url = URL.createObjectURL(createRingtoneWav());
+    audio.src = url;
+    audio.volume = 0.8;
+    audio.load();
+    return () => {
+      audio.pause();
+      audio.removeAttribute("src");
+      URL.revokeObjectURL(url);
+    };
   }, []);
 
-  const playRingtonePulse = useCallback(async () => {
-    const context = await ensureRingtoneAudio();
-    if (!context) return;
-
-    const now = context.currentTime;
-    const gain = context.createGain();
-    const firstTone = context.createOscillator();
-    const secondTone = context.createOscillator();
-
-    firstTone.type = "sine";
-    secondTone.type = "sine";
-    firstTone.frequency.setValueAtTime(523.25, now);
-    secondTone.frequency.setValueAtTime(659.25, now);
-
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.075, now + 0.025);
-    gain.gain.setValueAtTime(0.075, now + 0.22);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
-
-    firstTone.connect(gain);
-    secondTone.connect(gain);
-    gain.connect(context.destination);
-
-    firstTone.start(now);
-    secondTone.start(now);
-    firstTone.stop(now + 0.45);
-    secondTone.stop(now + 0.45);
-
-    window.setTimeout(() => {
-      firstTone.disconnect();
-      secondTone.disconnect();
-      gain.disconnect();
-    }, 650);
-
-    if ("vibrate" in navigator) {
-      navigator.vibrate([180, 90, 180]);
-    }
-  }, [ensureRingtoneAudio]);
-
   const stopRingtone = useCallback(() => {
-    if (ringtoneTimerRef.current) {
-      clearInterval(ringtoneTimerRef.current);
-      ringtoneTimerRef.current = null;
+    if (ringtoneTestTimerRef.current) {
+      window.clearTimeout(ringtoneTestTimerRef.current);
+      ringtoneTestTimerRef.current = null;
+    }
+    const audio = ringtoneAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
     }
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
       navigator.vibrate(0);
     }
   }, []);
 
-  const startRingtone = useCallback(() => {
+  const playRingtone = useCallback(async (): Promise<boolean> => {
+    const audio = ringtoneAudioRef.current;
+    if (!audio) return false;
+    try {
+      audio.currentTime = 0;
+      await audio.play();
+      setRingtoneBlocked(false);
+      if ("vibrate" in navigator) {
+        navigator.vibrate([180, 90, 180]);
+      }
+      return true;
+    } catch {
+      setRingtoneBlocked(true);
+      return false;
+    }
+  }, []);
+
+  const testRingtone = useCallback(() => {
     stopRingtone();
-    void playRingtonePulse();
-    ringtoneTimerRef.current = setInterval(() => {
-      void playRingtonePulse();
-    }, 1600);
-  }, [playRingtonePulse, stopRingtone]);
+    // Calling play() synchronously from this click is critical for Safari.
+    void playRingtone().then((played) => {
+      if (played && !incomingCall) {
+        ringtoneTestTimerRef.current = window.setTimeout(stopRingtone, 1500);
+      }
+    });
+  }, [incomingCall, playRingtone, stopRingtone]);
+
+  const incomingCallId = incomingCall?.id ?? "";
 
   useEffect(() => {
-    const unlockAudio = () => {
-      void ensureRingtoneAudio();
-    };
-
-    window.addEventListener("pointerdown", unlockAudio, { capture: true, once: true });
-    window.addEventListener("keydown", unlockAudio, { capture: true, once: true });
-
-    return () => {
-      window.removeEventListener("pointerdown", unlockAudio, true);
-      window.removeEventListener("keydown", unlockAudio, true);
-    };
-  }, [ensureRingtoneAudio]);
-
-  useEffect(() => {
-    if (!incomingCall) {
+    if (!incomingCallId) {
       stopRingtone();
       return;
     }
-
-    startRingtone();
+    // Begin playback on the next task so the effect does not synchronously
+    // update React state when iOS blocks autoplay.
+    const playbackTimer = window.setTimeout(() => {
+      void playRingtone();
+    }, 0);
 
     const resumeWhenVisible = () => {
       if (document.visibilityState === "visible") {
-        void ensureRingtoneAudio().then(() => startRingtone());
+        void playRingtone();
+      } else {
+        stopRingtone();
       }
     };
     document.addEventListener("visibilitychange", resumeWhenVisible);
-
     return () => {
+      window.clearTimeout(playbackTimer);
       document.removeEventListener("visibilitychange", resumeWhenVisible);
       stopRingtone();
     };
-  }, [ensureRingtoneAudio, incomingCall?.id, startRingtone, stopRingtone]);
+  }, [incomingCallId, playRingtone, stopRingtone]);
 
-  useEffect(() => () => {
-    stopRingtone();
-    const context = ringtoneContextRef.current;
-    ringtoneContextRef.current = null;
-    if (context && context.state !== "closed") {
-      void context.close().catch(() => undefined);
+  useEffect(() => () => stopRingtone(), [stopRingtone]);
+
+  const acquireMicrophone = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("此瀏覽器不支援麥克風，無法使用語音通話。");
     }
-  }, [stopRingtone]);
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
+        throw new Error("請在瀏覽器中允許此網站使用麥克風，才能進行語音通話。");
+      }
+      if (error instanceof DOMException && error.name === "NotFoundError") {
+        throw new Error("沒有找到可用的麥克風，請確認裝置設定。");
+      }
+      throw error;
+    }
+  }, []);
 
   const loadPeers = useCallback(async () => {
     if (!canUse) return;
@@ -567,7 +578,11 @@ export function CommunicationHub() {
         !data.relayAvailable
         && ["cost-guard-unconfigured", "cost-guard-unavailable"].includes(data.relayReason || "")
       ) {
-        setErrorMessage("TURN 成本保護已啟用：目前無法確認免費額度，因此暫停 TURN relay，改用 P2P／STUN。");
+        const diagnostic = data.costGuardDiagnostic;
+        const detail = typeof diagnostic === "string" && /^[a-z0-9-]+$/.test(diagnostic)
+          ? `（診斷：${diagnostic}）`
+          : "";
+        setErrorMessage(`TURN 額度目前無法確認${detail}，已暫停 TURN，通話改用 P2P／STUN。`);
       }
 
       if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
@@ -580,20 +595,22 @@ export function CommunicationHub() {
     return [{ urls: ["stun:stun.cloudflare.com:3478"] }];
   }, [requestJson]);
 
-  const setupPeerConnection = useCallback(async (call: CallRow, caller: boolean) => {
+  const setupPeerConnection = useCallback(async (
+    call: CallRow,
+    caller: boolean,
+    stream: MediaStream,
+    iceServersPromise: Promise<RTCIceServer[]>
+  ) => {
     cleanupPeerConnection();
     isCallerRef.current = caller;
     processedSignalsRef.current.clear();
     pendingIceRef.current = [];
 
-    if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === "undefined") {
+    if (typeof RTCPeerConnection === "undefined") {
       throw new Error("此瀏覽器不支援 App 內語音通話。");
     }
 
-    const [stream, iceServers] = await Promise.all([
-      navigator.mediaDevices.getUserMedia({ audio: true, video: false }),
-      loadIceServers(),
-    ]);
+    const iceServers = await resolveIceServersForCall(iceServersPromise);
     localStreamRef.current = stream;
     const pc = new RTCPeerConnection({
       iceServers,
@@ -645,7 +662,7 @@ export function CommunicationHub() {
     } else {
       await loadCallSignals(call.id);
     }
-  }, [cleanupPeerConnection, loadCallSignals, loadIceServers, requestJson, sendSignal]);
+  }, [cleanupPeerConnection, loadCallSignals, requestJson, sendSignal]);
 
   const loadActiveCalls = useCallback(async () => {
     if (!canUse) return;
@@ -885,37 +902,65 @@ export function CommunicationHub() {
   };
 
   const startCall = async () => {
-    if (!selectedPeer || activeCall) return;
+    if (!selectedPeer || activeCall || preparingCall) return;
+    setPreparingCall(true);
     setErrorMessage("");
+    const iceServersPromise = loadIceServers();
+    let stream: MediaStream | null = null;
+    let createdCallId = "";
     try {
+      // Request microphone while handling the user's click, before network work.
+      stream = await acquireMicrophone();
       const data = await requestJson("/api/communications/calls", {
         method: "POST",
         body: JSON.stringify({ action: "start", peerId: selectedPeer.id }),
       });
-      await setupPeerConnection(data.call as CallRow, true);
+      const call = data.call as CallRow;
+      createdCallId = call.id;
+      await setupPeerConnection(call, true, stream, iceServersPromise);
+      stream = null;
     } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
+      if (createdCallId) {
+        void requestJson("/api/communications/calls", {
+          method: "POST",
+          body: JSON.stringify({ action: "end", callId: createdCallId }),
+        }).catch(() => undefined);
+      }
       cleanupPeerConnection();
       setErrorMessage(error instanceof Error ? error.message : "無法開始通話。");
+    } finally {
+      setPreparingCall(false);
     }
   };
 
   const acceptCall = async () => {
-    if (!incomingCall) return;
+    if (!incomingCall || preparingCall) return;
+    setPreparingCall(true);
+    setErrorMessage("");
     const call = incomingCall;
+    const iceServersPromise = loadIceServers();
+    let stream: MediaStream | null = null;
     stopRingtone();
-    setIncomingCall(null);
-    setOpen(true);
-    const peerId = call.caller_id;
-    setSelectedPeerId(peerId);
     try {
+      // Ask for microphone before marking the call accepted on the server.
+      stream = await acquireMicrophone();
       const data = await requestJson("/api/communications/calls", {
         method: "POST",
         body: JSON.stringify({ action: "accept", callId: call.id }),
       });
-      await setupPeerConnection(data.call as CallRow, false);
+      setIncomingCall(null);
+      setOpen(true);
+      setSelectedPeerId(call.caller_id);
+      await setupPeerConnection(data.call as CallRow, false, stream, iceServersPromise);
+      stream = null;
     } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
       cleanupPeerConnection();
       setErrorMessage(error instanceof Error ? error.message : "無法接聽通話。");
+      void loadActiveCalls();
+    } finally {
+      setPreparingCall(false);
     }
   };
 
@@ -962,6 +1007,7 @@ export function CommunicationHub() {
   return (
     <>
       <audio ref={remoteAudioRef} autoPlay playsInline />
+      <audio ref={ringtoneAudioRef} loop playsInline preload="auto" />
 
       <button
         type="button"
@@ -991,7 +1037,7 @@ export function CommunicationHub() {
             )}
             {selectedPeer ? (
               <>
-                <SystemAvatar config={selectedPeer.avatarConfig} size={42} />
+                <SystemAvatar config={selectedPeer.avatarConfig} displayName={selectedPeer.displayName} size={42} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-black text-[#1F2937]">{selectedPeer.displayName}</div>
                   <div className="text-[11px] font-bold text-[#7B7B74]">私人對話</div>
@@ -999,7 +1045,7 @@ export function CommunicationHub() {
                 <button
                   type="button"
                   onClick={() => void startCall()}
-                  disabled={Boolean(activeCall)}
+                  disabled={Boolean(activeCall) || preparingCall}
                   aria-label="語音通話"
                   className="rounded-full bg-[#F3EEFF] p-2.5 text-[#6D55A3] disabled:opacity-40"
                 >
@@ -1012,6 +1058,9 @@ export function CommunicationHub() {
                 <div className="text-[11px] font-bold text-[#7B7B74]">不受崇拜時段限制</div>
               </div>
             )}
+            <button type="button" onClick={testRingtone} aria-label="測試並啟用來電鈴聲" title="測試鈴聲" className="rounded-full p-2 text-[#6D55A3]">
+              <Volume2 className="h-5 w-5" />
+            </button>
             <button type="button" onClick={() => setOpen(false)} aria-label="關閉訊息" className="rounded-full p-2 text-[#7B7B74]">
               <X className="h-5 w-5" />
             </button>
@@ -1040,7 +1089,7 @@ export function CommunicationHub() {
                       onClick={() => setSelectedPeerId(peer.id)}
                       className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left hover:bg-[#FFF9F3]"
                     >
-                      <SystemAvatar config={peer.avatarConfig} size={46} />
+                      <SystemAvatar config={peer.avatarConfig} displayName={peer.displayName} size={46} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-black text-[#1F2937]">{peer.displayName}</div>
                         <div className="truncate text-xs font-medium text-[#7B7B74]">私人對話</div>
@@ -1169,17 +1218,22 @@ export function CommunicationHub() {
       {incomingCall && (
         <div className="fixed inset-x-3 top-20 z-[90] mx-auto max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-5 shadow-2xl">
           <div className="flex items-center gap-3">
-            <SystemAvatar config={incomingPeer?.avatarConfig} size={58} />
+            <SystemAvatar config={incomingPeer?.avatarConfig} displayName={incomingPeer?.displayName} size={58} />
             <div className="flex-1">
               <div className="text-base font-black text-[#1F2937]">{incomingPeer?.displayName || "管理員／總招"}</div>
               <div className="mt-1 text-xs font-bold text-[#7B7B74]">App 內語音來電</div>
             </div>
           </div>
+          {ringtoneBlocked && (
+            <button type="button" onClick={testRingtone} className="mt-3 w-full rounded-xl bg-[#F3EEFF] px-3 py-2 text-xs font-bold text-[#6D55A3]">
+              瀏覽器阻擋自動鈴聲，點此播放
+            </button>
+          )}
           <div className="mt-5 grid grid-cols-2 gap-3">
             <button type="button" onClick={() => void declineCall()} className="flex items-center justify-center gap-2 rounded-2xl bg-[#FFF2F4] py-3 font-black text-[#D73A49]">
               <PhoneOff className="h-5 w-5" /> 拒接
             </button>
-            <button type="button" onClick={() => void acceptCall()} className="flex items-center justify-center gap-2 rounded-2xl bg-[#008A7A] py-3 font-black text-white">
+            <button type="button" onClick={() => void acceptCall()} disabled={preparingCall} className="flex items-center justify-center gap-2 rounded-2xl bg-[#008A7A] py-3 font-black text-white">
               <Phone className="h-5 w-5" /> 接聽
             </button>
           </div>
@@ -1189,7 +1243,7 @@ export function CommunicationHub() {
       {activeCall && (
         <div className="fixed inset-x-3 bottom-24 z-[95] mx-auto max-w-sm rounded-[28px] bg-[#1F2937] p-5 text-white shadow-2xl">
           <div className="flex items-center gap-3">
-            <SystemAvatar config={callPeer?.avatarConfig} size={58} />
+            <SystemAvatar config={callPeer?.avatarConfig} displayName={callPeer?.displayName} size={58} />
             <div className="flex-1">
               <div className="text-base font-black">{callPeer?.displayName || "通話中"}</div>
               <div className="mt-1 text-xs font-bold text-white/70">

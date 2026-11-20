@@ -5,11 +5,9 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ArrowLeft, KeyRound, Loader2, RefreshCw, ShieldAlert, UserCheck, UserPlus } from "lucide-react";
 import { useAuth, type AppRole } from "@/components/auth/AuthProvider";
 
-type PasswordResetRequest = {
-  userId: string;
-  accountCode: string;
-  displayName: string;
-  isActive: boolean;
+type AccountRecoveryRequest = {
+  requestLogId: string;
+  requestedName: string;
   requestedAt: string;
 };
 
@@ -17,6 +15,7 @@ type RegisteredUser = {
   id: string;
   accountCode: string;
   displayName: string;
+  contactEmail: string;
   isActive: boolean;
   roles: AppRole[];
 };
@@ -25,18 +24,24 @@ export default function AdminUsersPage() {
   const { isAdmin, session } = useAuth();
   const [accountCode, setAccountCode] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<AppRole>("volunteer");
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [resetRequests, setResetRequests] = useState<PasswordResetRequest[]>([]);
-  const [resetAccountCode, setResetAccountCode] = useState("");
-  const [resetPassword, setResetPassword] = useState("");
+  const [recoveryRequests, setRecoveryRequests] = useState<AccountRecoveryRequest[]>([]);
+  const [selectedRecoveryRequestId, setSelectedRecoveryRequestId] = useState("");
+  const [selectedRecoveryUserId, setSelectedRecoveryUserId] = useState("");
   const [resetMessage, setResetMessage] = useState("");
   const [resetIsError, setResetIsError] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isLoadingResets, setIsLoadingResets] = useState(true);
+  const [emailUserId, setEmailUserId] = useState("");
+  const [emailDraft, setEmailDraft] = useState("");
+  const [emailMessage, setEmailMessage] = useState("");
+  const [emailIsError, setEmailIsError] = useState(false);
+  const [isSavingEmail, setIsSavingEmail] = useState(false);
   const [adminCount, setAdminCount] = useState<number | null>(null);
   const [registeredUsers, setRegisteredUsers] = useState<RegisteredUser[]>([]);
   const [activatingUserId, setActivatingUserId] = useState("");
@@ -65,7 +70,7 @@ export default function AdminUsersPage() {
       if (!adminResponse.ok) {
         throw new Error(adminData?.error || "無法確認管理員安全狀態。");
       }
-      setResetRequests(Array.isArray(resetData?.requests) ? resetData.requests : []);
+      setRecoveryRequests(Array.isArray(resetData?.requests) ? resetData.requests : []);
       setAdminCount(Number(adminData?.adminCount ?? 0));
       setRegisteredUsers(Array.isArray(adminData?.users) ? adminData.users : []);
     } catch (error) {
@@ -125,12 +130,67 @@ export default function AdminUsersPage() {
     );
   }
 
-  const handlePasswordReset = async (event: FormEvent) => {
+  const normalizeName = (value: string) =>
+    value.normalize("NFKC").replace(/\s+/g, " ").trim();
+
+  const selectRecoveryRequest = (request: AccountRecoveryRequest) => {
+    setSelectedRecoveryRequestId(request.requestLogId);
+    setResetMessage("");
+    setResetIsError(false);
+    const matches = registeredUsers.filter(
+      (user) => user.isActive && normalizeName(user.displayName) === normalizeName(request.requestedName)
+    );
+    setSelectedRecoveryUserId(matches.length === 1 ? matches[0].id : "");
+  };
+
+  const saveRecoveryEmail = async (event: FormEvent) => {
+    event.preventDefault();
+    setEmailMessage("");
+    setEmailIsError(false);
+    if (!emailUserId) {
+      setEmailIsError(true);
+      setEmailMessage("請先選擇帳號。");
+      return;
+    }
+
+    setIsSavingEmail(true);
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: emailUserId,
+          action: "update-recovery-email",
+          contactEmail: emailDraft,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "儲存救援 Email 失敗。");
+      setEmailMessage(`已更新 ${data.user.displayName} 的救援 Email。`);
+      await loadResetRequests();
+    } catch (error) {
+      setEmailIsError(true);
+      setEmailMessage(error instanceof Error ? error.message : "儲存救援 Email 失敗。");
+    } finally {
+      setIsSavingEmail(false);
+    }
+  };
+
+  const handleAccountRecovery = async (event: FormEvent) => {
     event.preventDefault();
     setResetMessage("");
     setResetIsError(false);
-    setIsResetting(true);
 
+    if (!selectedRecoveryRequestId || !selectedRecoveryUserId) {
+      setResetIsError(true);
+      setResetMessage("請先選擇申請，並確認本人對應的服事帳號。");
+      return;
+    }
+
+    setIsResetting(true);
     try {
       const response = await fetch("/api/admin/password-resets", {
         method: "POST",
@@ -139,23 +199,22 @@ export default function AdminUsersPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          accountCode: resetAccountCode,
-          password: resetPassword,
+          requestLogId: selectedRecoveryRequestId,
+          userId: selectedRecoveryUserId,
         }),
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "重設密碼失敗。");
+      if (!response.ok) throw new Error(data?.error || "帳號／密碼協助處理失敗。");
 
-      setResetIsError(false);
       setResetMessage(
-        `已設定 ${data.user.displayName}（${data.user.accountCode}）的臨時密碼。請安全轉交本人；下次登入時系統會要求他自行設定新密碼。`
+        `已確認 ${data.delivery.displayName}，系統已將原服事帳號與臨時密碼寄到 ${data.delivery.emailMasked}。`
       );
-      setResetAccountCode("");
-      setResetPassword("");
+      setSelectedRecoveryRequestId("");
+      setSelectedRecoveryUserId("");
       await loadResetRequests();
     } catch (error) {
       setResetIsError(true);
-      setResetMessage(error instanceof Error ? error.message : "重設密碼失敗。");
+      setResetMessage(error instanceof Error ? error.message : "帳號／密碼協助處理失敗。");
     } finally {
       setIsResetting(false);
     }
@@ -173,7 +232,7 @@ export default function AdminUsersPage() {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ accountCode, displayName, password, role }),
+        body: JSON.stringify({ accountCode, displayName, contactEmail, password, role }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || "建立帳號失敗。");
@@ -182,6 +241,7 @@ export default function AdminUsersPage() {
       setMessage(`已建立 ${data.user.displayName}（${data.user.accountCode}）。`);
       setAccountCode("");
       setDisplayName("");
+      setContactEmail("");
       setPassword("");
       setRole("volunteer");
       await loadResetRequests();
@@ -223,9 +283,9 @@ export default function AdminUsersPage() {
         <section className="mb-6 rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-lg shadow-[#6D55A3]/5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h1 className="text-xl font-black text-[#1F2937]">待處理密碼重設</h1>
+              <h1 className="text-xl font-black text-[#1F2937]">待處理帳號／密碼協助</h1>
               <p className="mt-1 text-sm font-medium leading-6 text-[#7B7B74]">
-                同工在登入頁送出的申請會顯示在這裡。只有管理員可以真正設定新密碼。
+                申請人只填姓名。請確認本人並選對既有帳號；按確認後系統會自動寄出原帳號與新的臨時密碼。
               </p>
             </div>
             <button
@@ -235,7 +295,7 @@ export default function AdminUsersPage() {
                 void loadResetRequests();
               }}
               disabled={isLoadingResets}
-              aria-label="重新整理密碼重設申請"
+              aria-label="重新整理帳號／密碼協助申請"
               className="rounded-xl border border-[#6D55A3]/15 bg-[#F3EEFF] p-2 text-[#6D55A3] disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${isLoadingResets ? "animate-spin" : ""}`} />
@@ -243,35 +303,76 @@ export default function AdminUsersPage() {
           </div>
 
           <div className="mt-4 space-y-3">
-            {resetRequests.length === 0 ? (
+            {recoveryRequests.length === 0 ? (
               <div className="rounded-2xl bg-[#FFF9F3] px-4 py-4 text-sm font-bold text-[#7B7B74]">
-                目前沒有待處理的密碼重設申請。
+                目前沒有待處理的帳號／密碼協助申請。
               </div>
             ) : (
-              resetRequests.map((request) => (
-                <div key={request.userId} className="rounded-2xl border border-[#E6EAF0] p-4">
-                  <div className="font-black text-[#1F2937]">{request.displayName}</div>
-                  <div className="mt-1 text-sm font-bold text-[#6D55A3]">{request.accountCode}</div>
+              recoveryRequests.map((request) => (
+                <div key={request.requestLogId} className="rounded-2xl border border-[#E6EAF0] p-4">
+                  <div className="font-black text-[#1F2937]">{request.requestedName}</div>
                   <div className="mt-1 text-xs font-medium text-[#7B7B74]">
                     申請時間：{new Date(request.requestedAt).toLocaleString("zh-TW")}
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      setResetAccountCode(request.accountCode);
-                      setResetPassword("");
-                      setResetMessage("");
-                      setResetIsError(false);
-                    }}
+                    onClick={() => selectRecoveryRequest(request)}
                     className="mt-3 rounded-xl bg-[#F3EEFF] px-3 py-2 text-xs font-black text-[#6D55A3]"
                   >
-                    選擇這個帳號
+                    處理這份申請
                   </button>
                 </div>
               ))
             )}
           </div>
         </section>
+
+        <form onSubmit={saveRecoveryEmail} className="mb-6 rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-lg shadow-[#6D55A3]/5">
+          <h2 className="text-xl font-black text-[#1F2937]">救援 Email 管理</h2>
+          <p className="mt-1 text-sm font-medium leading-6 text-[#7B7B74]">
+            既有帳號若尚未設定 Email，請先在這裡補上。Email 只供帳號救援使用，不顯示給一般同工。
+          </p>
+          <select
+            value={emailUserId}
+            onChange={(event) => {
+              const id = event.target.value;
+              setEmailUserId(id);
+              setEmailDraft(registeredUsers.find((user) => user.id === id)?.contactEmail || "");
+              setEmailMessage("");
+            }}
+            className="mt-4 w-full rounded-2xl border border-[#D9DEE7] bg-white px-4 py-3"
+            required
+          >
+            <option value="">請選擇帳號</option>
+            {registeredUsers.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.displayName}（{user.accountCode}）{user.contactEmail ? "" : "｜未設定 Email"}
+              </option>
+            ))}
+          </select>
+          <input
+            type="email"
+            autoComplete="email"
+            value={emailDraft}
+            onChange={(event) => setEmailDraft(event.target.value)}
+            placeholder="name@example.com"
+            className="mt-3 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
+            required
+          />
+          {emailMessage && (
+            <p className={`mt-3 text-sm font-bold ${emailIsError ? "text-[#D73A49]" : "text-[#008A7A]"}`}>
+              {emailMessage}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={isSavingEmail}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#6D55A3] px-4 py-3 font-black text-white disabled:opacity-60"
+          >
+            {isSavingEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {isSavingEmail ? "儲存中" : "儲存救援 Email"}
+          </button>
+        </form>
 
         <section className="mb-6 rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-lg shadow-[#6D55A3]/5">
           <div className="flex items-start justify-between gap-3">
@@ -317,43 +418,44 @@ export default function AdminUsersPage() {
           </div>
         </section>
 
-        <form onSubmit={handlePasswordReset} className="mb-6 rounded-[28px] border border-[#6D55A3]/15 bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
+        <form onSubmit={handleAccountRecovery} className="mb-6 rounded-[28px] border border-[#6D55A3]/15 bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
           <div className="mb-6">
             <h2 className="flex items-center gap-2 text-xl font-black text-[#1F2937]">
               <KeyRound className="h-5 w-5 text-[#6D55A3]" />
-              重設既有帳號密碼
+              確認並寄送登入資料
             </h2>
             <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
-              可處理上方申請，也可直接選擇既有服事帳號。設定後會成為臨時密碼，使用者下次登入必須自行設定新密碼。
+              從上方選擇申請後，確認本人對應的服事帳號。按一次確認，系統會產生新的臨時密碼並自動寄到該帳號登記的 Email；原服事帳號不變。
             </p>
           </div>
 
-          <label htmlFor="reset-account-code" className="block text-sm font-black text-[#1F2937]">要重設的服事帳號</label>
+          {selectedRecoveryRequestId ? (
+            <div className="rounded-2xl bg-[#FFF9F3] px-4 py-3 text-sm font-bold text-[#1F2937]">
+              申請姓名：{
+                recoveryRequests.find((request) => request.requestLogId === selectedRecoveryRequestId)?.requestedName || "未指定"
+              }
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-[#FFF9F3] px-4 py-3 text-sm font-bold text-[#7B7B74]">
+              請先從上方選擇一份申請。
+            </div>
+          )}
+
           <select
-            id="reset-account-code"
-            value={resetAccountCode}
-            onChange={(event) => setResetAccountCode(event.target.value)}
-            className="mt-2 w-full rounded-2xl border border-[#D9DEE7] bg-white px-4 py-3"
+            value={selectedRecoveryUserId}
+            onChange={(event) => setSelectedRecoveryUserId(event.target.value)}
+            className="mt-4 w-full rounded-2xl border border-[#D9DEE7] bg-white px-4 py-3"
             required
           >
-            <option value="">請選擇已註冊帳號</option>
-            {registeredUsers.map((user) => (
-              <option key={user.id} value={user.accountCode}>
-                {user.displayName}（{user.accountCode}）{user.isActive ? "" : "｜待啟用"}
-              </option>
-            ))}
+            <option value="">確認本人對應的已啟用帳號</option>
+            {registeredUsers
+              .filter((user) => user.isActive)
+              .map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.displayName}（{user.accountCode}）{user.contactEmail ? "" : "｜未設定 Email"}
+                </option>
+              ))}
           </select>
-          <p className="mt-1.5 text-xs font-medium text-[#7B7B74]">
-            自行註冊後會自動出現在此清單，不必手動輸入帳號。
-          </p>
-          <Field
-            label="臨時密碼"
-            value={resetPassword}
-            onChange={setResetPassword}
-            type="password"
-            autoComplete="new-password"
-            hint="至少 8 位、最多 72 位字元，請用安全方式交給本人"
-          />
 
           {resetMessage && (
             <p role="status" className={`mt-4 text-sm font-bold ${resetIsError ? "text-[#D73A49]" : "text-[#008A7A]"}`}>
@@ -363,11 +465,11 @@ export default function AdminUsersPage() {
 
           <button
             type="submit"
-            disabled={isResetting}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
+            disabled={isResetting || !selectedRecoveryRequestId || !selectedRecoveryUserId}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-40"
           >
             {isResetting ? <Loader2 className="h-5 w-5 animate-spin" /> : <KeyRound className="h-5 w-5" />}
-            {isResetting ? "重設中" : "設定臨時密碼"}
+            {isResetting ? "處理中" : "確認本人並寄送登入資料"}
           </button>
         </form>
 
@@ -378,6 +480,7 @@ export default function AdminUsersPage() {
           </div>
 
           <Field label="姓名" value={displayName} onChange={setDisplayName} autoComplete="name" />
+          <Field label="聯絡 Email" value={contactEmail} onChange={setContactEmail} type="email" autoComplete="email" hint="只供帳號救援寄送登入資料使用" />
           <Field label="服事帳號" value={accountCode} onChange={setAccountCode} autoComplete="off" hint="3–32 字元：英文小寫、數字、點、底線或連字號" />
           <Field label="初始密碼" value={password} onChange={setPassword} type="password" autoComplete="new-password" hint="8–72 字元，請用安全方式交給本人" />
 
