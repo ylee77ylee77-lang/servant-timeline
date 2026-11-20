@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { communicationErrorResponse, getCommunicationPeer, requireCommunicationActor } from "@/lib/communications/access";
 import { broadcastCommunicationMessage } from "@/lib/communications/broadcast";
 import { COMMUNICATION_BUCKET } from "@/lib/communications/storage";
@@ -47,11 +47,13 @@ export async function GET(request: NextRequest) {
       .from("communication_messages")
       .select("id,sender_id,recipient_id,message_type,body,attachment_path,attachment_name,attachment_mime,attachment_size,edited_at,retracted_at,read_at,created_at")
       .or(`and(sender_id.eq.${actor.userId},recipient_id.eq.${peerId}),and(sender_id.eq.${peerId},recipient_id.eq.${actor.userId})`)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(250);
     if (error) throw error;
 
-    return NextResponse.json({ messages: await serializeMessages((data ?? []) as Array<Record<string, unknown>>) });
+    return NextResponse.json({
+      messages: await serializeMessages([...(data ?? [])].reverse() as Array<Record<string, unknown>>),
+    });
   } catch (error) {
     const resolved = communicationErrorResponse(error);
     return NextResponse.json({ error: resolved.message }, { status: resolved.status });
@@ -64,15 +66,21 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const peerId = String(body.peerId || "");
     const text = String(body.body || "").normalize("NFKC").trim();
+    const clientMessageId = body.clientMessageId == null ? "" : String(body.clientMessageId);
+    if (clientMessageId && !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(clientMessageId)) {
+      return NextResponse.json({ error: "訊息識別碼無效。" }, { status: 400 });
+    }
     await getCommunicationPeer(actor, peerId);
 
     if (!text || text.length > 4000) {
       return NextResponse.json({ error: "訊息需為 1–4000 字元。" }, { status: 400 });
     }
 
-    const { data, error } = await getSupabaseAdminClient()
+    const supabase = getSupabaseAdminClient();
+    const { data, error } = await supabase
       .from("communication_messages")
       .insert({
+        ...(clientMessageId ? { id: clientMessageId } : {}),
         sender_id: actor.userId,
         recipient_id: peerId,
         message_type: "text",
@@ -80,11 +88,31 @@ export async function POST(request: NextRequest) {
       })
       .select("id,sender_id,recipient_id,message_type,body,attachment_path,attachment_name,attachment_mime,attachment_size,edited_at,retracted_at,read_at,created_at")
       .single();
-    if (error) throw error;
+    if (error) {
+      // If the response was lost after a successful insert, retrying with
+      // the same client ID must not create a duplicate message.
+      if (error.code === "23505" && clientMessageId) {
+        const { data: existing, error: lookupError } = await supabase
+          .from("communication_messages")
+          .select("id,sender_id,recipient_id,message_type,body,attachment_path,attachment_name,attachment_mime,attachment_size,edited_at,retracted_at,read_at,created_at")
+          .eq("id", clientMessageId)
+          .eq("sender_id", actor.userId)
+          .eq("recipient_id", peerId)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+        if (existing?.message_type === "text" && existing.body === text) {
+          return NextResponse.json({ message: (await serializeMessages([existing]))[0], alreadySent: true });
+        }
+      }
+      throw error;
+    }
 
     const message = (await serializeMessages([data]))[0];
-    await broadcastCommunicationMessage(data as unknown as Record<string, unknown>);
-
+    after(async () => {
+      if (!await broadcastCommunicationMessage(data as unknown as Record<string, unknown>)) {
+        console.warn("Communication Broadcast unavailable; database fallback remains enabled.");
+      }
+    });
     return NextResponse.json({ message }, { status: 201 });
   } catch (error) {
     const resolved = communicationErrorResponse(error);
