@@ -917,6 +917,7 @@ export function CommunicationHub() {
         ));
       }
     } catch (error) {
+      if (!pendingMessagesRef.current.has(id)) return;
       const failed = { ...message, deliveryStatus: "failed" as const };
       pendingMessagesRef.current.set(id, failed);
       if (selectedPeerIdRef.current === message.recipientId) {
@@ -1355,7 +1356,7 @@ export function CommunicationHub() {
                     }}
                     rows={1}
                     placeholder="輸入訊息…"
-                    className="max-h-28 min-h-11 flex-1 resize-none rounded-2xl border border-[#D9DEE7] px-3 py-2.5 text-sm outline-none focus:border-[#6D55A3]"
+                    className="max-h-28 min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-[#D9DEE7] px-3 py-2.5 text-sm outline-none focus:border-[#6D55A3]"
                   />
                   <button
                     type="button"
