@@ -10,6 +10,7 @@ import {
   MicOff,
   Volume2,
   Paperclip,
+  Pencil,
   Phone,
   PhoneOff,
   Send,
@@ -20,6 +21,8 @@ import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 import { createRingtoneWav } from "@/lib/communications/ringtone-wave";
+import { MessageVoiceRecorder } from "@/components/communications/MessageVoiceRecorder";
+import { HandwritingComposer } from "@/components/communications/HandwritingComposer";
 
 type Peer = {
   id: string;
@@ -33,6 +36,7 @@ type ChatMessage = {
   senderId: string;
   recipientId: string;
   messageType: "text" | "image" | "file";
+  deliveryStatus?: "sending" | "failed" | "sent";
   body: string;
   attachmentName: string;
   attachmentMime: string;
@@ -199,6 +203,7 @@ export function CommunicationHub() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [composerMode, setComposerMode] = useState<"voice" | "handwriting" | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [incomingCall, setIncomingCall] = useState<CallRow | null>(null);
   const [activeCall, setActiveCall] = useState<CallRow | null>(null);
@@ -873,25 +878,79 @@ export function CommunicationHub() {
 
   useEffect(() => () => cleanupPeerConnection(), [cleanupPeerConnection]);
 
-  const sendText = async () => {
-    if (!selectedPeerId || !draft.trim() || sending) return;
-    setSending(true);
-    setErrorMessage("");
+  const persistTextMessage = async (message: ChatMessage) => {
+    const id = message.id;
+    pendingMessagesRef.current.set(id, { ...message, deliveryStatus: "sending" });
+    if (selectedPeerIdRef.current === message.recipientId) {
+      setMessages((current) => upsertMessage(current, { ...message, deliveryStatus: "sending" }));
+    }
     try {
       const data = await requestJson("/api/communications/messages", {
         method: "POST",
-        body: JSON.stringify({ peerId: selectedPeerId, body: draft }),
+        body: JSON.stringify({
+          peerId: message.recipientId,
+          body: message.body,
+          clientMessageId: id,
+        }),
       });
-      const message = data?.message as ChatMessage | undefined;
-      if (message?.id) {
-        setMessages((current) => upsertMessage(current, message));
+      const saved = data?.message as ChatMessage | undefined;
+      if (!saved?.id) throw new Error("伺服器未確認訊息已儲存。");
+      pendingMessagesRef.current.delete(id);
+      if (selectedPeerIdRef.current === message.recipientId) {
+        setMessages((current) => upsertMessage(
+          current.filter((item) => item.id !== id),
+          { ...saved, deliveryStatus: "sent" }
+        ));
       }
-      setDraft("");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "訊息傳送失敗。");
+      const failed = { ...message, deliveryStatus: "failed" as const };
+      pendingMessagesRef.current.set(id, failed);
+      if (selectedPeerIdRef.current === message.recipientId) {
+        setMessages((current) => upsertMessage(current, failed));
+      }
+      setErrorMessage(error instanceof Error ? error.message : "訊息傳送失敗，可按重試。");
+    }
+  };
+
+  const sendText = async () => {
+    const peerId = selectedPeerIdRef.current;
+    const body = draft.trim();
+    if (!peerId || !body || sending) return;
+    if (!globalThis.crypto?.randomUUID) {
+      setErrorMessage("此瀏覽器無法安全建立訊息識別碼，請更新後重試。");
+      return;
+    }
+    const now = new Date().toISOString();
+    const message: ChatMessage = {
+      id: crypto.randomUUID(),
+      senderId: session.user.id,
+      recipientId: peerId,
+      messageType: "text",
+      body,
+      attachmentName: "",
+      attachmentMime: "",
+      attachmentSize: 0,
+      attachmentUrl: "",
+      editedAt: null,
+      retractedAt: null,
+      readAt: null,
+      createdAt: now,
+      deliveryStatus: "sending",
+    };
+    setDraft("");
+    setSending(true);
+    setErrorMessage("");
+    try {
+      await persistTextMessage(message);
     } finally {
       setSending(false);
     }
+  };
+
+  const retryMessage = (message: ChatMessage) => {
+    if (message.senderId !== session.user.id || message.deliveryStatus !== "failed") return;
+    setErrorMessage("");
+    void persistTextMessage(message);
   };
 
   const editMessage = async (message: ChatMessage) => {
@@ -922,22 +981,25 @@ export function CommunicationHub() {
     }
   };
 
-  const uploadFile = async (file: File) => {
-    if (!selectedPeerId) return;
+  const uploadFile = async (file: File): Promise<boolean> => {
+    const peerId = selectedPeerIdRef.current;
+    if (!peerId || uploading) return false;
     setUploading(true);
     setErrorMessage("");
     try {
       const form = new FormData();
-      form.append("peerId", selectedPeerId);
+      form.append("peerId", peerId);
       form.append("file", file);
       await requestJson("/api/communications/attachments", {
         method: "POST",
         body: form,
       });
-      await loadMessages(selectedPeerId, false);
-      await loadPeers();
+      await loadMessages(peerId, false, false);
+      void loadPeers();
+      return true;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "檔案傳送失敗。");
+      return false;
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1168,6 +1230,15 @@ export function CommunicationHub() {
                                 <span className="italic opacity-70">此訊息已收回</span>
                               ) : message.messageType === "text" ? (
                                 <div className="whitespace-pre-wrap break-words">{renderLinkedText(message.body)}</div>
+                              ) : message.attachmentMime.startsWith("audio/") ? (
+                                <div className="min-w-[210px]">
+                                  <div className="mb-2 flex items-center gap-1.5 text-xs font-bold">
+                                    <Mic className="h-4 w-4" /> 語音留言
+                                  </div>
+                                  {message.attachmentUrl ? (
+                                    <audio controls preload="none" src={message.attachmentUrl} className="w-full max-w-[250px]" onError={() => void loadMessages(selectedPeerIdRef.current, false, false)} />
+                                  ) : <span className="text-xs text-[#7B7B74]">載入語音中…</span>}
+                                </div>
                               ) : message.messageType === "image" ? (
                                 <a href={message.attachmentUrl} target="_blank" rel="noreferrer noopener" className="block">
                                   {/* Signed attachment URLs are dynamic and intentionally rendered without Next Image optimization. */}
@@ -1188,8 +1259,19 @@ export function CommunicationHub() {
                             <div className={`mt-1 flex items-center gap-2 px-1 text-[10px] font-medium text-[#7B7B74] ${mine ? "justify-end" : "justify-start"}`}>
                               <span>{formatTime(message.createdAt)}</span>
                               {message.editedAt && !message.retractedAt && <span>已編輯</span>}
-                              {mine && !message.retractedAt && <span>{message.readAt ? "已讀" : "未讀"}</span>}
                               {mine && !message.retractedAt && (
+                                <span className={message.deliveryStatus === "failed" ? "text-[#D73A49]" : ""}>
+                                  {message.deliveryStatus === "sending" ? "傳送中…"
+                                    : message.deliveryStatus === "failed" ? "傳送失敗"
+                                      : message.readAt ? "已讀" : "已送出"}
+                                </span>
+                              )}
+                              {mine && message.deliveryStatus === "failed" && (
+                                <button type="button" onClick={() => retryMessage(message)} className="font-bold text-[#D73A49]" aria-label="重試傳送">
+                                  重試
+                                </button>
+                              )}
+                              {mine && !message.retractedAt && message.deliveryStatus !== "sending" && message.deliveryStatus !== "failed" && (
                                 <>
                                   {message.messageType === "text" && (
                                     <button type="button" onClick={() => void editMessage(message)} className="font-bold text-[#6D55A3]">編輯</button>
@@ -1228,6 +1310,26 @@ export function CommunicationHub() {
                   >
                     {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setComposerMode("voice")}
+                    disabled={uploading}
+                    aria-label="錄製語音留言"
+                    title="語音留言"
+                    className="mb-0.5 rounded-full p-2 text-[#6D55A3] disabled:opacity-40"
+                  >
+                    <Mic className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setComposerMode("handwriting")}
+                    disabled={uploading}
+                    aria-label="手寫留言"
+                    title="手寫留言"
+                    className="mb-0.5 rounded-full p-2 text-[#6D55A3] disabled:opacity-40"
+                  >
+                    <Pencil className="h-5 w-5" />
+                  </button>
                   <textarea
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
@@ -1251,11 +1353,18 @@ export function CommunicationHub() {
                     {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
                   </button>
                 </div>
-                <div className="mt-1 px-11 text-[10px] font-medium text-[#7B7B74]">照片／文件單檔最多 10MB</div>
+                <div className="mt-1 px-2 text-[10px] font-medium text-[#7B7B74]">語音留言最多 60 秒／4MB；手寫以圖片傳送；其他附件最多 10MB</div>
               </div>
             </>
           )}
         </div>
+      )}
+
+      {composerMode === "voice" && (
+        <MessageVoiceRecorder onClose={() => setComposerMode(null)} onSend={uploadFile} />
+      )}
+      {composerMode === "handwriting" && (
+        <HandwritingComposer onClose={() => setComposerMode(null)} onSend={uploadFile} />
       )}
 
       {incomingCall && (
