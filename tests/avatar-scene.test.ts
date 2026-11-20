@@ -244,6 +244,10 @@ test("profile live preview is sticky at the settings page scroll root", () => {
   const page = fs.readFileSync(path.join(process.cwd(), "app/page.tsx"), "utf8");
   const card = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarSettingsCard.tsx"), "utf8");
   const controls = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarControls.tsx"), "utf8");
+  // Sticky only works if personal settings owns a genuinely bounded scrolling
+  // viewport; a min-h-screen root lets the whole document scroll instead.
+  assert.match(page, /activeTab === "settings" \? "h-dvh" : "min-h-screen"/);
+  assert.match(page, /className="min-h-0 flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-\[#FFF9F3\]"/);
   assert.match(page, /ref=\{setAvatarPreviewHost\} className="sticky top-0 z-30"/);
   assert.match(page, /previewHost=\{avatarPreviewHost\}/);
   assert.match(card, /createPortal\(/);
