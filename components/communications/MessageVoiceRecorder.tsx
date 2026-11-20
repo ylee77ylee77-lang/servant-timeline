@@ -114,6 +114,12 @@ export function MessageVoiceRecorder({ onClose, onSend }: Props) {
         recorderRef.current = null;
         if (!mountedRef.current || discardRef.current) return;
 
+        const durationMs = Date.now() - startedRef.current;
+        if (durationMs > (MAX_VOICE_NOTE_SECONDS + 2) * 1000) {
+          setError("錄音超過 60 秒，請重新錄製。");
+          setPhase("idle");
+          return;
+        }
         const kind = baseMediaMime(recorder.mimeType || mime);
         const blob = new Blob(chunks, { type: kind });
         if (!isVoiceMime(kind) || !blob.size || blob.size > MAX_VOICE_NOTE_BYTES) {
