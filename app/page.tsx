@@ -4471,7 +4471,7 @@ export default function App() {
 
   const renderPersonalSettingsView = () => {
     return (
-      <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         <div className="mb-6 px-1">
           <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">個人設定</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
@@ -5295,7 +5295,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex justify-center w-full min-h-screen bg-[#F3EEFF] sm:p-6 md:p-10 font-sans">
+    <div className={`flex justify-center w-full bg-[#F3EEFF] sm:p-6 md:p-10 font-sans ${activeTab === "settings" ? "h-dvh" : "min-h-screen"}`}>
       <div className="relative flex flex-col w-full max-w-[420px] bg-[#FFF9F3] sm:rounded-[40px] sm:border-[10px] border-[#6D55A3]/5 overflow-hidden shadow-2xl shadow-[#6D55A3]/20">
         <style>{`
           .wifi-action-enter { animation: wifiFadeIn 420ms cubic-bezier(0.16, 1, 0.3, 1) both; }
