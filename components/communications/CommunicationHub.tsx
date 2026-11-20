@@ -1037,7 +1037,7 @@ export function CommunicationHub() {
             )}
             {selectedPeer ? (
               <>
-                <SystemAvatar config={selectedPeer.avatarConfig} size={42} />
+                <SystemAvatar config={selectedPeer.avatarConfig} displayName={selectedPeer.displayName} size={42} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-black text-[#1F2937]">{selectedPeer.displayName}</div>
                   <div className="text-[11px] font-bold text-[#7B7B74]">私人對話</div>
@@ -1089,7 +1089,7 @@ export function CommunicationHub() {
                       onClick={() => setSelectedPeerId(peer.id)}
                       className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left hover:bg-[#FFF9F3]"
                     >
-                      <SystemAvatar config={peer.avatarConfig} size={46} />
+                      <SystemAvatar config={peer.avatarConfig} displayName={peer.displayName} size={46} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-black text-[#1F2937]">{peer.displayName}</div>
                         <div className="truncate text-xs font-medium text-[#7B7B74]">私人對話</div>
@@ -1218,7 +1218,7 @@ export function CommunicationHub() {
       {incomingCall && (
         <div className="fixed inset-x-3 top-20 z-[90] mx-auto max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-5 shadow-2xl">
           <div className="flex items-center gap-3">
-            <SystemAvatar config={incomingPeer?.avatarConfig} size={58} />
+            <SystemAvatar config={incomingPeer?.avatarConfig} displayName={incomingPeer?.displayName} size={58} />
             <div className="flex-1">
               <div className="text-base font-black text-[#1F2937]">{incomingPeer?.displayName || "管理員／總招"}</div>
               <div className="mt-1 text-xs font-bold text-[#7B7B74]">App 內語音來電</div>
@@ -1243,7 +1243,7 @@ export function CommunicationHub() {
       {activeCall && (
         <div className="fixed inset-x-3 bottom-24 z-[95] mx-auto max-w-sm rounded-[28px] bg-[#1F2937] p-5 text-white shadow-2xl">
           <div className="flex items-center gap-3">
-            <SystemAvatar config={callPeer?.avatarConfig} size={58} />
+            <SystemAvatar config={callPeer?.avatarConfig} displayName={callPeer?.displayName} size={58} />
             <div className="flex-1">
               <div className="text-base font-black">{callPeer?.displayName || "通話中"}</div>
               <div className="mt-1 text-xs font-bold text-white/70">
