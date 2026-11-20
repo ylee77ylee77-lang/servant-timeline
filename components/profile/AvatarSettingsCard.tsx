@@ -13,6 +13,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
+import { AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import {
   AVATAR_DEFAULTS,
@@ -203,22 +204,11 @@ export function AvatarSettingsCard({
             </div>
           </div>
 
-          <fieldset className="mt-4 space-y-2">
-            <legend className="mb-2 text-sm font-black text-[#1F2937]">大頭貼顯示方式</legend>
-            {(["custom", "default", "name"] as const).map((mode) => (
-              <label key={mode} className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-[#E6EAF0] px-3 py-2 text-sm font-medium text-[#1F2937]">
-                <input
-                  type="radio"
-                  name="avatar-display-mode"
-                  checked={savedAvatar.displayMode === mode}
-                  disabled={saving}
-                  onChange={() => changeDisplayMode(mode)}
-                  className="h-4 w-4 accent-[#6D55A3]"
-                />
-                {AVATAR_DISPLAY_LABELS[mode]}
-              </label>
-            ))}
-          </fieldset>
+          <AvatarDisplayModeSelector
+            value={savedAvatar.displayMode}
+            onChange={changeDisplayMode}
+            disabled={saving}
+          />
 
           <button
             type="button"

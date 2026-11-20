@@ -12,13 +12,15 @@ import {
   type ReactNode,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { Eye, EyeOff, KeyRound, LogIn, LogOut, Loader2 } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, KeyRound, LogIn, LogOut, Loader2 } from "lucide-react";
 import { accountCodeToInternalEmail, normalizeAccountCode } from "@/lib/auth/account-code";
 import { getPublicSupabaseConfig } from "@/lib/supabase/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeRecoveryName, requiresPasswordChange } from "@/lib/auth/password-reset";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
-import { getDefaultAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
+import { AvatarLivePreview, AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
+import { SystemAvatar } from "@/components/profile/SystemAvatar";
+import { AVATAR_DISPLAY_LABELS, getDefaultAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 
 export type AppRole = "volunteer" | "coordinator" | "admin";
 
@@ -63,6 +65,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [registrationPassword, setRegistrationPassword] = useState("");
   const [registrationPasswordConfirm, setRegistrationPasswordConfirm] = useState("");
   const [registrationAvatar, setRegistrationAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
+  const [registrationAvatarOpen, setRegistrationAvatarOpen] = useState(false);
   const [registrationMessage, setRegistrationMessage] = useState("");
   const [registrationIsError, setRegistrationIsError] = useState(false);
   const [isRegistrationSubmitting, setIsRegistrationSubmitting] = useState(false);
@@ -290,6 +293,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setRegistrationPassword("");
       setRegistrationPasswordConfirm("");
       setRegistrationAvatar(getDefaultAvatarConfig());
+      setRegistrationAvatarOpen(false);
     } catch (error) {
       setRegistrationIsError(true);
       setRegistrationMessage(error instanceof Error ? error.message : "註冊失敗，請稍後再試。");
@@ -444,6 +448,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       <main className="min-h-screen bg-[#FFF9F3] px-5 py-10 flex items-center justify-center">
         {showRegistration ? (
           <form onSubmit={handleRegistration} className="max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto rounded-[28px] border border-[#E6EAF0] bg-white p-7 shadow-xl shadow-[#6D55A3]/10">
+            {registrationAvatarOpen && (
+              <AvatarLivePreview config={registrationAvatar} displayName={registrationDisplayName} />
+            )}
             <div className="mb-7">
               <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
               <h1 className="mt-2 text-2xl font-black text-[#1F2937]">註冊新帳號</h1>
@@ -486,11 +493,37 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               required
             />
 
-            <div className="mt-5">
-              <div className="mb-2 text-sm font-black text-[#1F2937]">大頭圖（選填）</div>
-              <div className="rounded-[22px] border border-[#E6EAF0] bg-[#FFF9F3]/60 p-4">
-                <AvatarEditor value={registrationAvatar} onChange={setRegistrationAvatar} compact />
-              </div>
+            <div className="mt-5 rounded-[22px] border border-[#E6EAF0] bg-[#FFF9F3]/60 p-4">
+              <button
+                type="button"
+                aria-expanded={registrationAvatarOpen}
+                aria-controls="registration-avatar-options"
+                onClick={() => setRegistrationAvatarOpen((open) => !open)}
+                className="flex w-full items-center gap-3 rounded-xl text-left"
+              >
+                <SystemAvatar config={registrationAvatar} displayName={registrationDisplayName} size={52} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-black text-[#1F2937]">大頭貼（選填）</span>
+                  <span className="mt-1 block truncate text-xs font-medium text-[#7B7B74]">
+                    {AVATAR_DISPLAY_LABELS[registrationAvatar.displayMode]}
+                  </span>
+                </span>
+                <ChevronDown className={`h-5 w-5 shrink-0 text-[#6D55A3] transition-transform ${registrationAvatarOpen ? "rotate-180" : ""}`} />
+              </button>
+              {registrationAvatarOpen && (
+                <div id="registration-avatar-options" className="mt-4 border-t border-[#E6EAF0] pt-4">
+                  <AvatarDisplayModeSelector
+                    value={registrationAvatar.displayMode}
+                    onChange={(mode) => setRegistrationAvatar((avatar) => ({ ...avatar, displayMode: mode }))}
+                    disabled={isRegistrationSubmitting}
+                  />
+                  {registrationAvatar.displayMode === "custom" && (
+                    <div className="mt-5">
+                      <AvatarEditor value={registrationAvatar} onChange={setRegistrationAvatar} showPreview={false} />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <PasswordInput
@@ -533,6 +566,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               type="button"
               onClick={() => {
                 setShowRegistration(false);
+                setRegistrationAvatarOpen(false);
                 setRegistrationMessage("");
                 setRegistrationIsError(false);
               }}
@@ -656,6 +690,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
                   setShowPasswordReset(false);
                   setPasswordResetMessage("");
                   setShowRegistration(true);
+                  setRegistrationAvatarOpen(false);
                   setRegistrationMessage("");
                   setRegistrationIsError(false);
                 }}

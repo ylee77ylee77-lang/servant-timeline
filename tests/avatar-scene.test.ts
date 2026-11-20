@@ -90,7 +90,10 @@ test("editor keeps only user-facing copy and animal thumbnails", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarEditor.tsx"), "utf8");
   assert.ok(!source.includes("所有選項共用同一套 3D 頭像。動物只露頭部"));
   assert.ok(!source.includes("可以不選。動物僅露頭部與上半身"));
-  assert.match(source, /sticky top-0/);
+  const sharedControls = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarControls.tsx"), "utf8");
+  assert.match(sharedControls, /sticky top-0/);
+  assert.match(sharedControls, /size={104}/);
+  assert.match(source, /AvatarLivePreview/);
   assert.match(source, /AvatarCompanionThumbnail/);
 });
 
@@ -112,4 +115,24 @@ test("display mode is enforced by the canonical scene, not by page-specific CSS"
   assert.equal(name.avatar.style, "feminine");
   assert.deepEqual(neutral.gradient, AVATAR_BACKGROUNDS.lavender);
   assert.deepEqual(name.gradient, AVATAR_BACKGROUNDS.lavender);
+});
+
+
+test("registration and profile reuse the same settings controls and full-size sticky preview", () => {
+  const auth = fs.readFileSync(path.join(process.cwd(), "components/auth/AuthProvider.tsx"), "utf8");
+  const settings = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarSettingsCard.tsx"), "utf8");
+  const controls = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarControls.tsx"), "utf8");
+  assert.match(auth, /<AvatarLivePreview config={registrationAvatar}/);
+  assert.match(auth, /showPreview={false}/);
+  assert.match(auth, /<AvatarDisplayModeSelector/);
+  assert.match(settings, /<AvatarDisplayModeSelector/);
+  assert.match(controls, /sticky top-0/);
+  assert.doesNotMatch(controls, /compactPreview|IntersectionObserver/);
+  assert.match(auth, /registrationAvatarOpen, setRegistrationAvatarOpen\] = useState\(false\)/);
+});
+
+test("default avatar fallback has a clearly visible high-contrast silhouette", () => {
+  const renderer = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarRenderer.tsx"), "utf8");
+  assert.match(renderer, /aria-hidden="true" fill="#6D55A3"/);
+  assert.doesNotMatch(renderer, /fill="#FFFFFF" opacity="0.72"/);
 });

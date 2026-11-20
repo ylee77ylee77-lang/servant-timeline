@@ -1,6 +1,7 @@
 "use client";
 
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
+import { AvatarLivePreview } from "@/components/profile/AvatarControls";
 import {
   AVATAR_DEFAULTS,
   normalizeAvatarConfig,
@@ -32,17 +33,13 @@ const petOptions: Array<{ value: AvatarConfig["pet"]; label: string }> = [
 export function AvatarEditor({
   value,
   onChange,
+  showPreview = true,
 }: {
   value: AvatarConfig;
   onChange: (value: AvatarConfig) => void;
-  compact?: boolean;
+  showPreview?: boolean;
 }) {
   const avatar = normalizeAvatarConfig(value);
-  const previewSummary = [
-    avatar.style === "feminine" ? "女生" : avatar.style === "masculine" ? "男生" : "未選角色",
-    avatar.glasses ? "眼鏡" : null,
-    avatar.pet !== "none" ? petOptions.find((option) => option.value === avatar.pet)?.label : null,
-  ].filter(Boolean).join("・");
 
   const setStyle = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
     const preset = AVATAR_DEFAULTS[style];
@@ -57,13 +54,7 @@ export function AvatarEditor({
 
   return (
     <div className="relative">
-      <div className="sticky top-0 z-30 flex items-center gap-5 rounded-[22px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3]/95 to-[#F7F4FF]/95 p-4 shadow-sm backdrop-blur-sm">
-        <AvatarRenderer config={{ ...avatar, displayMode: "custom" }} size={104} />
-        <div className="min-w-0">
-          <div className="text-base font-black text-[#1F2937]">即時預覽</div>
-          <div className="mt-1 truncate text-xs font-medium text-[#7B7B74]">{previewSummary}</div>
-        </div>
-      </div>
+      {showPreview && <AvatarLivePreview config={{ ...avatar, displayMode: "custom" }} />}
       <div className="mt-6 space-y-6">
 
       <section>

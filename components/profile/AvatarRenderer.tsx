@@ -89,9 +89,9 @@ export function AvatarRenderer({
             {nameMark}
           </text>
         ) : (
-          <g aria-hidden="true" fill="#FFFFFF" opacity="0.72">
-            <circle cx="256" cy="205" r="81" />
-            <path d="M98 485 C103 370 165 333 256 333 C347 333 409 370 414 485 Z" />
+          <g aria-hidden="true" fill="#6D55A3">
+            <circle cx="256" cy="205" r="81" opacity="0.94" />
+            <path d="M98 485 C103 370 165 333 256 333 C347 333 409 370 414 485 Z" opacity="0.84" />
           </g>
         )}
         {companion && (

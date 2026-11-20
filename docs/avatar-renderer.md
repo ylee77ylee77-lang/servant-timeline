@@ -59,8 +59,8 @@ This is a single renderer-level composition rule, not per-image/device offsets.
 The full-canvas animal layers are unchanged.
 
 In the editing view, the live preview sticks to the settings scroll container,
-shrinking when the editor's top marker scrolls above the visible area. It remains
-within the editor and does not become a global fixed overlay. The animal picker
+remaining 104px at every scroll position. It stays inside
+the editor and does not become a global fixed overlay. The animal picker
 shows a common crop into each **existing animal file**, plus a short name; no
 new images or long technical explanations are shown.
 
@@ -75,3 +75,17 @@ passes the existing profile display name through the canonical renderer for
 name-mark mode in the settings page, chat list, chat header, incoming calls and
 active calls. Missing names use the neutral system icon. No schema migration,
 new image assets, image-generation service or storage API is needed.
+
+
+## Registration and profile share avatar controls
+
+Registration and authenticated profile settings use the same `AvatarDisplayModeSelector`,
+`AvatarLivePreview`, `AvatarEditor`, and `AvatarRenderer`. Each settings panel
+starts collapsed. Registration mounts its 104px live preview at the top of the form
+only while avatar options are expanded; because it is a direct child of the form's
+scroll container, the preview remains visible through the whole registration flow.
+The editor suppresses its own preview inside registration to avoid duplicates.
+Existing registration `avatarConfig` submission remains unchanged.
+
+The default/person-shaped placeholder now uses a visible purple silhouette instead
+of near-white artwork against a pale gradient. No new image assets or paid services.
