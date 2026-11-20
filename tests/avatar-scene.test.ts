@@ -92,7 +92,7 @@ test("editor keeps only user-facing copy and animal thumbnails", () => {
   assert.ok(!source.includes("可以不選。動物僅露頭部與上半身"));
   const sharedControls = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarControls.tsx"), "utf8");
   assert.match(sharedControls, /sticky top-0/);
-  assert.match(sharedControls, /size={104}/);
+  assert.match(sharedControls, /size=\{104\}/);
   assert.match(source, /AvatarLivePreview/);
   assert.match(source, /AvatarCompanionThumbnail/);
 });
