@@ -1,6 +1,7 @@
 "use client";
 
-import { AvatarRenderer } from "@/components/profile/AvatarRenderer";
+import { useEffect, useRef, useState } from "react";
+import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import {
   AVATAR_DEFAULTS,
   normalizeAvatarConfig,
@@ -38,6 +39,36 @@ export function AvatarEditor({
   compact?: boolean;
 }) {
   const avatar = normalizeAvatarConfig(value);
+  const previewAnchorRef = useRef<HTMLSpanElement>(null);
+  const [compactPreview, setCompactPreview] = useState(false);
+
+  useEffect(() => {
+    const anchor = previewAnchorRef.current;
+    if (!anchor || typeof IntersectionObserver === "undefined") return;
+
+    // Settings scrolls within a panel below the app header.
+    let root: HTMLElement | null = null;
+    for (let node = anchor.parentElement; node; node = node.parentElement) {
+      const overflow = window.getComputedStyle(node).overflowY;
+      if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 1) {
+        root = node;
+        break;
+      }
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      const top = entry.rootBounds?.top ?? 0;
+      setCompactPreview(!entry.isIntersecting && entry.boundingClientRect.top < top);
+    }, { root, threshold: 0 });
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, []);
+
+  const previewSummary = [
+    avatar.style === "feminine" ? "女生" : avatar.style === "masculine" ? "男生" : "未選角色",
+    avatar.glasses ? "眼鏡" : null,
+    avatar.pet !== "none" ? petOptions.find((option) => option.value === avatar.pet)?.label : null,
+  ].filter(Boolean).join("・");
 
   const setStyle = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
     const preset = AVATAR_DEFAULTS[style];
@@ -50,16 +81,17 @@ export function AvatarEditor({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-5 rounded-[26px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3] to-[#F7F4FF] p-4 sm:p-5">
-        <AvatarRenderer config={avatar} size={112} />
+    <div className="relative">
+      <span ref={previewAnchorRef} aria-hidden="true"
+        className="pointer-events-none absolute left-0 top-0 h-px w-px" />
+      <div className={`sticky top-0 z-30 flex items-center rounded-[22px] border border-[#E6EAF0] bg-gradient-to-br from-[#FFF9F3]/95 to-[#F7F4FF]/95 shadow-sm backdrop-blur-sm transition-[padding,gap] duration-150 ${compactPreview ? "gap-3 p-2.5" : "gap-5 p-4"}`}>
+        <AvatarRenderer config={avatar} size={compactPreview ? 60 : 104} />
         <div className="min-w-0">
-          <div className="text-base font-black text-[#1F2937]">即時預覽</div>
-          <div className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-            所有選項共用同一套 3D 頭像。動物只露頭部與上半身，靠近圓框，不顯示腳爪。
-          </div>
+          <div className={`font-black text-[#1F2937] ${compactPreview ? "text-sm" : "text-base"}`}>即時預覽</div>
+          <div className="mt-1 truncate text-xs font-medium text-[#7B7B74]">{previewSummary}</div>
         </div>
       </div>
+      <div className="mt-6 space-y-6">
 
       <section>
         <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">基礎角色</div>
@@ -120,9 +152,6 @@ export function AvatarEditor({
 
       <section>
         <div className="mb-1 text-xs font-black tracking-widest text-[#7B7B74]">陪伴動物（選填）</div>
-        <p className="mb-3 text-xs font-medium leading-5 text-[#7B7B74]">
-          可以不選。動物僅露頭部與上半身，靠在圓框內側，不顯示腳或爪子。
-        </p>
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
           {petOptions.map((option) => {
             const selected = avatar.pet === option.value;
@@ -132,9 +161,15 @@ export function AvatarEditor({
                 type="button"
                 aria-pressed={selected}
                 onClick={() => onChange({ ...avatar, pet: option.value })}
-                className={`flex min-h-32 flex-col items-center justify-center gap-2 rounded-2xl border px-2 py-3 text-xs font-black ${selected ? "border-[#6D55A3] bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
+                className={`flex min-h-24 flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-3 text-xs font-black ${selected ? "border-[#6D55A3] bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
               >
-                <AvatarRenderer config={{ ...avatar, pet: option.value }} size={68} />
+                {option.value === "none" ? (
+                  <span aria-hidden="true" className="flex h-14 w-14 items-center justify-center rounded-xl bg-white/70 text-2xl">—</span>
+                ) : (
+                  <span className="flex h-14 w-14 items-center justify-center rounded-xl bg-white/70">
+                    <AvatarCompanionThumbnail pet={option.value} size={56} />
+                  </span>
+                )}
                 <span>{selected ? "✓ " : ""}{option.label}</span>
               </button>
             );
@@ -148,6 +183,7 @@ export function AvatarEditor({
           髮型、髮色、眼睛、配件與服裝會等同品質的 3D 素材準備完成後再開放，不使用不相容的扁平圖層。
         </p>
       </section>
+      </div>
     </div>
   );
 }

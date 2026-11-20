@@ -5,6 +5,10 @@ import type { AvatarConfig } from "@/lib/profile/avatar";
 import {
   AVATAR_CANVAS_SIZE,
   AVATAR_FRAME,
+  AVATAR_PORTRAIT_BOUNDS,
+  AVATAR_COMPANION_THUMBNAIL,
+  AVATAR_COMPANIONS,
+  type CompanionKind,
   getAvatarScene,
 } from "@/lib/profile/avatar-scene";
 
@@ -59,7 +63,13 @@ export function AvatarRenderer({
       <g clipPath={`url(#${clipId})`}>
         {/* 2. Portrait and 3. animal head/upper body stay inside the frame. */}
         {portrait ? (
-          <image href={portrait} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
+          <image
+            href={portrait}
+            x={AVATAR_PORTRAIT_BOUNDS.x}
+            y={AVATAR_PORTRAIT_BOUNDS.y}
+            width={AVATAR_PORTRAIT_BOUNDS.size}
+            height={AVATAR_PORTRAIT_BOUNDS.size}
+          />
         ) : (
           <g aria-hidden="true" fill="#FFFFFF" opacity="0.72">
             <circle cx="256" cy="205" r="81" />
@@ -81,6 +91,21 @@ export function AvatarRenderer({
         strokeWidth={stroke}
       />
 
+    </svg>
+  );
+}
+/** Reuse an existing animal asset for a simple picker thumbnail, not a new image. */
+export function AvatarCompanionThumbnail({ pet, size = 56 }: {
+  pet: CompanionKind;
+  size?: number;
+}) {
+  const { x, y, width, height } = AVATAR_COMPANION_THUMBNAIL;
+  return (
+    <svg aria-hidden="true" focusable="false"
+      viewBox={`${x} ${y} ${width} ${height}`}
+      width={size} height={size} className="block shrink-0">
+      <image href={AVATAR_COMPANIONS[pet].behind}
+        x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
     </svg>
   );
 }

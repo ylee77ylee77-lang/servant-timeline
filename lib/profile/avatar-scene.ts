@@ -8,6 +8,12 @@ import { normalizeAvatarConfig, type AvatarConfig, type AvatarPet } from "./avat
  */
 export const AVATAR_CANVAS_SIZE = 512;
 export const AVATAR_FRAME = Object.freeze({ cx: 256, cy: 256, radius: 236, stroke: 16 });
+/** One safe portrait frame for all 3D people and all display sizes. */
+export const AVATAR_PORTRAIT_BOUNDS = Object.freeze({ x: 20, y: 28, size: 472 });
+/** Shared head-only view into the existing lower-left companion imagery. */
+export const AVATAR_COMPANION_THUMBNAIL = Object.freeze({
+  x: 0, y: 185, width: 225, height: 230,
+});
 export const AVATAR_LAYER_ORDER = [
   "background",
   "portrait",

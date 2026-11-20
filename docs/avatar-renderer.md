@@ -49,3 +49,17 @@ The existing `neutral` value is a not-yet-selected status. The renderer displays
 a neutral inline placeholder rather than assigning a male or female 3D portrait
 until the volunteer explicitly chooses a base character. This adds no image files
 and requires no database migration.
+
+
+## Shared portrait headroom and sticky preview
+
+All existing 3D portrait images share `AVATAR_PORTRAIT_BOUNDS` within the
+512×512 artboard, giving both genders and glasses variants consistent headroom.
+This is a single renderer-level composition rule, not per-image/device offsets.
+The full-canvas animal layers are unchanged.
+
+In the editing view, the live preview sticks to the settings scroll container,
+shrinking when the editor's top marker scrolls above the visible area. It remains
+within the editor and does not become a global fixed overlay. The animal picker
+shows a common crop into each **existing animal file**, plus a short name; no
+new images or long technical explanations are shown.

@@ -5,6 +5,8 @@ import path from "node:path";
 import {
   AVATAR_LAYER_ORDER,
   AVATAR_CANVAS_SIZE,
+  AVATAR_PORTRAIT_BOUNDS,
+  AVATAR_COMPANION_THUMBNAIL,
   AVATAR_COMPANIONS,
   AVATAR_PORTRAITS,
   AVATAR_BACKGROUNDS,
@@ -72,4 +74,22 @@ test("the removed paw/talon foreground assets are not required", () => {
     const file = path.join(process.cwd(), "public", "avatar", "scenes", "v2", `${kind}-front.webp`);
     assert.equal(fs.existsSync(file), false, `${kind} should not include a foreground feet overlay`);
   }
+});
+
+test("all 3D portraits use one safe artboard with added headroom", () => {
+  const { x, y, size } = AVATAR_PORTRAIT_BOUNDS;
+  assert.ok(x > 0 && y > 0 && y >= x);
+  assert.ok(size < AVATAR_CANVAS_SIZE);
+  assert.ok(x + size <= AVATAR_CANVAS_SIZE);
+  assert.ok(y + size <= AVATAR_CANVAS_SIZE);
+  const { x: tx, y: ty, width: tw, height: th } = AVATAR_COMPANION_THUMBNAIL;
+  assert.ok(tx >= 0 && ty >= 0 && tx + tw <= AVATAR_CANVAS_SIZE && ty + th <= AVATAR_CANVAS_SIZE);
+});
+
+test("editor keeps only user-facing copy and animal thumbnails", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarEditor.tsx"), "utf8");
+  assert.ok(!source.includes("所有選項共用同一套 3D 頭像。動物只露頭部"));
+  assert.ok(!source.includes("可以不選。動物僅露頭部與上半身"));
+  assert.match(source, /sticky top-0/);
+  assert.match(source, /AvatarCompanionThumbnail/);
 });
