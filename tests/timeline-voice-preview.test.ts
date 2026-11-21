@@ -22,8 +22,11 @@ test("admin preview reuses real reminder wording for both timing and all detail 
   const source = page();
   assert.ok(source.includes('const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now", detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel)'));
   assert.ok(source.includes('const detailHint = buildDetailedVoiceHint(node, detailLevel);'));
-  assert.ok(source.includes('const text = buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail);'));
-  assert.ok(source.includes('{buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail)}'));
+  assert.ok(source.includes('const customText = getCustomReminderText(node, reminderType, detailLevel);'));
+  assert.ok(source.includes('if (customText) return customText;'));
+  assert.ok(source.includes('const text = timelinePreviewDraftText.trim();'));
+  assert.ok(source.includes('value={timelinePreviewDraftText}'));
+  assert.ok(source.includes('onClick={() => void saveTimelinePreviewText(node)}'));
   assert.ok(source.includes('buildReminderSpeechText(node, reminderType)'));
   assert.ok(source.includes('<option value="pre5">提前 5 分鐘</option>'));
   assert.ok(source.includes('<option value="now">準點提醒</option>'));
@@ -53,6 +56,7 @@ test("only administrators can see and request preview audio; preview is independ
   const api = fs.readFileSync("app/api/voice/route.ts", "utf8");
   assert.ok(source.includes('{isAdmin && (\n                        <button'));
   assert.ok(source.includes('aria-expanded={timelinePreviewNodeId === node.id}'));
+  assert.ok(source.includes('if (!isAdmin || timelinePreviewSaveStatus === "saving") return;'));
   assert.ok(source.includes('if (!isAdmin) return;\n    stopTimelinePreviewAudio();'));
   assert.ok(source.includes('preview: true,'));
   assert.ok(source.includes('voiceProfile: personalSettings.voiceProfile'));
