@@ -4456,9 +4456,10 @@ export default function App() {
                               value={timelinePreviewTiming}
                               disabled={timelinePreviewSaveStatus === "saving"}
                               onChange={(event) => {
+                                // Stop playback during the tap; the confirmation callback remains ref-free.
+                                stopTimelinePreviewAudio();
                                 const selectedTiming = event.target.value as "pre5" | "now";
                                 confirmDiscardVoiceDraft(node, () => {
-                                  stopTimelinePreviewAudio();
                                   setTimelinePreviewError("");
                                   setTimelinePreviewSaveMessage("");
                                   setTimelinePreviewSaveError("");
@@ -4479,9 +4480,9 @@ export default function App() {
                               value={timelinePreviewDetail}
                               disabled={timelinePreviewSaveStatus === "saving"}
                               onChange={(event) => {
+                                stopTimelinePreviewAudio();
                                 const selectedDetail = event.target.value as ReminderDetailLevel;
                                 confirmDiscardVoiceDraft(node, () => {
-                                  stopTimelinePreviewAudio();
                                   setTimelinePreviewError("");
                                   setTimelinePreviewSaveMessage("");
                                   setTimelinePreviewSaveError("");
