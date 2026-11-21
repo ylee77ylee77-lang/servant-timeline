@@ -4084,7 +4084,11 @@ export default function App() {
                 style={{ top: `${currentTimeCursorTop}px`, transform: "translate(-50%, -50%)" }}
               >
                 <div className="relative flex items-center justify-center">
-                  <span className="absolute inline-flex w-6 h-6 rounded-full opacity-30 bg-[#F25D6B] animate-ping" />
+                  <span
+                    aria-hidden="true"
+                    className="absolute inline-flex w-5 h-5 rounded-full bg-[#F25D6B] opacity-20 motion-safe:animate-ping"
+                    style={{ animationDuration: "3s" }}
+                  />
                   <span className="relative inline-flex w-4 h-4 rounded-full bg-[#F25D6B] shadow-sm shadow-[#F25D6B]/50" />
                   <span className="absolute left-1/2 -translate-x-1/2 -top-7 px-2 py-0.5 rounded-full bg-white border border-[#F25D6B]/20 shadow-sm text-[10px] font-black font-mono text-[#F25D6B] whitespace-nowrap">
                     {currentTime || "--:--"}
