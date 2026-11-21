@@ -3,6 +3,8 @@
 import type { ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
+export type SettingsPanel = "avatar" | "voice" | "reminder";
+
 type SettingsAccordionCardProps = {
   panelId: string;
   title: string;
