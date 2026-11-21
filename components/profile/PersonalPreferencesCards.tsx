@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { AudioLines, Bell } from "lucide-react";
-import { SettingsAccordionCard } from "@/components/profile/SettingsAccordionCard";
+import { SettingsAccordionCard, type SettingsPanel } from "@/components/profile/SettingsAccordionCard";
 
 type VoiceProfile = "zephyr" | "iapetus";
 type VoiceDetailLevel = "simple" | "standard" | "detailed";
@@ -21,6 +20,8 @@ type PersonalPreferencesCardsProps = {
   onChange: (patch: Partial<PersonalPreferenceValues>) => void;
   isVoiceEnabled: boolean;
   isWakeLockActive: boolean;
+  expandedPanel: SettingsPanel | null;
+  onToggle: (panel: SettingsPanel) => void;
 };
 
 const VOICE_OPTIONS = [
@@ -48,9 +49,9 @@ export function PersonalPreferencesCards({
   onChange,
   isVoiceEnabled,
   isWakeLockActive,
+  expandedPanel,
+  onToggle,
 }: PersonalPreferencesCardsProps) {
-  const [voiceExpanded, setVoiceExpanded] = useState(false);
-  const [reminderExpanded, setReminderExpanded] = useState(false);
   const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲 Iapetus" : "女聲 Zephyr";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
 
@@ -61,8 +62,8 @@ export function PersonalPreferencesCards({
         title="語音風格"
         summary={selectedVoice}
         icon={<span className={cardIconClass}><AudioLines className="h-6 w-6" /></span>}
-        expanded={voiceExpanded}
-        onToggle={() => setVoiceExpanded((previous) => !previous)}
+        expanded={expandedPanel === "voice"}
+        onToggle={() => onToggle("voice")}
       >
         <p className="mb-3 text-xs font-medium leading-5 text-[#7B7B74]">
           每位同工可在本機選擇自己的語音；開啟語音助理時會盡量保持畫面亮起，服事結束後會自動關閉。
@@ -107,8 +108,8 @@ export function PersonalPreferencesCards({
         title="提醒設定"
         summary={`語音${settings.voiceReminderEnabled ? "開啟" : "關閉"}・震動${settings.vibrationReminderEnabled ? "開啟" : "關閉"}・${selectedDetail.label}內容`}
         icon={<span className={cardIconClass}><Bell className="h-6 w-6" /></span>}
-        expanded={reminderExpanded}
-        onToggle={() => setReminderExpanded((previous) => !previous)}
+        expanded={expandedPanel === "reminder"}
+        onToggle={() => onToggle("reminder")}
       >
         <h3 className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">提醒開關</h3>
         <div className="space-y-2.5">
