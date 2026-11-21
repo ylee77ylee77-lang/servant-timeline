@@ -7,6 +7,7 @@ import {
   MAX_REMINDER_LEAD_MINUTES,
   REMINDER_SECOND_OPTIONS,
   normalizeReminderLeadTime,
+  stepReminderLeadTime,
   getReminderLeadSeconds,
   formatReminderLeadLabel,
   formatReminderLeadSpeech,
@@ -26,10 +27,10 @@ test("existing local settings retain the five-minute default", () => {
   assert.equal(read("app/page.tsx").includes('shekinah_personal_reminder_settings_v1'), true);
 });
 
-test("minute increments are 1, seconds advance in 15-second steps; zero delay is excluded", () => {
+test("minute increments are 1, seconds advance in 15-second steps and support zero", () => {
   assert.equal(MAX_REMINDER_LEAD_MINUTES, 60);
   assert.deepEqual(REMINDER_SECOND_OPTIONS, [0, 15, 30, 45]);
-  assert.deepEqual(normalizeReminderLeadTime(0, 0), { minutes: 0, seconds: 15 });
+  assert.deepEqual(normalizeReminderLeadTime(0, 0), { minutes: 0, seconds: 0 });
   assert.deepEqual(normalizeReminderLeadTime(0, 15), { minutes: 0, seconds: 15 });
   assert.deepEqual(normalizeReminderLeadTime(1, 30), { minutes: 1, seconds: 30 });
   assert.deepEqual(normalizeReminderLeadTime(60, 45), { minutes: 60, seconds: 45 });
@@ -41,6 +42,23 @@ test("minute increments are 1, seconds advance in 15-second steps; zero delay is
   assert.equal(formatReminderLeadSpeech(5, 0), "五分鐘");
   assert.equal(formatReminderLeadSpeech(1, 15), "一分鐘十五秒");
   assert.equal(formatReminderLeadSpeech(0, 45), "四十五秒");
+});
+
+test("seconds cycle independently at 00/15/30/45 without carrying into minutes", () => {
+  assert.deepEqual(stepReminderLeadTime(5, 0, "seconds", 1), { minutes: 5, seconds: 15 });
+  assert.deepEqual(stepReminderLeadTime(5, 15, "seconds", 1), { minutes: 5, seconds: 30 });
+  assert.deepEqual(stepReminderLeadTime(5, 30, "seconds", 1), { minutes: 5, seconds: 45 });
+  assert.deepEqual(stepReminderLeadTime(5, 45, "seconds", 1), { minutes: 5, seconds: 0 });
+  assert.deepEqual(stepReminderLeadTime(5, 0, "seconds", -1), { minutes: 5, seconds: 45 });
+  assert.deepEqual(stepReminderLeadTime(5, 15, "seconds", -1), { minutes: 5, seconds: 0 });
+  assert.deepEqual(stepReminderLeadTime(0, 45, "seconds", 1), { minutes: 0, seconds: 0 });
+  assert.deepEqual(stepReminderLeadTime(60, 0, "seconds", -1), { minutes: 60, seconds: 45 });
+  assert.deepEqual(stepReminderLeadTime(5, 45, "minutes", 1), { minutes: 6, seconds: 45 });
+  assert.deepEqual(stepReminderLeadTime(5, 45, "minutes", -1), { minutes: 4, seconds: 45 });
+  assert.deepEqual(stepReminderLeadTime(0, 45, "minutes", -1), { minutes: 0, seconds: 45 });
+  assert.deepEqual(stepReminderLeadTime(60, 45, "minutes", 1), { minutes: 60, seconds: 45 });
+  assert.equal(getReminderLeadSeconds(0, 0), 0);
+  assert.equal(formatReminderLeadLabel(0, 0), "0 秒");
 });
 
 test("live second-level reminder fires near the expected time but not early", () => {
@@ -70,11 +88,18 @@ test("advanced cues wrap midnight without changing on-time alerts", () => {
 test("profile controls, saved preferences, speech, and upcoming cue share the same lead time", () => {
   const ui = read("components/profile/PersonalPreferencesCards.tsx");
   const page = read("app/page.tsx");
-  assert.match(ui, /aria-label="提前提醒分鐘"/);
-  assert.match(ui, /aria-label="提前提醒秒數"/);
-  assert.match(ui, /MAX_REMINDER_LEAD_MINUTES \+ 1/);
-  assert.match(ui, /REMINDER_SECOND_OPTIONS\.map/);
-  assert.match(ui, /disabled=\{lead\.minutes === 0 && seconds === 0\}/);
+  assert.match(ui, /data-reminder-lead-stepper/);
+  assert.match(ui, /settings\.reminderPre5Enabled && \(/);
+  assert.match(ui, /aria-label="增加提前提醒分鐘"/);
+  assert.match(ui, /aria-label="減少提前提醒分鐘"/);
+  assert.match(ui, /aria-label="增加提前提醒秒數"/);
+  assert.match(ui, /aria-label="減少提前提醒秒數"/);
+  assert.match(ui, /stepReminderLeadTime\(lead\.minutes, lead\.seconds, unit, direction\)/);
+  assert.match(ui, /padStart\(2, "0"\)/);
+  assert.match(ui, /<h3 className="mb-3 text-xs font-black tracking-widest text-\[#7B7B74\]">提醒<\/h3>/);
+  assert.match(ui, /label: "準點提醒"/);
+  assert.match(ui, /description: "任務開始前先提醒一次。"/);
+  assert.doesNotMatch(ui, /<select|每次 1 分鐘|每次 15 秒|提醒開關|可設 0–60 分鐘/);
   assert.match(ui, /reminderLeadMinutes: number;/);
   assert.match(ui, /reminderLeadSeconds: number;/);
   assert.match(page, /reminderLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES/);
@@ -83,6 +108,7 @@ test("profile controls, saved preferences, speech, and upcoming cue share the sa
   assert.match(page, /getReminderLeadSeconds\(personalSettings\.reminderLeadMinutes, personalSettings\.reminderLeadSeconds\)/);
   assert.match(page, /isReminderDue\(currentDate, node\.time, leadSeconds\)/);
   assert.match(page, /isReminderDue\(currentDate, node\.time, 0\)/);
+  assert.match(page, /leadSeconds > 0 \|\| !personalSettings\.reminderNowEnabled/);
   assert.match(page, /currentDate,\s*isVoiceEnabled/);
   assert.match(page, /lastReminderDayRef\.current !== dayKey/);
   assert.doesNotMatch(page, /minutesBeforeTask === 5|nodeMinutes - 5/);
