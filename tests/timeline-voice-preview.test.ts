@@ -24,7 +24,7 @@ test("admin preview reuses real reminder wording for both timing and all detail 
   assert.ok(source.includes('const detailHint = buildDetailedVoiceHint(node, detailLevel);'));
   assert.ok(source.includes('const customText = getCustomReminderText(node, reminderType, detailLevel);'));
   assert.ok(source.includes('if (customText) return customText;'));
-  assert.ok(source.includes('const text = timelinePreviewDraftText.trim();'));
+  assert.ok(source.includes('const text = normalizeReminderText(timelinePreviewDraftText);'));
   assert.ok(source.includes('value={timelinePreviewDraftText}'));
   assert.ok(source.includes('onClick={() => void saveTimelinePreviewText(node)}'));
   assert.ok(source.includes('buildReminderSpeechText(node, reminderType)'));
