@@ -76,7 +76,7 @@ test("live reminders use saved text and the preview can audition unsaved edits b
   const src = page();
   assert.match(src, /const customText = getCustomReminderText\(node, reminderType, detailLevel\);\s*if \(customText\) return customText;/);
   assert.ok(src.includes('speak(buildReminderSpeechText(node, reminderType));'));
-  assert.ok(src.includes('const text = timelinePreviewDraftText.trim();'));
+  assert.ok(src.includes('const text = normalizeReminderText(timelinePreviewDraftText);'));
   assert.ok(src.includes('value={timelinePreviewDraftText}'));
   assert.ok(src.includes('getReminderTextField(timelinePreviewTiming, timelinePreviewDetail)'));
   assert.ok(src.includes('expectedText: getCustomReminderText(node, timelinePreviewTiming, timelinePreviewDetail)'));
