@@ -85,6 +85,38 @@ test("advanced cues wrap midnight without changing on-time alerts", () => {
   assert.equal(isReminderDue(time(12, 0, 30), "12:01", -1), false);
 });
 
+test("master reminder switch sits beside header and toggles all four preferences", () => {
+  const ui = read("components/profile/PersonalPreferencesCards.tsx");
+  const heading = ui.indexOf('>提醒</h3>');
+  const master = ui.indexOf('aria-label="提醒總開關"');
+  const switches = ui.indexOf('REMINDER_SWITCHES.map((item)');
+  assert.ok(heading > 0 && master > heading && switches > master);
+  assert.ok(ui.includes('REMINDER_SWITCHES.every((item) => settings[item.key])'));
+  assert.ok(ui.includes('aria-checked={hasActiveReminders}'));
+  assert.ok(ui.includes('const nextEnabled = !hasActiveReminders;'));
+  for (const key of [
+    "voiceReminderEnabled", "vibrationReminderEnabled", "reminderPre5Enabled", "reminderNowEnabled",
+  ]) assert.ok(ui.includes(`${key}: nextEnabled,`), `${key} follows master control`);
+  assert.ok(ui.includes('hasActiveReminders ? "translate-x-6" : "translate-x-1"'));
+});
+
+test("advance time extends immediately below the advance reminder card when enabled", () => {
+  const ui = read("components/profile/PersonalPreferencesCards.tsx");
+  const listStart = ui.indexOf('REMINDER_SWITCHES.map((item)');
+  const activeCheck = ui.indexOf('const showAdvanceTime = item.key === "reminderPre5Enabled" && active;', listStart);
+  const buttonEnd = ui.indexOf('</button>', activeCheck);
+  const panelStart = ui.indexOf('{showAdvanceTime && (', activeCheck);
+  const stepper = ui.indexOf('data-reminder-lead-stepper', panelStart);
+  const mapEnd = ui.indexOf('          })}', panelStart);
+  assert.ok(listStart >= 0 && activeCheck > listStart);
+  assert.ok(buttonEnd > activeCheck && panelStart > buttonEnd && stepper > panelStart);
+  assert.ok(mapEnd > stepper, "the stepper must remain in the matching card loop");
+  assert.ok(ui.includes('border border-t-0 border-[#6D55A3]/20 bg-[#F3EEFF]'));
+  assert.ok(ui.includes('showAdvanceTime ? "border-b-0" : ""'));
+  assert.ok(ui.includes('className="overflow-hidden rounded-2xl"'));
+  assert.doesNotMatch(ui, /<select/);
+});
+
 test("profile controls, saved preferences, speech, and upcoming cue share the same lead time", () => {
   const ui = read("components/profile/PersonalPreferencesCards.tsx");
   const page = read("app/page.tsx");
@@ -96,7 +128,7 @@ test("profile controls, saved preferences, speech, and upcoming cue share the sa
   assert.match(ui, /aria-label="減少提前提醒秒數"/);
   assert.match(ui, /stepReminderLeadTime\(lead\.minutes, lead\.seconds, unit, direction\)/);
   assert.match(ui, /padStart\(2, "0"\)/);
-  assert.match(ui, /<h3 className="mb-3 text-xs font-black tracking-widest text-\[#7B7B74\]">提醒<\/h3>/);
+  assert.match(ui, /<h3 className="text-xs font-black tracking-widest text-\[#7B7B74\]">提醒<\/h3>/);
   assert.match(ui, /label: "準點提醒"/);
   assert.match(ui, /description: "任務開始前先提醒一次。"/);
   assert.doesNotMatch(ui, /<select|每次 1 分鐘|每次 15 秒|提醒開關|可設 0–60 分鐘/);
