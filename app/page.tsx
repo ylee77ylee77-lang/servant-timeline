@@ -2247,14 +2247,12 @@ export default function App() {
     const detailHint = buildDetailedVoiceHint(node, detailLevel);
 
     if (reminderType === "pre5") {
-      const taskTime = formatTaskTimeForVoice(node.time);
-
+      // Simple mode speaks only the action. The scheduler still fires five minutes early.
       if (detailLevel === "simple") {
-        return taskTime
-          ? `提醒您，五分鐘後，${taskTime}，${phrase}。`
-          : `提醒您，五分鐘後，${phrase}。`;
+        return `提醒您，${phrase}。`;
       }
 
+      const taskTime = formatTaskTimeForVoice(node.time);
       return taskTime
         ? `提醒您，五分鐘後，${taskTime}，要${phrase}。${detailHint}`
         : `提醒您，五分鐘後，要${phrase}。${detailHint}`;
