@@ -53,16 +53,16 @@ export function isReminderDue(
   now: Date,
   taskTime: string,
   secondsBeforeTask: number,
-  graceSeconds = 3,
+  graceSeconds = 15,
 ): boolean {
-  const match = /^(\d{1,2}):([0-5]\d)(?::[0-5]\d)?$/.exec(taskTime);
+  const match = /^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$/.exec(taskTime);
   if (!match || !Number.isFinite(now.getTime()) || !Number.isInteger(secondsBeforeTask)
       || secondsBeforeTask < 0 || secondsBeforeTask > 24 * 60 * 60) return false;
   const taskHour = Number(match[1]);
   if (taskHour >= 24) return false;
   const daySeconds = 24 * 60 * 60;
   const nowSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-  const taskSeconds = taskHour * 3600 + Number(match[2]) * 60;
+  const taskSeconds = taskHour * 3600 + Number(match[2]) * 60 + Number(match[3] || 0);
   const dueSeconds = (taskSeconds - secondsBeforeTask + daySeconds) % daySeconds;
   const elapsed = (nowSeconds - dueSeconds + daySeconds) % daySeconds;
   return elapsed >= 0 && elapsed < graceSeconds;
