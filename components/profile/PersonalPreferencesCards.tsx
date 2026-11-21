@@ -2,6 +2,7 @@
 
 import { AudioLines, Bell } from "lucide-react";
 import { SettingsAccordionCard, type SettingsPanel } from "@/components/profile/SettingsAccordionCard";
+import { formatReminderLeadLabel, MAX_REMINDER_LEAD_MINUTES, normalizeReminderLeadTime, REMINDER_SECOND_OPTIONS } from "@/lib/voice/reminder-timing";
 
 type VoiceProfile = "zephyr" | "iapetus";
 type VoiceDetailLevel = "simple" | "standard" | "detailed";
@@ -13,6 +14,8 @@ export type PersonalPreferenceValues = {
   vibrationReminderEnabled: boolean;
   reminderPre5Enabled: boolean;
   reminderNowEnabled: boolean;
+  reminderLeadMinutes: number;
+  reminderLeadSeconds: number;
 };
 
 type PersonalPreferencesCardsProps = {
@@ -32,7 +35,7 @@ const VOICE_OPTIONS = [
 const REMINDER_SWITCHES = [
   { key: "voiceReminderEnabled", label: "語音助理", description: "開啟後，才會播放個人耳機提醒。" },
   { key: "vibrationReminderEnabled", label: "震動提醒", description: "進入下一個任務區塊時震動提醒。" },
-  { key: "reminderPre5Enabled", label: "5分鐘前", description: "任務前五分鐘先提醒一次。" },
+  { key: "reminderPre5Enabled", label: "提前提醒", description: "任務開始前先提醒一次。" },
   { key: "reminderNowEnabled", label: "準點", description: "任務時間到時提醒一次。" },
 ] as const;
 
@@ -54,6 +57,8 @@ export function PersonalPreferencesCards({
 }: PersonalPreferencesCardsProps) {
   const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲 Iapetus" : "女聲 Zephyr";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
+  const lead = normalizeReminderLeadTime(settings.reminderLeadMinutes, settings.reminderLeadSeconds);
+  const leadLabel = formatReminderLeadLabel(lead.minutes, lead.seconds);
 
   return (
     <div className="space-y-4">
@@ -130,7 +135,9 @@ export function PersonalPreferencesCards({
               >
                 <span className="text-left">
                   <span className="block text-sm font-black">{item.label}</span>
-                  <span className="mt-0.5 block text-[11px] font-medium leading-4 opacity-75">{item.description}</span>
+                  <span className="mt-0.5 block text-[11px] font-medium leading-4 opacity-75">
+                    {item.key === "reminderPre5Enabled" ? `任務開始前 ${leadLabel} 先提醒一次。` : item.description}
+                  </span>
                 </span>
                 <span aria-hidden="true" className={`h-6 w-10 shrink-0 rounded-full p-1 transition-colors ${active ? "bg-[#6D55A3]" : "bg-[#E6EAF0]"}`}>
                   <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${active ? "translate-x-4" : "translate-x-0"}`} />
@@ -138,6 +145,54 @@ export function PersonalPreferencesCards({
               </button>
             );
           })}
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-[#E6EAF0] bg-white p-3.5">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-black text-[#1F2937]">提前時間</h3>
+            <span className="text-xs font-bold text-[#6D55A3]">任務前 {leadLabel}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs font-bold text-[#7B7B74]">
+              分鐘（每次 1 分鐘）
+              <select
+                aria-label="提前提醒分鐘"
+                value={lead.minutes}
+                disabled={!settings.reminderPre5Enabled}
+                onChange={(event) => {
+                  const next = normalizeReminderLeadTime(Number(event.target.value), lead.seconds);
+                  onChange({ reminderLeadMinutes: next.minutes, reminderLeadSeconds: next.seconds });
+                }}
+                className="mt-1.5 w-full min-h-11 rounded-xl border border-[#E6EAF0] bg-[#FFF9F3] px-3 text-sm font-black text-[#1F2937] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] disabled:opacity-50"
+              >
+                {Array.from({ length: MAX_REMINDER_LEAD_MINUTES + 1 }, (_, index) => (
+                  <option value={index} key={index}>{index} 分鐘</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-bold text-[#7B7B74]">
+              秒（每次 15 秒）
+              <select
+                aria-label="提前提醒秒數"
+                value={lead.seconds}
+                disabled={!settings.reminderPre5Enabled}
+                onChange={(event) => {
+                  const next = normalizeReminderLeadTime(lead.minutes, Number(event.target.value));
+                  onChange({ reminderLeadMinutes: next.minutes, reminderLeadSeconds: next.seconds });
+                }}
+                className="mt-1.5 w-full min-h-11 rounded-xl border border-[#E6EAF0] bg-[#FFF9F3] px-3 text-sm font-black text-[#1F2937] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] disabled:opacity-50"
+              >
+                {REMINDER_SECOND_OPTIONS.map((seconds) => (
+                  <option value={seconds} key={seconds} disabled={lead.minutes === 0 && seconds === 0}>
+                    {seconds} 秒
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="mt-2 text-[11px] leading-5 text-[#7B7B74]">
+            可設 0–60 分鐘，最短提前 15 秒；準點提醒獨立設定。自訂播報文字不會自動改寫。
+          </p>
         </div>
 
         <h3 className="mb-3 mt-6 text-xs font-black tracking-widest text-[#7B7B74]">提醒內容</h3>
