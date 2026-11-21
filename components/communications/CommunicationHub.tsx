@@ -1437,8 +1437,10 @@ export function CommunicationHub() {
                                 <a href={message.attachmentUrl} target="_blank" rel="noreferrer noopener" className="block">
                                   {/* Signed attachment URLs are dynamic and intentionally rendered without Next Image optimization. */}
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img src={message.attachmentUrl} alt={message.attachmentName || "聊天圖片"} className="max-h-52 rounded-xl object-contain" />
-                                  <div className="mt-1 break-all text-[11px] font-bold">{message.attachmentName}</div>
+                                  <img src={message.attachmentUrl} alt={message.attachmentName === "手寫留言.png" ? "手繪留言" : message.attachmentName || "聊天圖片"} className="max-h-52 rounded-xl object-contain" />
+                                  {message.attachmentName !== "手寫留言.png" && (
+                                    <div className="mt-1 break-all text-[11px] font-bold">{message.attachmentName}</div>
+                                  )}
                                 </a>
                               ) : (
                                 <a href={message.attachmentUrl} target="_blank" rel="noreferrer noopener" className="flex items-center gap-2">
@@ -1548,7 +1550,7 @@ export function CommunicationHub() {
                     {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
                   </button>
                 </div>
-                <div className="mt-1 px-2 text-[10px] font-medium text-[#7B7B74]">語音留言最多 60 秒／4MB；手寫以圖片傳送；其他附件最多 10MB</div>
+                <div className="mt-1 px-2 text-[10px] font-medium text-[#7B7B74]">語音留言最多 60 秒／4MB；手繪直接顯示在聊天中；其他附件最多 10MB</div>
               </div>
             </>
           )}

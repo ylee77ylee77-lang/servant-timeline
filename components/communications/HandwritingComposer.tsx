@@ -240,7 +240,7 @@ export function HandwritingComposer({ onClose, onSend }: Props) {
         <div className="mb-3 flex items-center justify-between">
           <div>
             <h2 className="text-base font-black text-[#1F2937]">手寫留言</h2>
-            <p className="text-xs text-[#7B7B74]">用手指或觸控筆書寫，會以圖片傳送</p>
+            <p className="text-xs text-[#7B7B74]">可畫字或示意圖，傳送後直接顯示在聊天中</p>
           </div>
           <button type="button" onClick={onClose} disabled={saving} aria-label="關閉手寫" className="rounded-full p-2 text-[#7B7B74] disabled:opacity-40">
             <X className="h-5 w-5" />
