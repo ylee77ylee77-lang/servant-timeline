@@ -5,7 +5,7 @@ import path from "node:path";
 
 const read = (file: string) => fs.readFileSync(path.join(process.cwd(), file), "utf8");
 
-test("all three personal-setting sections use the same accessible accordion component", () => {
+test("all three personal-setting sections reuse one accessible card", () => {
   const card = read("components/profile/SettingsAccordionCard.tsx");
   const avatar = read("components/profile/AvatarSettingsCard.tsx");
   const preferences = read("components/profile/PersonalPreferencesCards.tsx");
@@ -21,38 +21,58 @@ test("all three personal-setting sections use the same accessible accordion comp
   assert.match(preferences, /panelId="personal-reminder-settings-panel"/);
 });
 
-test("voice and reminder cards can expand independently and start collapsed", () => {
-  const source = read("components/profile/PersonalPreferencesCards.tsx");
-  assert.match(source, /const \[voiceExpanded, setVoiceExpanded\] = useState\(false\)/);
-  assert.match(source, /const \[reminderExpanded, setReminderExpanded\] = useState\(false\)/);
-  assert.match(source, /expanded=\{voiceExpanded\}/);
-  assert.match(source, /expanded=\{reminderExpanded\}/);
-  assert.match(source, /setVoiceExpanded\(\(previous\) => !previous\)/);
-  assert.match(source, /setReminderExpanded\(\(previous\) => !previous\)/);
+test("profile settings have a single expanded card rather than independent states", () => {
+  const page = read("app/page.tsx");
+  const preferences = read("components/profile/PersonalPreferencesCards.tsx");
+  assert.match(page, /useState<SettingsPanel \| null>\(null\)/);
+  assert.match(page, /setExpandedSettingsPanel\(\(current\) => current === panel \? null : panel\)/);
+  assert.match(page, /expanded=\{expandedSettingsPanel === "avatar"\}/);
+  assert.match(page, /onToggle=\{\(\) => toggleSettingsPanel\("avatar"\)\}/);
+  assert.match(page, /expandedPanel=\{expandedSettingsPanel\}/);
+  assert.match(page, /onToggle=\{toggleSettingsPanel\}/);
+  assert.match(preferences, /expanded=\{expandedPanel === "voice"\}/);
+  assert.match(preferences, /expanded=\{expandedPanel === "reminder"\}/);
+  assert.match(preferences, /onToggle=\{\(\) => onToggle\("voice"\)\}/);
+  assert.match(preferences, /onToggle=\{\(\) => onToggle\("reminder"\)\}/);
+  assert.doesNotMatch(preferences, /voiceExpanded|reminderExpanded|useState/);
   for (const key of [
     "voiceProfile", "voiceReminderEnabled", "vibrationReminderEnabled",
     "reminderPre5Enabled", "reminderNowEnabled", "voiceDetailLevel",
-  ]) assert.match(source, new RegExp(key));
-  assert.doesNotMatch(source, /fetch\(|localStorage|\bsetInterval\(/);
+  ]) assert.match(preferences, new RegExp(key));
+  assert.doesNotMatch(preferences, /fetch\(|localStorage|\bsetInterval\(/);
 });
 
-test("personal preferences hydrate before persisting, using the existing local storage key", () => {
+test("registration and profile share the same titled sticky live avatar header", () => {
+  const registration = read("components/auth/AuthProvider.tsx");
+  const settings = read("components/profile/AvatarSettingsCard.tsx");
+  const shared = read("components/profile/SettingsAccordionCard.tsx");
+
+  assert.match(registration, /title="大頭貼"/);
+  assert.match(settings, /title="大頭貼"/);
+  assert.match(registration, /summary=\{\["選填"/);
+  assert.match(registration, /icon=\{<SystemAvatar config=\{registrationAvatar\}/);
+  assert.match(settings, /icon=\{<SystemAvatar config=\{headingAvatar\}/);
+  assert.match(registration, /size=\{registrationAvatarOpen \? 80 : 52\}/);
+  assert.match(settings, /size=\{expanded \? 80 : 52\}/);
+  assert.match(registration, /stickyHeader/);
+  assert.match(settings, /stickyHeader/);
+  assert.match(shared, /stickyHeader && expanded/);
+  assert.match(shared, /sticky top-0 z-30/);
+  assert.doesNotMatch(registration, /AvatarLivePreview/);
+  assert.doesNotMatch(settings, /AvatarLivePreview|createPortal|previewHost/);
+  assert.doesNotMatch(read("app/page.tsx"), /setAvatarPreviewHost|avatarPreviewHost/);
+});
+
+test("personal settings retain local persistence and the avatar save API", () => {
   const page = read("app/page.tsx");
+  const avatar = read("components/profile/AvatarSettingsCard.tsx");
   assert.match(page, /const PERSONAL_REMINDER_STORAGE_KEY = "shekinah_personal_reminder_settings_v1"/);
   assert.match(page, /window\.localStorage\.getItem\(PERSONAL_REMINDER_STORAGE_KEY\)/);
   assert.match(page, /if \(!personalSettingsLoaded \|\| typeof window === "undefined"\) return;/);
   assert.match(page, /window\.localStorage\.setItem\(PERSONAL_REMINDER_STORAGE_KEY, JSON\.stringify\(personalSettings\)\)/);
-  assert.match(page, /<PersonalPreferencesCards/);
   assert.match(page, /onChange=\{updatePersonalSettings\}/);
-});
-
-test("avatar keeps the existing persistent editor and scroll-level live preview", () => {
-  const avatar = read("components/profile/AvatarSettingsCard.tsx");
-  const page = read("app/page.tsx");
-  assert.match(avatar, /expanded && previewHost && createPortal/);
   assert.match(avatar, /displayDirty/);
   assert.match(avatar, /onClick=\{\(\) => void save\(avatar\)\}/);
   assert.match(avatar, /<AvatarEditor/);
-  assert.match(page, /ref=\{setAvatarPreviewHost\}/);
-  assert.match(page, /previewHost=\{avatarPreviewHost\}/);
+  assert.match(avatar, /fetch\("\/api\/profile\/avatar"/);
 });
