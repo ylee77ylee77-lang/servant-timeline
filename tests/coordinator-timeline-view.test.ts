@@ -20,7 +20,7 @@ test("coordinator shared timeline endpoint requires a verified coordinator and e
 test("coordinators can preview all three services without changing the locked check-in service", () => {
   const page = read("app/page.tsx");
   assert.match(page, /const isCoordinatorTimelinePreview = isCoordinator && !isAdmin;/);
-  assert.match(page, /const \\[viewedTimelineService, setViewedTimelineService\\] = useState\\(" *"\\)/);
+  assert.match(page, /const \[viewedTimelineService, setViewedTimelineService\] = useState\(\"\"\)/);
   assert.match(page, /coordinatorTimelineNodes\.filter\(\(node\) => node\.service_type === timelineViewService\)/);
   assert.match(page, /\(isAdminUnlocked \|\| \(isCoordinatorTimelinePreview && activeTab === "timeline"\)\)/);
   assert.match(page, /aria-pressed=\{\(isAdminUnlocked \? currentService : timelineViewService\) === srv\}/);
