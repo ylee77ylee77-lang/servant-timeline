@@ -5401,18 +5401,25 @@ export default function App() {
         )}
       </div>
 
-      {isAdminUnlocked && (
+      {(isAdminUnlocked || (isCoordinatorTimelinePreview && activeTab === "timeline")) && (
         <div className="grid grid-cols-3 gap-2.5 mt-5">
           {serviceOptions.map((srv) => (
             <button
               key={srv}
+              type="button"
+              aria-pressed={(isAdminUnlocked ? currentService : timelineViewService) === srv}
               onClick={() => {
-                setCurrentService(srv);
-                hasManuallySwitchedRef.current = true;
-                setNewNode((prev) => ({ ...prev, service_type: srv }));
+                if (isAdminUnlocked) {
+                  setCurrentService(srv);
+                  hasManuallySwitchedRef.current = true;
+                  setNewNode((prev) => ({ ...prev, service_type: srv }));
+                } else {
+                  // Viewing another timeline never changes check-in or voice reminders.
+                  setViewedTimelineService(srv);
+                }
               }}
               className={`px-4 py-3 rounded-full text-[15px] font-black transition-all duration-300 ${
-                currentService === srv
+                (isAdminUnlocked ? currentService : timelineViewService) === srv
                   ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-lg shadow-[#F25D6B]/20 scale-[1.03]"
                   : "bg-white text-[#7B7B74] border border-[#E6EAF0] hover:bg-[#F3EEFF] hover:text-[#6D55A3]"
               }`}
