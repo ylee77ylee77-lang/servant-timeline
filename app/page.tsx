@@ -44,6 +44,7 @@ import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 import { getServiceActivationState } from '@/lib/services/service-activation';
+import { getCustomReminderText, getReminderTextField, type ReminderDetailLevel } from '@/lib/voice/reminder-overrides';
 import {
   CHECK_IN_NETWORK_MESSAGES,
   getSelectedCheckInOption,
@@ -115,7 +116,6 @@ const DEFAULT_TTS_USAGE = {
 // Phase 1 rollout: coordinators first use only check-in, timeline, and personal settings.
 // Existing features remain implemented and available to admins for later rollout phases.
 const PHASE_ONE_COORDINATOR_TABS = new Set(["checkin", "timeline", "settings"]);
-type ReminderDetailLevel = "simple" | "standard" | "detailed";
 
 const formatNumber = (value: any) => Number(value || 0).toLocaleString("zh-TW");
 
@@ -343,6 +343,10 @@ export default function App() {
   const [timelinePreviewDetail, setTimelinePreviewDetail] = useState<ReminderDetailLevel>("standard");
   const [timelinePreviewStatus, setTimelinePreviewStatus] = useState<"idle" | "loading" | "playing">("idle");
   const [timelinePreviewError, setTimelinePreviewError] = useState("");
+  const [timelinePreviewDraftText, setTimelinePreviewDraftText] = useState("");
+  const [timelinePreviewSaveStatus, setTimelinePreviewSaveStatus] = useState<"idle" | "saving">("idle");
+  const [timelinePreviewSaveMessage, setTimelinePreviewSaveMessage] = useState("");
+  const [timelinePreviewSaveError, setTimelinePreviewSaveError] = useState("");
   const timelinePreviewRequestRef = useRef<AbortController | null>(null);
   const timelinePreviewSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const timelinePreviewRunRef = useRef(0);
@@ -2243,6 +2247,8 @@ export default function App() {
   };
 
   const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now", detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel) => {
+    const customText = getCustomReminderText(node, reminderType, detailLevel);
+    if (customText) return customText;
     const phrase = simplifyTaskPhrase(node);
     const detailHint = buildDetailedVoiceHint(node, detailLevel);
 
