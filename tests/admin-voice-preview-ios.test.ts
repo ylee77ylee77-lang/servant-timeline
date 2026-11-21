@@ -51,10 +51,39 @@ test("successful MP3 synthesis always provides explicit native iOS playback cont
 
 test("preview synthesis and playback failures are not silent or mistaken for success", () => {
   const preview = previewFunction();
-  assert.ok(preview.includes('throw new Error(payload?.error || "試聽語音產生失敗")'));
+  assert.ok(preview.includes('雲端請求 HTTP ${response.status}：${payload?.error || "試聽語音產生失敗"}'));
   assert.ok(preview.includes("雲端語音沒有傳回有效音檔"));
   assert.ok(preview.includes("語音音檔已產生，但自動播放受限"));
   assert.ok(preview.includes('setCustomAlert({ isOpen: true, message: err?.message || "試聽語音失敗，請稍後再試。" })'));
+});
+
+test("device tone isolates local audio output from cloud TTS", () => {
+  const source = readPage();
+  const start = source.indexOf('  const testPreviewDeviceTone = async () => {');
+  const end = source.indexOf('  const previewVoiceDraft = async () => {', start);
+  assert.ok(start > 0 && end > start, "local audio test must exist");
+  const tone = source.slice(start,end);
+  assert.ok(tone.includes('getVoiceAudioContext()'));
+  assert.ok(tone.includes('ctx.createOscillator()'));
+  assert.ok(tone.includes('ctx.createGain()'));
+  assert.ok(tone.includes('ctx.resume()'));
+  assert.ok(!tone.includes('fetch('), "local test must not contact TTS");
+  assert.ok(source.includes('測試手機音效（不使用雲端）'));
+  assert.ok(source.includes('deviceToneDiagnostic &&'));
+});
+
+test("MP3 diagnostics distinguish cloud generation, media load and actual player events", () => {
+  const source = readPage();
+  const preview = previewFunction();
+  assert.ok(preview.includes('正在向 Google 語音服務產生'));
+  assert.ok(preview.includes('雲端已回傳'));
+  assert.ok(preview.includes('setVoicePreviewDiagnostic(err?.message'));
+  assert.ok(source.includes('onLoadedMetadata={(event) => {'));
+  assert.ok(source.includes('onPlaying={() => setVoicePreviewDiagnostic('));
+  assert.ok(source.includes('onError={(event) => {'));
+  assert.ok(source.includes('download={voicePreviewClip.label.includes("Iapetus")'));
+  assert.ok(source.includes('另存 MP3 檢查音檔'));
+  assert.ok(!preview.includes('setPersonalSettings('));
 });
 
 test("preview never mutates formal reminders, voice profile settings or timeline data", () => {
