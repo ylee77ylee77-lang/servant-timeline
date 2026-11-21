@@ -54,7 +54,7 @@ export async function PATCH(request: NextRequest) {
       .eq("is_active", true);
     update = expectedText === null ? update.is(field, null) : update.eq(field, expectedText);
 
-    const { data, error } = await update.select(`id,${field}`).maybeSingle();
+    const { data, error } = await update.select("id").maybeSingle();
     if (error) throw error;
     if (!data) {
       return NextResponse.json(
@@ -63,7 +63,7 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, nodeId: data.id, field, text: data[field] ?? null });
+    return NextResponse.json({ ok: true, nodeId: data.id, field, text });
   } catch (error) {
     const authError = getAuthErrorResponse(error);
     return NextResponse.json({
