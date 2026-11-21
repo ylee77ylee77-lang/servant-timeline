@@ -120,17 +120,20 @@ test("display mode is enforced by the canonical scene, not by page-specific CSS"
 });
 
 
-test("registration and profile reuse the same settings controls and full-size sticky preview", () => {
+test("registration and profile share settings controls and a single live heading", () => {
   const auth = fs.readFileSync(path.join(process.cwd(), "components/auth/AuthProvider.tsx"), "utf8");
   const settings = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarSettingsCard.tsx"), "utf8");
-  const controls = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarControls.tsx"), "utf8");
-  assert.match(auth, /<AvatarLivePreview config={registrationAvatar}/);
+  assert.match(auth, /<SettingsAccordionCard/);
+  assert.match(settings, /<SettingsAccordionCard/);
+  assert.match(auth, /title="大頭貼"/);
+  assert.match(settings, /title="大頭貼"/);
   assert.match(auth, /showPreview={false}/);
+  assert.match(settings, /showPreview={false}/);
   assert.match(auth, /<AvatarDisplayModeSelector/);
   assert.match(settings, /<AvatarDisplayModeSelector/);
-  assert.match(controls, /sticky top-0/);
-  assert.doesNotMatch(controls, /compactPreview|IntersectionObserver/);
   assert.match(auth, /registrationAvatarOpen, setRegistrationAvatarOpen\] = useState\(false\)/);
+  assert.doesNotMatch(auth, /AvatarLivePreview/);
+  assert.doesNotMatch(settings, /AvatarLivePreview/);
 });
 
 test("default avatar fallback has a clearly visible high-contrast silhouette", () => {
@@ -181,7 +184,8 @@ test("registration and profile share the final short display labels and icon pic
   assert.match(settings, /AvatarIconPicker/);
   assert.match(picker, /選擇圖示/);
   assert.match(picker, /色調/);
-  assert.match(registration, /大頭貼（選填）/);
+  assert.match(registration, /title="大頭貼"/);
+  assert.match(registration, /summary=\{\["選填"/);
   assert.doesNotMatch(registration, /系統預設圖示|自訂3D大頭貼/);
 });
 
@@ -240,19 +244,17 @@ test("avatar creation leads directly to manual male/female choice", () => {
   assert.match(source, /iconTone: current.iconTone/);
 });
 
-test("profile live preview is sticky at the settings page scroll root", () => {
+test("profile live heading stays sticky in the page scroll viewport without a second preview", () => {
   const page = fs.readFileSync(path.join(process.cwd(), "app/page.tsx"), "utf8");
   const card = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarSettingsCard.tsx"), "utf8");
-  const controls = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarControls.tsx"), "utf8");
-  // Sticky only works if personal settings owns a genuinely bounded scrolling
-  // viewport; a min-h-screen root lets the whole document scroll instead.
+  const shared = fs.readFileSync(path.join(process.cwd(), "components/profile/SettingsAccordionCard.tsx"), "utf8");
+  // Sticky remains constrained to the actual settings scroll region and expanded card.
   assert.match(page, /activeTab === "settings" \? "h-dvh" : "min-h-screen"/);
   assert.match(page, /className="min-h-0 flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-\[#FFF9F3\]"/);
-  assert.match(page, /ref=\{setAvatarPreviewHost\} className="sticky top-0 z-30"/);
-  assert.match(page, /previewHost=\{avatarPreviewHost\}/);
-  assert.match(card, /createPortal\(/);
-  assert.match(card, /sticky=\{false\}/);
-  assert.match(controls, /sticky = true/);
-  assert.match(controls, /sticky \? "sticky top-0 z-30 "/);
-  assert.match(controls, /size=\{104\}/);
+  assert.match(card, /stickyHeader/);
+  assert.match(card, /headingAvatar/);
+  assert.match(card, /size=\{expanded \? 80 : 52\}/);
+  assert.match(shared, /sticky top-0 z-30/);
+  assert.doesNotMatch(card, /createPortal\(|previewHost|AvatarLivePreview/);
+  assert.doesNotMatch(page, /setAvatarPreviewHost|avatarPreviewHost/);
 });
