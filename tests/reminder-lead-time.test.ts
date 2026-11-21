@@ -121,7 +121,7 @@ test("profile controls, saved preferences, speech, and upcoming cue share the sa
   const ui = read("components/profile/PersonalPreferencesCards.tsx");
   const page = read("app/page.tsx");
   assert.match(ui, /data-reminder-lead-stepper/);
-  assert.match(ui, /settings\.reminderPre5Enabled && \(/);
+  assert.match(ui, /const showAdvanceTime = item\.key === "reminderPre5Enabled" && active;/);
   assert.match(ui, /aria-label="增加提前提醒分鐘"/);
   assert.match(ui, /aria-label="減少提前提醒分鐘"/);
   assert.match(ui, /aria-label="增加提前提醒秒數"/);
