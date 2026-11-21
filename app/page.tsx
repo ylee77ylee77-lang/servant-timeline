@@ -2288,6 +2288,11 @@ export default function App() {
     setTimelinePreviewStatus("idle");
   };
 
+  // Variant changes stop the independent preview from an effect, not render.
+  useEffect(() => {
+    if (timelinePreviewNodeId !== null) stopTimelinePreviewAudio();
+  }, [timelinePreviewTiming, timelinePreviewDetail]);
+
   const confirmDiscardVoiceDraft = (node: any, next: () => void) => {
     const original = buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail);
     if (timelinePreviewDraftText !== original) {
@@ -4456,8 +4461,6 @@ export default function App() {
                               value={timelinePreviewTiming}
                               disabled={timelinePreviewSaveStatus === "saving"}
                               onChange={(event) => {
-                                // Stop playback during the tap; the confirmation callback remains ref-free.
-                                stopTimelinePreviewAudio();
                                 const selectedTiming = event.target.value as "pre5" | "now";
                                 confirmDiscardVoiceDraft(node, () => {
                                   setTimelinePreviewError("");
@@ -4480,7 +4483,6 @@ export default function App() {
                               value={timelinePreviewDetail}
                               disabled={timelinePreviewSaveStatus === "saving"}
                               onChange={(event) => {
-                                stopTimelinePreviewAudio();
                                 const selectedDetail = event.target.value as ReminderDetailLevel;
                                 confirmDiscardVoiceDraft(node, () => {
                                   setTimelinePreviewError("");
