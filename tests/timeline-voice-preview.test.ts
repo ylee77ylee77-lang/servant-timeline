@@ -32,6 +32,22 @@ test("admin preview reuses real reminder wording for both timing and all detail 
   }
 });
 
+test("simple early reminder is a direct task cue without mentioning delay or clock time", () => {
+  const source = page();
+  const start = source.indexOf('  const buildReminderSpeechText = (node: any');
+  const end = source.indexOf('  // An admin test uses the existing voice preview endpoint', start);
+  assert.ok(start > 0 && end > start);
+  const builder = source.slice(start, end);
+  assert.match(builder, /if \(reminderType === "pre5"\) \{[\s\S]*?if \(detailLevel === "simple"\) \{\s*return `提醒您，\$\{phrase\}。`;\s*\}/);
+  assert.ok(!builder.includes('return `提醒您，五分鐘後，${phrase}。`;'));
+  assert.ok(builder.includes('const taskTime = formatTaskTimeForVoice(node.time);'));
+  assert.ok(builder.includes('提醒您，五分鐘後，${taskTime}，要${phrase}。'));
+  assert.ok(builder.includes('return `可以${phrase}了。`;'));
+  // Live reminders and preview must continue to call this same builder.
+  assert.ok(source.includes('speak(buildReminderSpeechText(node, reminderType));'));
+  assert.ok(source.includes('buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail)'));
+});
+
 test("only administrators can see and request preview audio; preview is independent from live reminders", () => {
   const source = page();
   const api = fs.readFileSync("app/api/voice/route.ts", "utf8");
