@@ -4292,6 +4292,9 @@ export default function App() {
                     }}
                     className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10"
                   >
+                    <span aria-hidden="true" className="absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none tabular-nums text-[#9CA3AF]">
+                      {node.time}
+                    </span>
                     {completed ? (
                       <div className="w-7 h-7 rounded-full bg-[#00B8B8] flex items-center justify-center shadow-sm shadow-[#00B8B8]/30">
                          <Check className="w-4 h-4 text-white" strokeWidth={3} />
@@ -4309,8 +4312,8 @@ export default function App() {
                     'bg-white border border-[#E6EAF0] shadow-sm'
                   }`}>
                     
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="w-full">
+                    <div className="flex items-start justify-between gap-2 mb-4">
+                      <div className="min-w-0 flex-1">
                         <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
                           {renderInlineEdit('node', node.id, 'title', node.title, "w-full")}
                         </h3>
@@ -4326,7 +4329,91 @@ export default function App() {
                           )}
                         </div>
                       </div>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          aria-expanded={timelinePreviewNodeId === node.id}
+                          aria-controls={`timeline-voice-preview-${node.id}`}
+                          aria-label={`${node.time} ${node.title} 語音試聽`}
+                          onClick={() => toggleTimelinePreviewPanel(node.id)}
+                          className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-3 text-xs font-black text-[#6D55A3] transition-colors hover:bg-[#EDE6FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3]"
+                        >
+                          <Volume2 className="h-4 w-4" />
+                          試聽
+                        </button>
+                      )}
                     </div>
+
+                    {isAdmin && timelinePreviewNodeId === node.id && (
+                      <div id={`timeline-voice-preview-${node.id}`} className="mb-4 space-y-3 rounded-2xl border border-[#6D55A3]/15 bg-[#F3EEFF]/50 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-xs font-black text-[#6D55A3]">語音提醒試聽</h4>
+                          <span className="text-[10px] font-medium text-[#7B7B74]">僅此裝置播放</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="text-[11px] font-bold text-[#7B7B74]">
+                            提醒時機
+                            <select
+                              aria-label="試聽提醒時機"
+                              value={timelinePreviewTiming}
+                              onChange={(event) => {
+                                stopTimelinePreviewAudio();
+                                setTimelinePreviewTiming(event.target.value as "pre5" | "now");
+                              }}
+                              className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
+                            >
+                              <option value="pre5">提前 5 分鐘</option>
+                              <option value="now">準點提醒</option>
+                            </select>
+                          </label>
+                          <label className="text-[11px] font-bold text-[#7B7B74]">
+                            播報內容
+                            <select
+                              aria-label="試聽播報內容"
+                              value={timelinePreviewDetail}
+                              onChange={(event) => {
+                                stopTimelinePreviewAudio();
+                                setTimelinePreviewDetail(event.target.value as ReminderDetailLevel);
+                              }}
+                              className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
+                            >
+                              <option value="simple">簡短</option>
+                              <option value="standard">標準</option>
+                              <option value="detailed">詳細</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div className="rounded-xl border border-[#E6EAF0] bg-white p-3">
+                          <p className="mb-1 text-[10px] font-black text-[#7B7B74]">實際產生的播報文字</p>
+                          <p aria-live="polite" className="text-xs font-medium leading-6 text-[#1F2937]">
+                            {buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail)}
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={timelinePreviewStatus === "loading"}
+                            onClick={() => void playTimelinePreviewAudio(node)}
+                            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#6D55A3] px-3 text-xs font-black text-white disabled:opacity-50"
+                          >
+                            {timelinePreviewStatus === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
+                            {timelinePreviewStatus === "loading" ? "準備中…" : timelinePreviewStatus === "playing" ? "重新播放" : "播放試聽"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={timelinePreviewStatus === "idle"}
+                            onClick={stopTimelinePreviewAudio}
+                            className="min-h-11 rounded-xl border border-[#D9DEE7] bg-white px-3 text-xs font-black text-[#6D55A3] disabled:opacity-40"
+                          >
+                            停止
+                          </button>
+                        </div>
+                        {timelinePreviewError && (
+                          <p role="alert" className="text-xs font-bold text-[#C23B4E]">{timelinePreviewError}</p>
+                        )}
+                        <p className="text-[10px] leading-4 text-[#7B7B74]">不改變正式語音提醒或任務完成狀態；正式播報仍依個人設定執行。</p>
+                      </div>
+                    )}
 
                     <div className="flex flex-col gap-2.5 mt-2 text-[13px] text-[#7B7B74]">
                       <div className="flex items-center gap-2">
