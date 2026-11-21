@@ -1944,6 +1944,42 @@ export default function App() {
     }
   }, []);
 
+  // Shared timeline previews use a read-only coordinator-validated endpoint.
+  // Personal assignments and live voice reminders still use their existing data source.
+  useEffect(() => {
+    if (!isCoordinatorTimelinePreview || activeTab !== "timeline") return;
+    let disposed = false;
+    let fetching = false;
+    const refresh = async () => {
+      if (fetching) return;
+      fetching = true;
+      setCoordinatorTimelineLoading(true);
+      try {
+        const response = await fetch("/api/coordinator-timelines", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "無法載入三堂流程。");
+        if (!disposed) {
+          setCoordinatorTimelineNodes(Array.isArray(data.nodes) ? data.nodes : []);
+          setCoordinatorTimelineLoaded(true);
+          setCoordinatorTimelineError("");
+        }
+      } catch (error) {
+        if (!disposed) {
+          setCoordinatorTimelineError(error instanceof Error ? error.message : "無法載入三堂流程。");
+        }
+      } finally {
+        fetching = false;
+        if (!disposed) setCoordinatorTimelineLoading(false);
+      }
+    };
+    void refresh();
+    const syncTimer = window.setInterval(() => void refresh(), 30000);
+    return () => { disposed = true; window.clearInterval(syncTimer); };
+  }, [isCoordinatorTimelinePreview, activeTab, session.access_token]);
+
   const getActiveNodeIdByTime = (candidateNodes: any[] = filteredNodes) => {
     if (candidateNodes.length === 0) return null;
     const currentMinutes = timeToMinutes(currentTime);
@@ -2042,12 +2078,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (activeTab !== 'timeline' || filteredNodes.length === 0 || !timelineContainerRef.current) {
+    if (activeTab !== 'timeline' || !showLiveTimeline || timelineDisplayNodes.length === 0 || !timelineContainerRef.current) {
       setCurrentTimeCursorTop(null);
       return;
     }
 
-    const sortedNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+    const sortedNodes = [...timelineDisplayNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
     const currentMinutes = getCurrentMinuteValue();
 
     let previousNode = sortedNodes[0];
@@ -2099,8 +2135,11 @@ export default function App() {
     activeTab,
     currentDate,
     currentService,
+    timelineViewService,
+    showLiveTimeline,
     nodes,
-    filteredNodes.length,
+    coordinatorTimelineNodes,
+    timelineDisplayNodes.length,
     personalSettings.role,
     personalSettings.name
   ]);
@@ -3021,12 +3060,12 @@ export default function App() {
 
 
   useEffect(() => {
-    if (!isLoading && !fetchError && filteredNodes.length > 0 && activeTab === 'timeline' && activeNodeRef.current) {
+    if (showLiveTimeline && !isLoading && !fetchError && timelineDisplayNodes.length > 0 && activeTab === 'timeline' && activeNodeRef.current) {
       setTimeout(() => {
         activeNodeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 300);
     }
-  }, [activeTab, isLoading, fetchError, filteredNodes.length, currentService, activeNodeId]);
+  }, [activeTab, isLoading, fetchError, timelineDisplayNodes.length, timelineViewService, timelineActiveNodeId, showLiveTimeline]);
 
   const toggleChecklist = async (nodeId: string, checkId: string) => {
     const nodeToUpdate = nodes.find(n => n.id === nodeId);
@@ -4089,14 +4128,26 @@ export default function App() {
           </div>
         )}
 
-        {filteredNodes.length === 0 ? (
+        {isCoordinatorTimelinePreview && (
+          <div className="mb-4 rounded-2xl border border-[#6D55A3]/10 bg-white px-4 py-3 text-xs font-bold text-[#6D55A3]">
+            查看：{timelineViewService}（僅供檢視；已報到堂次：{checkedInService || "待確認"}）
+          </div>
+        )}
+        {isCoordinatorTimelinePreview && coordinatorTimelineError && (
+          <div role="alert" className="mb-3 rounded-xl bg-[#FFF2F4] p-3 text-xs font-bold text-[#F25D6B]">{coordinatorTimelineError}</div>
+        )}
+        {isCoordinatorTimelinePreview && !coordinatorTimelineLoaded ? (
+          <div className="mt-16 text-center text-sm text-[#7B7B74]">{coordinatorTimelineLoading ? "正在載入三堂流程…" : "暫時無法讀取三堂流程。"}</div>
+        ) : timelineDisplayNodes.length === 0 ? (
           <div className="text-center text-[#7B7B74] mt-16 text-sm bg-white p-7 rounded-[24px] shadow-sm border border-[#E6EAF0]">
             <Sparkles className="w-9 h-9 text-[#E6EAF0] mx-auto mb-3" />
             <div className="text-[16px] font-black text-[#1F2937] mb-2">
-              {serviceNodes.length === 0 ? "此堂次目前尚未安排服事任務" : "目前角色沒有相關任務"}
+              {isCoordinatorTimelinePreview ? "此堂次目前尚未安排共用流程" : serviceNodes.length === 0 ? "此堂次目前尚未安排服事任務" : "目前角色沒有相關任務"}
             </div>
             <div className="text-[13px] font-medium leading-relaxed">
-              {serviceNodes.length === 0 ? (
+              {isCoordinatorTimelinePreview ? (
+                <span>請由管理員建立共用流程。</span>
+              ) : serviceNodes.length === 0 ? (
                 <span>請至「任務管理」新增此堂次的服事流程。</span>
               ) : personalSettings.role === "副總招" ? (
                 <span>你目前的角色是：副總招。此堂次暫無三樓相關任務。</span>
@@ -4124,9 +4175,9 @@ export default function App() {
               </div>
             )}
             
-            {filteredNodes.map((node) => {
+            {timelineDisplayNodes.map((node) => {
               const completed = isNodeCompleted(node);
-              const active = node.id === activeNodeId;
+              const active = node.id === timelineActiveNodeId;
               return (
                 <div key={node.id} className="relative mb-8 transition-all duration-500" ref={active ? activeNodeRef : null}>
                   
@@ -4207,12 +4258,13 @@ export default function App() {
                                   : 'bg-white border border-[#E6EAF0] shadow-sm hover:border-[#6D55A3]/30'
                             }`}>
                               
-                              <label className="relative flex items-center justify-center shrink-0 mt-0.5 cursor-pointer">
+                              <label className={`relative flex items-center justify-center shrink-0 mt-0.5 ${isCoordinatorTimelinePreview ? "cursor-default opacity-60" : "cursor-pointer"}`}>
                                 <input 
                                   type="checkbox" 
                                   className="peer sr-only" 
                                   checked={item.is_completed} 
-                                  onChange={() => toggleChecklist(node.id, item.id)}
+                                  disabled={isCoordinatorTimelinePreview}
+                                  onChange={() => { if (!isCoordinatorTimelinePreview) void toggleChecklist(node.id, item.id); }}
                                 />
                                 <div className={`w-5 h-5 rounded-[6px] border-2 transition-all flex items-center justify-center ${
                                   item.is_completed ? 'bg-[#00B8B8] border-[#00B8B8]' : 'bg-white border-[#E6EAF0] peer-focus:ring-2 ring-[#6D55A3]/30'
