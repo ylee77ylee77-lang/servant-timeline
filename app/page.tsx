@@ -2267,6 +2267,94 @@ export default function App() {
     return `可以${phrase}了。${detailHint}`;
   };
 
+
+  // An admin test uses the existing voice preview endpoint and independent WebAudio
+  // source. It never touches live reminders, their queue or their fired timestamps.
+  const stopTimelinePreviewAudio = () => {
+    timelinePreviewRunRef.current += 1;
+    timelinePreviewRequestRef.current?.abort();
+    timelinePreviewRequestRef.current = null;
+    const source = timelinePreviewSourceRef.current;
+    if (source) {
+      source.onended = null;
+      try { source.stop(); } catch { /* Already ended. */ }
+      source.disconnect();
+      timelinePreviewSourceRef.current = null;
+    }
+    setTimelinePreviewStatus("idle");
+  };
+
+  const toggleTimelinePreviewPanel = (nodeId: string) => {
+    if (!isAdmin) return;
+    stopTimelinePreviewAudio();
+    setTimelinePreviewError("");
+    setTimelinePreviewTiming("pre5");
+    setTimelinePreviewDetail(personalSettings.voiceDetailLevel);
+    setTimelinePreviewNodeId((current) => current === nodeId ? null : nodeId);
+  };
+
+  const playTimelinePreviewAudio = async (node: any) => {
+    if (!isAdmin) return;
+    stopTimelinePreviewAudio();
+    setTimelinePreviewError("");
+    setTimelinePreviewStatus("loading");
+    const runId = timelinePreviewRunRef.current;
+    const controller = new AbortController();
+    timelinePreviewRequestRef.current = controller;
+
+    try {
+      // Resume while still handling the user's tap, before any network work.
+      const context = getVoiceAudioContext();
+      if (!context) throw new Error("此裝置不支援語音試聽。");
+      if (context.state === "suspended") await context.resume();
+
+      const text = buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail);
+      const response = await fetch("/api/voice", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          preview: true,
+          voiceProfile: personalSettings.voiceProfile,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.error || "無法產生試聽語音。");
+      }
+
+      const audioData = await (await response.blob()).arrayBuffer();
+      if (timelinePreviewRunRef.current !== runId) return;
+      const decoded = await context.decodeAudioData(audioData.slice(0));
+      if (timelinePreviewRunRef.current !== runId) return;
+
+      const source = context.createBufferSource() as AudioBufferSourceNode;
+      source.buffer = decoded;
+      source.connect(context.destination);
+      timelinePreviewSourceRef.current = source;
+      source.onended = () => {
+        source.disconnect();
+        if (timelinePreviewRunRef.current !== runId) return;
+        timelinePreviewSourceRef.current = null;
+        setTimelinePreviewStatus("idle");
+      };
+      source.start();
+      setTimelinePreviewStatus("playing");
+    } catch (error) {
+      if (controller.signal.aborted || timelinePreviewRunRef.current !== runId) return;
+      setTimelinePreviewError(error instanceof Error ? error.message : "語音試聽失敗。");
+      setTimelinePreviewStatus("idle");
+    } finally {
+      if (timelinePreviewRunRef.current === runId) {
+        timelinePreviewRequestRef.current = null;
+      }
+    }
+  };
+
   const getNextReminderInfo = () => {
     if (!personalSettings.voiceReminderEnabled) return null;
 
