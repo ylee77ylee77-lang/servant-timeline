@@ -46,6 +46,15 @@ import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/
 import { getServiceActivationState } from '@/lib/services/service-activation';
 import { getCustomReminderText, getReminderTextField, normalizeReminderText, type ReminderDetailLevel } from '@/lib/voice/reminder-overrides';
 import {
+  DEFAULT_REMINDER_LEAD_MINUTES,
+  DEFAULT_REMINDER_LEAD_SECONDS,
+  formatReminderLeadLabel,
+  formatReminderLeadSpeech,
+  getReminderLeadSeconds,
+  isReminderDue,
+  normalizeReminderLeadTime,
+} from '@/lib/voice/reminder-timing';
+import {
   CHECK_IN_NETWORK_MESSAGES,
   getSelectedCheckInOption,
   normalizeEligibleCheckInOptions,
@@ -354,6 +363,7 @@ export default function App() {
   const voiceCommandBufferRef = useRef("");
   const recognitionShouldSubmitRef = useRef(false);
   const announcedNodesRef = useRef<Set<string>>(new Set()); // 紀錄已報時的任務，避免重複提醒
+  const lastReminderDayRef = useRef("");
   const voiceAudioContextRef = useRef<any>(null);
   const voiceHtmlAudioRef = useRef<HTMLAudioElement | null>(null);
   const voiceHtmlAudioUnlockedRef = useRef(false);
@@ -425,6 +435,8 @@ export default function App() {
     vibrationReminderEnabled: true,
     reminderPre5Enabled: true,
     reminderNowEnabled: true,
+    reminderLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
+    reminderLeadSeconds: DEFAULT_REMINDER_LEAD_SECONDS,
     voiceDetailLevel: "standard" as "simple" | "standard" | "detailed",
     voiceProfile: "zephyr" as "zephyr" | "iapetus"
   });
@@ -436,6 +448,7 @@ export default function App() {
       const saved = window.localStorage.getItem(PERSONAL_REMINDER_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
+        const lead = normalizeReminderLeadTime(parsed.reminderLeadMinutes, parsed.reminderLeadSeconds);
         setPersonalSettings(prev => ({
           ...prev,
           ...parsed,
@@ -446,6 +459,8 @@ export default function App() {
               ? "副總招"
               : (parsed.role || "總招"),
           vibrationReminderEnabled: parsed.vibrationReminderEnabled !== false,
+          reminderLeadMinutes: lead.minutes,
+          reminderLeadSeconds: lead.seconds,
           voiceDetailLevel: parsed.voiceDetailLevel || "standard",
           voiceProfile: parsed.voiceProfile === "iapetus" || parsed.voiceProfile === "mature_male" ? "iapetus" : "zephyr"
         }));
@@ -1841,13 +1856,18 @@ export default function App() {
   }, []);
 
   // --- 【整合自動化】語音助理提醒核心觸發邏輯 ---
-  // 語音助理開啟時，會同時尊重：
-  // 1. 個人設定：角色篩選、語音提醒、5分鐘前、準點、提醒內容
-  // 2. 不提醒未完成，避免造成現場壓力
+  // 照各同工本機設定的提前分秒觸發，準點提醒仍維持獨立。
+  // 以每秒更新的時鐘計算；跨日只重設一次，避免午夜重複播放。
   useEffect(() => {
-    if (!isVoiceEnabled || !currentTime || nodes.length === 0 || !personalSettings.voiceReminderEnabled) return;
+    if (!currentDate) return;
+    const dayKey = `${currentDate.getFullYear()}-${currentDate.getMonth() + 1}-${currentDate.getDate()}`;
+    if (lastReminderDayRef.current !== dayKey) {
+      announcedNodesRef.current.clear();
+      lastReminderDayRef.current = dayKey;
+    }
+    if (!isVoiceEnabled || nodes.length === 0 || !personalSettings.voiceReminderEnabled) return;
 
-    const currentMinutes = timeToMinutes(currentTime);
+    const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
     const currentServiceNodes = nodes
       .filter(n => n.service_type === currentService)
       .filter(isNodeForCurrentPerson);
@@ -1855,33 +1875,24 @@ export default function App() {
     currentServiceNodes.forEach((node) => {
       const settings = getReminderSettings(node);
       if (!settings.voiceReminderEnabled) return;
-
-      const nodeMinutes = timeToMinutes(node.time);
-      const minutesBeforeTask = nodeMinutes - currentMinutes;
-
       let reminderType: "pre5" | "now" | null = null;
 
-      if (minutesBeforeTask === 5 && settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled) {
+      if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled
+          && isReminderDue(currentDate, node.time, leadSeconds)) {
         reminderType = "pre5";
-      } else if (minutesBeforeTask === 0 && settings.reminderNowEnabled && personalSettings.reminderNowEnabled) {
+      } else if (settings.reminderNowEnabled && personalSettings.reminderNowEnabled
+          && isReminderDue(currentDate, node.time, 0)) {
         reminderType = "now";
       }
-
       if (!reminderType) return;
 
-      const announceId = `${node.id}-${reminderType}-${personalSettings.role}`;
-
+      const announceId = `${dayKey}-${node.id}-${reminderType}-${personalSettings.role}`;
       if (announcedNodesRef.current.has(announceId)) return;
-
       announcedNodesRef.current.add(announceId);
       speak(buildReminderSpeechText(node, reminderType));
     });
-
-    if (currentTime === "00:00") {
-      announcedNodesRef.current.clear();
-    }
   }, [
-    currentTime,
+    currentDate,
     isVoiceEnabled,
     nodes,
     currentService,
@@ -1890,6 +1901,8 @@ export default function App() {
     personalSettings.voiceReminderEnabled,
     personalSettings.reminderPre5Enabled,
     personalSettings.reminderNowEnabled,
+    personalSettings.reminderLeadMinutes,
+    personalSettings.reminderLeadSeconds,
     personalSettings.voiceDetailLevel
   ]);
 
@@ -2253,15 +2266,16 @@ export default function App() {
     const detailHint = buildDetailedVoiceHint(node, detailLevel);
 
     if (reminderType === "pre5") {
-      // Simple mode speaks only the action. The scheduler still fires five minutes early.
+      // Simple mode speaks only the action; the scheduler honors the selected advance interval.
       if (detailLevel === "simple") {
         return `提醒您，${phrase}。`;
       }
 
+      const leadSpeech = formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
       const taskTime = formatTaskTimeForVoice(node.time);
       return taskTime
-        ? `提醒您，五分鐘後，${taskTime}，要${phrase}。${detailHint}`
-        : `提醒您，五分鐘後，要${phrase}。${detailHint}`;
+        ? `提醒您，${leadSpeech}後，${taskTime}，要${phrase}。${detailHint}`
+        : `提醒您，${leadSpeech}後，要${phrase}。${detailHint}`;
     }
 
     if (detailLevel === "simple") {
@@ -4472,7 +4486,7 @@ export default function App() {
                               }}
                               className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
                             >
-                              <option value="pre5">提前 5 分鐘</option>
+                              <option value="pre5">提前 {formatReminderLeadLabel(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)}</option>
                               <option value="now">準點提醒</option>
                             </select>
                           </label>
