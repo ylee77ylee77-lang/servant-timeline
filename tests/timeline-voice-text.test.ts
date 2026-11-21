@@ -10,7 +10,7 @@ import {
 } from "../lib/voice/reminder-overrides.ts";
 
 const migration = () => fs.readFileSync(
-  "supabase/migrations/20261121110000_editable_timeline_voice_text.sql", "utf8",
+  "supabase/migrations/20261121111809_editable_timeline_voice_text.sql", "utf8",
 );
 const route = () => fs.readFileSync("app/api/timeline-voice-text/route.ts", "utf8");
 const page = () => fs.readFileSync("app/page.tsx", "utf8");
