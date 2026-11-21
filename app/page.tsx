@@ -2288,13 +2288,93 @@ export default function App() {
     setTimelinePreviewStatus("idle");
   };
 
-  const toggleTimelinePreviewPanel = (nodeId: string) => {
-    if (!isAdmin) return;
+  const confirmDiscardVoiceDraft = (node: any, next: () => void) => {
+    const original = buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail);
+    if (timelinePreviewDraftText !== original) {
+      setCustomConfirm({
+        isOpen: true,
+        message: "目前有尚未儲存的播報文字。確定捨棄修改並切換嗎？",
+        confirmLabel: "捨棄修改",
+        onConfirm: next,
+      });
+    } else {
+      next();
+    }
+  };
+
+  const toggleTimelinePreviewPanel = (node: any) => {
+    if (!isAdmin || timelinePreviewSaveStatus === "saving") return;
+    const next = () => {
+      stopTimelinePreviewAudio();
+      setTimelinePreviewError("");
+      setTimelinePreviewSaveMessage("");
+      setTimelinePreviewSaveError("");
+      setTimelinePreviewTiming("pre5");
+      setTimelinePreviewDetail(personalSettings.voiceDetailLevel);
+      setTimelinePreviewDraftText(buildReminderSpeechText(node, "pre5", personalSettings.voiceDetailLevel));
+      setTimelinePreviewNodeId((current) => current === node.id ? null : node.id);
+    };
+    const previous = nodes.find((item) => item.id === timelinePreviewNodeId);
+    if (previous) confirmDiscardVoiceDraft(previous, next);
+    else next();
+  };
+
+  const changeTimelinePreviewVariant = (node: any, timing: "pre5" | "now", detail: ReminderDetailLevel) => {
+    if (timelinePreviewSaveStatus === "saving") return;
+    const next = () => {
+      stopTimelinePreviewAudio();
+      setTimelinePreviewError("");
+      setTimelinePreviewSaveMessage("");
+      setTimelinePreviewSaveError("");
+      setTimelinePreviewTiming(timing);
+      setTimelinePreviewDetail(detail);
+      setTimelinePreviewDraftText(buildReminderSpeechText(node, timing, detail));
+    };
+    confirmDiscardVoiceDraft(node, next);
+  };
+
+  const saveTimelinePreviewText = async (node: any, restoreDefault = false) => {
+    if (!isAdmin || timelinePreviewSaveStatus === "saving") return;
+    const text = restoreDefault ? null : timelinePreviewDraftText.trim();
+    if (text !== null && (Array.from(text).length === 0 || Array.from(text).length > 600)) {
+      setTimelinePreviewSaveError("播報文字需為 1 至 600 字。");
+      return;
+    }
     stopTimelinePreviewAudio();
-    setTimelinePreviewError("");
-    setTimelinePreviewTiming("pre5");
-    setTimelinePreviewDetail(personalSettings.voiceDetailLevel);
-    setTimelinePreviewNodeId((current) => current === nodeId ? null : nodeId);
+    setTimelinePreviewSaveStatus("saving");
+    setTimelinePreviewSaveMessage("");
+    setTimelinePreviewSaveError("");
+    const field = getReminderTextField(timelinePreviewTiming, timelinePreviewDetail);
+    try {
+      const response = await fetch("/api/timeline-voice-text", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nodeId: node.id,
+          timing: timelinePreviewTiming,
+          detailLevel: timelinePreviewDetail,
+          text,
+          expectedText: getCustomReminderText(node, timelinePreviewTiming, timelinePreviewDetail),
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "無法儲存播報文字。");
+      const updatedNode = { ...node, [field]: result.text ?? null };
+      setNodes((prev) => prev.map((item) =>
+        item.id === node.id ? { ...item, [field]: result.text ?? null } : item
+      ));
+      setTimelinePreviewDraftText(buildReminderSpeechText(
+        updatedNode, timelinePreviewTiming, timelinePreviewDetail
+      ));
+      setTimelinePreviewSaveMessage(restoreDefault ? "已恢復自動產生文字。" : "已儲存，正式提醒將使用這段文字。");
+    } catch (error) {
+      setTimelinePreviewSaveError(error instanceof Error ? error.message : "儲存失敗，請稍後再試。");
+    } finally {
+      setTimelinePreviewSaveStatus("idle");
+    }
   };
 
   const playTimelinePreviewAudio = async (node: any) => {
@@ -2312,7 +2392,11 @@ export default function App() {
       if (!context) throw new Error("此裝置不支援語音試聽。");
       if (context.state === "suspended") await context.resume();
 
-      const text = buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail);
+      // Preview the current draft, even when it has not been saved.
+      const text = timelinePreviewDraftText.trim();
+      if (Array.from(text).length === 0 || Array.from(text).length > 600) {
+        throw new Error("播報文字需為 1 至 600 字。");
+      }
       const response = await fetch("/api/voice", {
         method: "POST",
         headers: {
