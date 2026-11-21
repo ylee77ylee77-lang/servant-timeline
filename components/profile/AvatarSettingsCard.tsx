@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  ChevronDown,
   ChevronLeft,
   Loader2,
   Pencil,
@@ -14,6 +13,7 @@ import { AvatarEditor } from "@/components/profile/AvatarEditor";
 import { AvatarDisplayModeSelector, AvatarLivePreview } from "@/components/profile/AvatarControls";
 import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
+import { SettingsAccordionCard } from "@/components/profile/SettingsAccordionCard";
 import { useAuth } from "@/components/auth/AuthProvider";
 import {
   AVATAR_DEFAULTS,
@@ -138,25 +138,14 @@ export function AvatarSettingsCard({
         />,
         previewHost
       )}
-      <div className="rounded-[24px] border border-[#E6EAF0] bg-white p-4 shadow-lg shadow-[#6D55A3]/5 sm:p-5">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls="avatar-settings-panel"
-        onClick={() => setExpanded((open) => !open)}
-        className="flex w-full items-center gap-3 rounded-2xl text-left"
+      <SettingsAccordionCard
+        panelId="avatar-settings-panel"
+        title="我的大頭貼"
+        summary={`${displayDirty ? "尚未儲存・" : ""}${AVATAR_DISPLAY_LABELS[visibleAvatar.displayMode]}`}
+        icon={<SystemAvatar config={visibleAvatar} displayName={displayName} size={52} />}
+        expanded={expanded}
+        onToggle={() => setExpanded((open) => !open)}
       >
-        <SystemAvatar config={visibleAvatar} displayName={displayName} size={52} />
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-black text-[#1F2937]">我的大頭貼</span>
-          <span className="mt-1 block truncate text-xs font-medium text-[#7B7B74]">
-            {displayDirty ? "尚未儲存・" : ""}{AVATAR_DISPLAY_LABELS[visibleAvatar.displayMode]}
-          </span>
-        </span>
-        <ChevronDown className={`h-5 w-5 shrink-0 text-[#6D55A3] transition-transform ${expanded ? "rotate-180" : ""}`} />
-      </button>
-      {expanded && (
-      <div id="avatar-settings-panel" className="mt-4 border-t border-[#E6EAF0] pt-4">
       {!previewHost && (
         <AvatarLivePreview
           config={view === "manual-edit" ? { ...avatar, displayMode: "custom" } : visibleAvatar}
@@ -308,9 +297,7 @@ export function AvatarSettingsCard({
           {message}
         </p>
       )}
-      </div>
-      )}
-      </div>
+      </SettingsAccordionCard>
     </>
   );
 }

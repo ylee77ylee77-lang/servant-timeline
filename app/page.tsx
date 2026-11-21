@@ -36,6 +36,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { MyServiceDashboard } from '@/components/service/MyServiceDashboard';
 import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStatusDashboard';
 import { AvatarSettingsCard } from '@/components/profile/AvatarSettingsCard';
+import { PersonalPreferencesCards } from '@/components/profile/PersonalPreferencesCards';
 import { CommunicationHub } from '@/components/communications/CommunicationHub';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
@@ -392,6 +393,7 @@ export default function App() {
   // portals its live preview here without lifting avatar state into app/page.
   const [avatarPreviewHost, setAvatarPreviewHost] = useState<HTMLDivElement | null>(null);
 
+  const [personalSettingsLoaded, setPersonalSettingsLoaded] = useState(false);
   const [personalSettings, setPersonalSettings] = useState({
     name: "",
     role: "總招",
@@ -426,8 +428,21 @@ export default function App() {
       }
     } catch (err) {
       console.error("讀取個人提醒設定失敗:", err);
+    } finally {
+      setPersonalSettingsLoaded(true);
     }
   }, [authDisplayName]);
+
+  // Apply saved preferences after they have been loaded, not the defaults on
+  // the first render. Persist each real change without extra API requests.
+  useEffect(() => {
+    if (!personalSettingsLoaded || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(PERSONAL_REMINDER_STORAGE_KEY, JSON.stringify(personalSettings));
+    } catch (error) {
+      console.warn("儲存個人提醒設定失敗:", error);
+    }
+  }, [personalSettings, personalSettingsLoaded]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -961,10 +976,6 @@ export default function App() {
     });
   };
 
-  const voiceProfileOptions = [
-    { value: "zephyr", label: "女聲 Zephyr", description: "自然、明亮、溫柔，適合一般提醒。" },
-    { value: "iapetus", label: "男聲 Iapetus", description: "自然、穩重、清楚，適合現場指令。" }
-  ];
   const getVoiceProfile = () => personalSettings.voiceProfile === "iapetus" ? "iapetus" : "zephyr";
 
   const requestVoiceWakeLock = useCallback(async () => {
@@ -4489,106 +4500,12 @@ export default function App() {
           />
         </div>
 
-        <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 space-y-6">
-          <div className="p-4 rounded-[18px] bg-[#FFF9F3] border border-[#E6EAF0]">
-            <div className="text-xs font-black text-[#6D55A3] tracking-widest mb-1">語音風格</div>
-            <div className="text-sm font-black text-[#1F2937]">
-              個人選擇｜{personalSettings.voiceProfile === "iapetus" ? "男聲 Iapetus" : "女聲 Zephyr"}
-            </div>
-            <div className="text-[11px] font-bold text-[#7B7B74] mt-1">
-              每位同工可在本機選擇自己的語音；開啟語音助理時會盡量保持畫面亮起，服事結束後會自動關閉。
-            </div>
-            <div className={`mt-2 text-[10px] font-black ${isWakeLockActive ? "text-[#00B8B8]" : "text-[#7B7B74]"}`}>
-              {isVoiceEnabled
-                ? isWakeLockActive
-                  ? "螢幕保持喚醒：已啟用"
-                  : "螢幕保持喚醒：此裝置可能不支援"
-                : "語音助理關閉時不會保持螢幕喚醒"}
-            </div>
-          </div>
-
-          <div data-voice-profile-selector="chirp3">
-            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">語音選擇</label>
-            <div className="grid grid-cols-2 gap-2 mb-6">
-              {voiceProfileOptions.map(option => (
-                <button key={option.value} type="button"
-                  onClick={() => updatePersonalSettings({ voiceProfile: option.value as "zephyr" | "iapetus" })}
-                  className={"p-3 rounded-2xl border text-left transition-all " + (personalSettings.voiceProfile === option.value ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent" : "bg-white text-[#7B7B74] border-[#E6EAF0]")}>
-                  <div className="text-sm font-black">{personalSettings.voiceProfile === option.value ? "✓ " : ""}{option.label}</div>
-                  <div className="text-[10px] font-bold opacity-80 mt-1">{option.description}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒設定</label>
-            <div className="space-y-2.5">
-              {[
-                { key: "voiceReminderEnabled", label: "語音助理", description: "開啟後，才會播放個人耳機提醒。" },
-                { key: "vibrationReminderEnabled", label: "震動提醒", description: "進入下一個任務區塊時震動提醒。" },
-                { key: "reminderPre5Enabled", label: "5分鐘前", description: "任務前五分鐘先提醒一次。" },
-                { key: "reminderNowEnabled", label: "準點", description: "任務時間到時提醒一次。" }
-              ].map(item => {
-                const active = personalSettings[item.key as keyof typeof personalSettings] as boolean;
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => updatePersonalSettings({ [item.key]: !active } as any)}
-                    className={`w-full flex items-center justify-between gap-3 p-3.5 rounded-2xl border transition-all ${
-                      active
-                        ? "bg-[#F3EEFF] border-[#6D55A3]/20 text-[#6D55A3]"
-                        : "bg-white border-[#E6EAF0] text-[#7B7B74]"
-                    }`}
-                  >
-                    <div className="text-left">
-                      <div className="text-sm font-black">{active ? "✓ " : ""}{item.label}</div>
-                      <div className="text-[11px] font-medium opacity-75 mt-0.5">{item.description}</div>
-                    </div>
-                    <div className={`w-10 h-6 rounded-full p-1 transition-all ${active ? "bg-[#6D55A3]" : "bg-[#E6EAF0]"}`}>
-                      <div className={`w-4 h-4 rounded-full bg-white transition-transform ${active ? "translate-x-4" : "translate-x-0"}`} />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-black text-[#7B7B74] mb-3 tracking-widest">提醒內容</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: "simple", label: "極簡" },
-                { value: "standard", label: "標準" },
-                { value: "detailed", label: "詳細" }
-              ].map(option => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => updatePersonalSettings({ voiceDetailLevel: option.value as any })}
-                  className={`py-2.5 rounded-2xl border text-xs font-black transition-all ${
-                    personalSettings.voiceDetailLevel === option.value
-                      ? "bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white border-transparent shadow-md shadow-[#F25D6B]/15"
-                      : "bg-white text-[#7B7B74] border-[#E6EAF0]"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-3 p-3 rounded-2xl bg-[#FFF9F3] border border-[#E6EAF0] text-[12px] leading-relaxed text-[#7B7B74] font-medium">
-              {personalSettings.voiceDetailLevel === "simple" && "極簡：提醒更短，適合服事中快速聽懂。"}
-              {personalSettings.voiceDetailLevel === "standard" && "標準：預告含時間，即時提醒更短。"}
-              {personalSettings.voiceDetailLevel === "detailed" && "詳細：會加上任務提示與前三項確認清單，適合任務不多的崗位。"}
-            </div>
-          </div>
-
-          <p className="text-center text-[11px] font-bold text-[#00B8B8]">
-            設定已自動儲存在這台裝置
-          </p>
-        </div>
+        <PersonalPreferencesCards
+          settings={personalSettings}
+          onChange={updatePersonalSettings}
+          isVoiceEnabled={isVoiceEnabled}
+          isWakeLockActive={isWakeLockActive}
+        />
       </div>
     );
   };
