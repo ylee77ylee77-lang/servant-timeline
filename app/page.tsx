@@ -1877,12 +1877,15 @@ export default function App() {
       if (!settings.voiceReminderEnabled) return;
       let reminderType: "pre5" | "now" | null = null;
 
-      if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled
-          && isReminderDue(currentDate, node.time, leadSeconds)) {
-        reminderType = "pre5";
-      } else if (settings.reminderNowEnabled && personalSettings.reminderNowEnabled
+      // The 00:00 advance option can coincide with on-time; do not queue
+      // two announcements for the same task at the same instant.
+      if (settings.reminderNowEnabled && personalSettings.reminderNowEnabled
           && isReminderDue(currentDate, node.time, 0)) {
         reminderType = "now";
+      } else if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled
+          && (leadSeconds > 0 || !personalSettings.reminderNowEnabled)
+          && isReminderDue(currentDate, node.time, leadSeconds)) {
+        reminderType = "pre5";
       }
       if (!reminderType) return;
 
@@ -2273,6 +2276,9 @@ export default function App() {
 
       const leadSpeech = formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
       const taskTime = formatTaskTimeForVoice(node.time);
+      if (getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds) === 0) {
+        return `提醒您，現在要${phrase}。${detailHint}`;
+      }
       return taskTime
         ? `提醒您，${leadSpeech}後，${taskTime}，要${phrase}。${detailHint}`
         : `提醒您，${leadSpeech}後，要${phrase}。${detailHint}`;
@@ -2484,7 +2490,8 @@ export default function App() {
       const taskSeconds = timeToMinutes(node.time) * 60;
       const candidates: any[] = [];
 
-      if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled) {
+      if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled
+          && (leadSeconds > 0 || !personalSettings.reminderNowEnabled)) {
         const dueSeconds = (taskSeconds - leadSeconds + daySeconds) % daySeconds;
         candidates.push({
           node,
