@@ -44,7 +44,7 @@ import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 import { getServiceActivationState } from '@/lib/services/service-activation';
-import { getCustomReminderText, getReminderTextField, type ReminderDetailLevel } from '@/lib/voice/reminder-overrides';
+import { getCustomReminderText, getReminderTextField, normalizeReminderText, type ReminderDetailLevel } from '@/lib/voice/reminder-overrides';
 import {
   CHECK_IN_NETWORK_MESSAGES,
   getSelectedCheckInOption,
@@ -2393,7 +2393,7 @@ export default function App() {
       if (context.state === "suspended") await context.resume();
 
       // Preview the current draft, even when it has not been saved.
-      const text = timelinePreviewDraftText.trim();
+      const text = normalizeReminderText(timelinePreviewDraftText);
       if (Array.from(text).length === 0 || Array.from(text).length > 600) {
         throw new Error("播報文字需為 1 至 600 字。");
       }
