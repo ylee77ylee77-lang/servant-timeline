@@ -37,6 +37,7 @@ import { MyServiceDashboard } from '@/components/service/MyServiceDashboard';
 import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStatusDashboard';
 import { AvatarSettingsCard } from '@/components/profile/AvatarSettingsCard';
 import { PersonalPreferencesCards } from '@/components/profile/PersonalPreferencesCards';
+import type { SettingsPanel } from '@/components/profile/SettingsAccordionCard';
 import { CommunicationHub } from '@/components/communications/CommunicationHub';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
@@ -389,9 +390,11 @@ export default function App() {
     ? [...baseRoleOptions, "聖餐助手"]
     : baseRoleOptions;
 
-  // A sticky host at the correct settings scroll level. The avatar card
-  // portals its live preview here without lifting avatar state into app/page.
-  const [avatarPreviewHost, setAvatarPreviewHost] = useState<HTMLDivElement | null>(null);
+  // One shared expanded setting: opening a new card closes the previous one.
+  const [expandedSettingsPanel, setExpandedSettingsPanel] = useState<SettingsPanel | null>(null);
+  const toggleSettingsPanel = (panel: SettingsPanel) => {
+    setExpandedSettingsPanel((current) => current === panel ? null : panel);
+  };
 
   const [personalSettingsLoaded, setPersonalSettingsLoaded] = useState(false);
   const [personalSettings, setPersonalSettings] = useState({
@@ -4491,12 +4494,12 @@ export default function App() {
           </p>
         </div>
 
-        <div ref={setAvatarPreviewHost} className="sticky top-0 z-30" />
-        <div className="mb-6">
+        <div className="mb-4">
           <AvatarSettingsCard
             accessToken={session.access_token}
             displayName={authDisplayName}
-            previewHost={avatarPreviewHost}
+            expanded={expandedSettingsPanel === "avatar"}
+            onToggle={() => toggleSettingsPanel("avatar")}
           />
         </div>
 
@@ -4505,6 +4508,8 @@ export default function App() {
           onChange={updatePersonalSettings}
           isVoiceEnabled={isVoiceEnabled}
           isWakeLockActive={isWakeLockActive}
+          expandedPanel={expandedSettingsPanel}
+          onToggle={toggleSettingsPanel}
         />
       </div>
     );
