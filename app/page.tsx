@@ -186,6 +186,12 @@ export default function App() {
   const [detailModal, setDetailModal] = useState<{isOpen: boolean, title: string, details: string}>({isOpen: false, title: '', details: ''});
 
   const [currentService, setCurrentService] = useState(''); 
+  // Viewing a timeline must not change the service locked by check-in.
+  const [viewedTimelineService, setViewedTimelineService] = useState("");
+  const [coordinatorTimelineNodes, setCoordinatorTimelineNodes] = useState<any[]>([]);
+  const [coordinatorTimelineLoaded, setCoordinatorTimelineLoaded] = useState(false);
+  const [coordinatorTimelineLoading, setCoordinatorTimelineLoading] = useState(false);
+  const [coordinatorTimelineError, setCoordinatorTimelineError] = useState("");
   const serviceOptions = [...SERVICE_TYPES];
   const stationOptionsByService: Record<string, readonly string[]> = STATION_OPTIONS_BY_SERVICE;
 
@@ -480,12 +486,14 @@ export default function App() {
       setCheckedInService(String(record.serviceType));
       setCurrentAssignmentId(String(record.assignmentId || ""));
       setCurrentService(String(record.serviceType));
+      hasManuallySwitchedRef.current = true;
+      if (isCoordinator && !isAdmin) setViewedTimelineService(String(record.serviceType));
       setConfirmedStation(String(record.stationName || ""));
       setCheckinStatus(record.stationName || record.status === "station_confirmed" ? "station_confirmed" : "checked_in");
     } catch (error) {
       console.warn("恢復持久報到紀錄失敗:", error);
     }
-  }, [session.access_token]);
+  }, [session.access_token, isCoordinator, isAdmin]);
 
   useEffect(() => {
     void restorePersistentCheckin();
@@ -539,6 +547,15 @@ export default function App() {
 
   const serviceNodes = nodes.filter(n => n.service_type === currentService);
   const filteredNodes = isCoordinator ? serviceNodes.filter(isNodeForCurrentPerson) : serviceNodes;
+  const isCoordinatorTimelinePreview = isCoordinator && !isAdmin;
+  const timelineViewService = isCoordinatorTimelinePreview
+    ? (viewedTimelineService || checkedInService || currentService)
+    : currentService;
+  const timelineDisplayNodes = isCoordinatorTimelinePreview
+    ? coordinatorTimelineNodes.filter((node) => node.service_type === timelineViewService)
+    : filteredNodes;
+  const showLiveTimeline = !isCoordinatorTimelinePreview
+    || timelineViewService === (checkedInService || currentService);
   const adminNodes = serviceNodes;
   const isNodeCompleted = (node: any) => node.checklist && node.checklist.length > 0 && node.checklist.every((c: any) => c.is_completed);
 
@@ -1927,10 +1944,10 @@ export default function App() {
     }
   }, []);
 
-  const getActiveNodeIdByTime = () => {
-    if (filteredNodes.length === 0) return null;
+  const getActiveNodeIdByTime = (candidateNodes: any[] = filteredNodes) => {
+    if (candidateNodes.length === 0) return null;
     const currentMinutes = timeToMinutes(currentTime);
-    const sortedNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+    const sortedNodes = [...candidateNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
     if (currentMinutes < timeToMinutes(sortedNodes[0].time)) {
       return sortedNodes[0].id;
@@ -1949,6 +1966,7 @@ export default function App() {
   };
 
   const activeNodeId = getActiveNodeIdByTime();
+  const timelineActiveNodeId = showLiveTimeline ? getActiveNodeIdByTime(timelineDisplayNodes) : null;
 
   const triggerVibration = (pattern: number | number[]) => {
     if (!personalSettings.vibrationReminderEnabled) return;
@@ -2523,6 +2541,8 @@ export default function App() {
       );
       setCurrentAssignmentId(resolvedAssignmentId);
       setCurrentService(lockedServiceType);
+      hasManuallySwitchedRef.current = true;
+      if (isCoordinatorTimelinePreview) setViewedTimelineService(lockedServiceType);
       setConfirmedStation("");
       const nextCheckinStatus =
         result.checkIn.status === "station_confirmed" ? "station_confirmed" : "checked_in";
@@ -2540,6 +2560,7 @@ export default function App() {
       );
       void fetchData(true, lockedServiceType);
       triggerVibration([200, 100, 200]);
+      if (isCoordinator) setActiveTab("timeline");
     } catch (error) {
       setCustomAlert({ isOpen: true, message: error instanceof Error ? error.message : "報到失敗，請稍後再試。" });
       return;
@@ -2547,12 +2568,15 @@ export default function App() {
       setIsCheckinSyncing(false);
     }
 
-    window.setTimeout(() => {
-      checkinCompletedCardRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start"
-      });
-    }, 180);
+    // Volunteers retain their confirmation card. Coordinators open the timeline.
+    if (!isCoordinator) {
+      window.setTimeout(() => {
+        checkinCompletedCardRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start"
+        });
+      }, 180);
+    }
   };
 
   const handleCorrectCheckedInService = (newService: string) => {
