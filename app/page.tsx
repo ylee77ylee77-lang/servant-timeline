@@ -2319,20 +2319,6 @@ export default function App() {
     else next();
   };
 
-  const changeTimelinePreviewVariant = (node: any, timing: "pre5" | "now", detail: ReminderDetailLevel) => {
-    if (timelinePreviewSaveStatus === "saving") return;
-    const next = () => {
-      stopTimelinePreviewAudio();
-      setTimelinePreviewError("");
-      setTimelinePreviewSaveMessage("");
-      setTimelinePreviewSaveError("");
-      setTimelinePreviewTiming(timing);
-      setTimelinePreviewDetail(detail);
-      setTimelinePreviewDraftText(buildReminderSpeechText(node, timing, detail));
-    };
-    confirmDiscardVoiceDraft(node, next);
-  };
-
   const saveTimelinePreviewText = async (node: any, restoreDefault = false) => {
     if (!isAdmin || timelinePreviewSaveStatus === "saving") return;
     const text = restoreDefault ? null : timelinePreviewDraftText.trim();
@@ -4469,7 +4455,17 @@ export default function App() {
                               aria-label="試聽提醒時機"
                               value={timelinePreviewTiming}
                               disabled={timelinePreviewSaveStatus === "saving"}
-                              onChange={(event) => changeTimelinePreviewVariant(node, event.target.value as "pre5" | "now", timelinePreviewDetail)}
+                              onChange={(event) => {
+                                const selectedTiming = event.target.value as "pre5" | "now";
+                                confirmDiscardVoiceDraft(node, () => {
+                                  stopTimelinePreviewAudio();
+                                  setTimelinePreviewError("");
+                                  setTimelinePreviewSaveMessage("");
+                                  setTimelinePreviewSaveError("");
+                                  setTimelinePreviewTiming(selectedTiming);
+                                  setTimelinePreviewDraftText(buildReminderSpeechText(node, selectedTiming, timelinePreviewDetail));
+                                });
+                              }}
                               className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
                             >
                               <option value="pre5">提前 5 分鐘</option>
@@ -4482,7 +4478,17 @@ export default function App() {
                               aria-label="試聽播報內容"
                               value={timelinePreviewDetail}
                               disabled={timelinePreviewSaveStatus === "saving"}
-                              onChange={(event) => changeTimelinePreviewVariant(node, timelinePreviewTiming, event.target.value as ReminderDetailLevel)}
+                              onChange={(event) => {
+                                const selectedDetail = event.target.value as ReminderDetailLevel;
+                                confirmDiscardVoiceDraft(node, () => {
+                                  stopTimelinePreviewAudio();
+                                  setTimelinePreviewError("");
+                                  setTimelinePreviewSaveMessage("");
+                                  setTimelinePreviewSaveError("");
+                                  setTimelinePreviewDetail(selectedDetail);
+                                  setTimelinePreviewDraftText(buildReminderSpeechText(node, timelinePreviewTiming, selectedDetail));
+                                });
+                              }}
                               className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
                             >
                               <option value="simple">簡短</option>
