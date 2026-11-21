@@ -36,6 +36,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { MyServiceDashboard } from '@/components/service/MyServiceDashboard';
 import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStatusDashboard';
 import { AvatarSettingsCard } from '@/components/profile/AvatarSettingsCard';
+import { SystemAvatar } from '@/components/profile/SystemAvatar';
 import { PersonalPreferencesCards } from '@/components/profile/PersonalPreferencesCards';
 import type { SettingsPanel } from '@/components/profile/SettingsAccordionCard';
 import { CommunicationHub } from '@/components/communications/CommunicationHub';
@@ -164,7 +165,7 @@ const cleanTextForTtsBilling = (value: any) => {
 };
 
 export default function App() {
-  const { displayName: authDisplayName, isAdmin, isCoordinator, session } = useAuth();
+  const { displayName: authDisplayName, avatarConfig: authAvatarConfig, isAdmin, isCoordinator, session } = useAuth();
   const [nodes, setNodes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
@@ -3517,24 +3518,30 @@ export default function App() {
         </div>
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[12px] font-black text-[#7B7B74] tracking-widest mb-1">今日服事</div>
-                  <h3 className="text-xl font-black text-[#1F2937]">{displayCheckinName || "服事同工"}</h3>
-                  <p className="text-sm font-bold text-[#6D55A3] mt-1">
-                    今日堂次：{todayService}{checkedInService ? "（已鎖定）" : ""}
-                  </p>
-                </div>
-                <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border shrink-0 ${
-                  isCheckedIn
-                    ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
-                    : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
-                }`}>
-                  {isCheckedIn ? "已報到" : "尚未報到"}
-                </div>
-              </div>
-
+          <div className="relative min-h-5">
+            <div className="text-[12px] font-black leading-5 text-[#7B7B74] tracking-widest">今日服事</div>
+            <div className={`absolute right-0 top-0 px-3 py-1.5 rounded-full text-[11px] font-black border ${
+              isCheckedIn
+                ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
+                : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
+            }`}>
+              {isCheckedIn ? "已報到" : "尚未報到"}
             </div>
+          </div>
+          <div className="mt-4 flex min-w-0 items-center gap-4">
+            <SystemAvatar
+              config={authAvatarConfig}
+              displayName={displayCheckinName || "服事同工"}
+              size={52}
+            />
+            <h3 className="min-w-0 break-words text-xl font-black text-[#1F2937]">
+              {displayCheckinName || "服事同工"}
+            </h3>
+          </div>
+          <p className="mt-4 text-sm font-bold leading-6 text-[#6D55A3]">
+            今日堂次：{todayService}{checkedInService ? "（已鎖定）" : ""}
+          </p>
+        </div>
 
             <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
               <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成報到</h3>
