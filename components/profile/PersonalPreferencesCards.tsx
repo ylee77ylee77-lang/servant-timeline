@@ -58,7 +58,7 @@ export function PersonalPreferencesCards({
   const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲 Iapetus" : "女聲 Zephyr";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
   const lead = normalizeReminderLeadTime(settings.reminderLeadMinutes, settings.reminderLeadSeconds);
-  const hasActiveReminders = REMINDER_SWITCHES.some((item) => settings[item.key]);
+  const hasActiveReminders = REMINDER_SWITCHES.every((item) => settings[item.key]);
   const adjustLead = (unit: "minutes" | "seconds", direction: -1 | 1) => {
     const next = stepReminderLeadTime(lead.minutes, lead.seconds, unit, direction);
     onChange({ reminderLeadMinutes: next.minutes, reminderLeadSeconds: next.seconds });
