@@ -3518,9 +3518,9 @@ export default function App() {
         </div>
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="text-[12px] font-black text-[#7B7B74] tracking-widest">今日服事</div>
-            <div className={`px-3 py-1.5 rounded-full text-[11px] font-black border shrink-0 ${
+          <div className="relative min-h-5">
+            <div className="text-[12px] font-black leading-5 text-[#7B7B74] tracking-widest">今日服事</div>
+            <div className={`absolute right-0 top-0 px-3 py-1.5 rounded-full text-[11px] font-black border ${
               isCheckedIn
                 ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
                 : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
