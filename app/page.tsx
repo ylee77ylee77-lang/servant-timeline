@@ -4447,7 +4447,7 @@ export default function App() {
                           aria-expanded={timelinePreviewNodeId === node.id}
                           aria-controls={`timeline-voice-preview-${node.id}`}
                           aria-label={`${node.time} ${node.title} 語音試聽`}
-                          onClick={() => toggleTimelinePreviewPanel(node.id)}
+                          onClick={() => toggleTimelinePreviewPanel(node)}
                           className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-3 text-xs font-black text-[#6D55A3] transition-colors hover:bg-[#EDE6FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3]"
                         >
                           <Volume2 className="h-4 w-4" />
@@ -4468,10 +4468,8 @@ export default function App() {
                             <select
                               aria-label="試聽提醒時機"
                               value={timelinePreviewTiming}
-                              onChange={(event) => {
-                                stopTimelinePreviewAudio();
-                                setTimelinePreviewTiming(event.target.value as "pre5" | "now");
-                              }}
+                              disabled={timelinePreviewSaveStatus === "saving"}
+                              onChange={(event) => changeTimelinePreviewVariant(node, event.target.value as "pre5" | "now", timelinePreviewDetail)}
                               className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
                             >
                               <option value="pre5">提前 5 分鐘</option>
@@ -4483,10 +4481,8 @@ export default function App() {
                             <select
                               aria-label="試聽播報內容"
                               value={timelinePreviewDetail}
-                              onChange={(event) => {
-                                stopTimelinePreviewAudio();
-                                setTimelinePreviewDetail(event.target.value as ReminderDetailLevel);
-                              }}
+                              disabled={timelinePreviewSaveStatus === "saving"}
+                              onChange={(event) => changeTimelinePreviewVariant(node, timelinePreviewTiming, event.target.value as ReminderDetailLevel)}
                               className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
                             >
                               <option value="simple">簡短</option>
@@ -4496,15 +4492,38 @@ export default function App() {
                           </label>
                         </div>
                         <div className="rounded-xl border border-[#E6EAF0] bg-white p-3">
-                          <p className="mb-1 text-[10px] font-black text-[#7B7B74]">實際產生的播報文字</p>
-                          <p aria-live="polite" className="text-xs font-medium leading-6 text-[#1F2937]">
-                            {buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail)}
-                          </p>
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <label htmlFor={`timeline-voice-text-${node.id}`} className="text-xs font-black text-[#1F2937]">
+                              播報文字（可自行修改）
+                            </label>
+                            <span className="text-[10px] font-medium text-[#7B7B74]">
+                              {getCustomReminderText(node, timelinePreviewTiming, timelinePreviewDetail) ? "已儲存自訂文字" : "自動產生"}
+                            </span>
+                          </div>
+                          <textarea
+                            id={`timeline-voice-text-${node.id}`}
+                            aria-label="編輯實際播報文字"
+                            value={timelinePreviewDraftText}
+                            rows={3}
+                            maxLength={600}
+                            disabled={timelinePreviewSaveStatus === "saving"}
+                            onChange={(event) => {
+                              stopTimelinePreviewAudio();
+                              setTimelinePreviewDraftText(event.target.value);
+                              setTimelinePreviewSaveMessage("");
+                              setTimelinePreviewSaveError("");
+                            }}
+                            className="w-full resize-y rounded-xl border border-[#E6EAF0] bg-[#FFFDFB] px-3 py-2.5 text-[14px] font-medium leading-6 text-[#1F2937] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] disabled:opacity-50"
+                          />
+                          <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[#7B7B74]">
+                            <span>{timelinePreviewDraftText !== buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail) ? "尚未儲存的修改" : "已與儲存內容同步"}</span>
+                            <span>{Array.from(timelinePreviewDraftText).length} / 600</span>
+                          </div>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
-                            disabled={timelinePreviewStatus === "loading"}
+                            disabled={timelinePreviewStatus === "loading" || timelinePreviewSaveStatus === "saving"}
                             onClick={() => void playTimelinePreviewAudio(node)}
                             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#6D55A3] px-3 text-xs font-black text-white disabled:opacity-50"
                           >
@@ -4520,10 +4539,49 @@ export default function App() {
                             停止
                           </button>
                         </div>
-                        {timelinePreviewError && (
-                          <p role="alert" className="text-xs font-bold text-[#C23B4E]">{timelinePreviewError}</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={timelinePreviewSaveStatus === "saving" || timelinePreviewDraftText.trim().length === 0 || Array.from(timelinePreviewDraftText.trim()).length > 600 || timelinePreviewDraftText === buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail)}
+                            onClick={() => void saveTimelinePreviewText(node)}
+                            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#00A6A6] px-3 text-xs font-black text-white disabled:opacity-40"
+                          >
+                            {timelinePreviewSaveStatus === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                            儲存播報文字
+                          </button>
+                          <button
+                            type="button"
+                            disabled={timelinePreviewSaveStatus === "saving" || !getCustomReminderText(node, timelinePreviewTiming, timelinePreviewDetail)}
+                            onClick={() => setCustomConfirm({
+                              isOpen: true,
+                              message: "確定清除這個提醒組合的自訂文字，恢復系統自動產生的播報內容嗎？",
+                              confirmLabel: "恢復預設",
+                              onConfirm: () => void saveTimelinePreviewText(node, true),
+                            })}
+                            className="min-h-11 rounded-xl border border-[#D9DEE7] bg-white px-3 text-xs font-black text-[#6D55A3] disabled:opacity-40"
+                          >
+                            恢復預設
+                          </button>
+                        </div>
+                        {timelinePreviewDraftText !== buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail) && (
+                          <button
+                            type="button"
+                            disabled={timelinePreviewSaveStatus === "saving"}
+                            onClick={() => {
+                              stopTimelinePreviewAudio();
+                              setTimelinePreviewDraftText(buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail));
+                              setTimelinePreviewSaveError("");
+                              setTimelinePreviewSaveMessage("");
+                            }}
+                            className="text-[11px] font-bold text-[#6D55A3] underline underline-offset-2"
+                          >
+                            捨棄尚未儲存的修改
+                          </button>
                         )}
-                        <p className="text-[10px] leading-4 text-[#7B7B74]">不改變正式語音提醒或任務完成狀態；正式播報仍依個人設定執行。</p>
+                        {timelinePreviewSaveMessage && <p role="status" className="text-xs font-bold text-[#008D85]">{timelinePreviewSaveMessage}</p>}
+                        {timelinePreviewSaveError && <p role="alert" className="text-xs font-bold text-[#C23B4E]">{timelinePreviewSaveError}</p>}
+                        {timelinePreviewError && <p role="alert" className="text-xs font-bold text-[#C23B4E]">{timelinePreviewError}</p>}
+                        <p className="text-[10px] leading-4 text-[#7B7B74]">試聽可播放尚未儲存的文字；儲存後，使用此流程與提醒設定的同工會在正式提醒時聽到自訂內容。</p>
                       </div>
                     )}
 
