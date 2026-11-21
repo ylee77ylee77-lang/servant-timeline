@@ -28,7 +28,7 @@ test("admin preview reuses real reminder wording for both timing and all detail 
   assert.ok(source.includes('value={timelinePreviewDraftText}'));
   assert.ok(source.includes('onClick={() => void saveTimelinePreviewText(node)}'));
   assert.ok(source.includes('buildReminderSpeechText(node, reminderType)'));
-  assert.ok(source.includes('<option value="pre5">提前 5 分鐘</option>'));
+  assert.ok(source.includes('<option value="pre5">提前 {formatReminderLeadLabel(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)}</option>'));
   assert.ok(source.includes('<option value="now">準點提醒</option>'));
   for (const level of ["simple", "standard", "detailed"]) {
     assert.ok(source.includes(`<option value="${level}">`));
@@ -44,11 +44,12 @@ test("simple early reminder is a direct task cue without mentioning delay or clo
   assert.match(builder, /if \(reminderType === "pre5"\) \{[\s\S]*?if \(detailLevel === "simple"\) \{\s*return `提醒您，\$\{phrase\}。`;\s*\}/);
   assert.ok(!builder.includes('return `提醒您，五分鐘後，${phrase}。`;'));
   assert.ok(builder.includes('const taskTime = formatTaskTimeForVoice(node.time);'));
-  assert.ok(builder.includes('提醒您，五分鐘後，${taskTime}，要${phrase}。'));
+  assert.ok(builder.includes('提醒您，${leadSpeech}後，${taskTime}，要${phrase}。'));
   assert.ok(builder.includes('return `可以${phrase}了。`;'));
   // Live reminders and preview must continue to call this same builder.
   assert.ok(source.includes('speak(buildReminderSpeechText(node, reminderType));'));
   assert.ok(source.includes('buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail)'));
+  assert.ok(builder.includes('formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)'));
 });
 
 test("only administrators can see and request preview audio; preview is independent from live reminders", () => {
