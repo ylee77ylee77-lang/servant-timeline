@@ -2355,6 +2355,26 @@ export default function App() {
     }
   };
 
+  // Closing the timeline or switching services must not leave a test clip playing.
+  useEffect(() => {
+    if (timelinePreviewNodeId === null) return;
+    stopTimelinePreviewAudio();
+    setTimelinePreviewNodeId(null);
+    setTimelinePreviewError("");
+  }, [activeTab, currentService]);
+
+  useEffect(() => () => {
+    timelinePreviewRunRef.current += 1;
+    timelinePreviewRequestRef.current?.abort();
+    const source = timelinePreviewSourceRef.current;
+    if (source) {
+      source.onended = null;
+      try { source.stop(); } catch { /* Already ended. */ }
+      source.disconnect();
+      timelinePreviewSourceRef.current = null;
+    }
+  }, []);
+
   const getNextReminderInfo = () => {
     if (!personalSettings.voiceReminderEnabled) return null;
 
