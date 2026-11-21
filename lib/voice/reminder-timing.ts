@@ -15,9 +15,27 @@ export function normalizeReminderLeadTime(minutes: unknown, seconds: unknown): R
     ? minutes : DEFAULT_REMINDER_LEAD_MINUTES;
   const safeSeconds = typeof seconds === "number" && (REMINDER_SECOND_OPTIONS as readonly number[]).includes(seconds)
     ? seconds : DEFAULT_REMINDER_LEAD_SECONDS;
-  // Zero would duplicate the separate on-time reminder. The minimum advance is 15 seconds.
-  if (safeMinutes === 0 && safeSeconds === 0) return { minutes: 0, seconds: 15 };
+  // Keep each field independent. 00分:00秒 is permitted; live scheduling
+  // gives the separate on-time reminder priority when both are enabled.
   return { minutes: safeMinutes, seconds: safeSeconds };
+}
+
+/** Adjust one field without carrying or borrowing from the other field. */
+export function stepReminderLeadTime(
+  minutes: unknown,
+  seconds: unknown,
+  unit: "minutes" | "seconds",
+  direction: -1 | 1,
+): ReminderLeadTime {
+  const lead = normalizeReminderLeadTime(minutes, seconds);
+  if (unit === "minutes") {
+    return {
+      minutes: Math.max(0, Math.min(MAX_REMINDER_LEAD_MINUTES, lead.minutes + direction)),
+      seconds: lead.seconds,
+    };
+  }
+  const nextSeconds = (lead.seconds + direction * 15 + 60) % 60;
+  return { minutes: lead.minutes, seconds: nextSeconds };
 }
 
 export function getReminderLeadSeconds(minutes: unknown, seconds: unknown): number {
@@ -29,7 +47,7 @@ export function formatReminderLeadLabel(minutes: unknown, seconds: unknown): str
   const safe = normalizeReminderLeadTime(minutes, seconds);
   const minutePart = safe.minutes > 0 ? `${safe.minutes} 分鐘` : "";
   const secondPart = safe.seconds > 0 ? `${safe.seconds} 秒` : "";
-  return [minutePart, secondPart].filter(Boolean).join(" ");
+  return [minutePart, secondPart].filter(Boolean).join(" ") || "0 秒";
 }
 
 function chineseNumber(value: number): string {
