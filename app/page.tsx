@@ -2618,6 +2618,13 @@ export default function App() {
     }
   };
 
+  const openCheckedInTimeline = () => {
+    if (isCoordinatorTimelinePreview && isServiceType(checkedInService)) {
+      setViewedTimelineService(checkedInService);
+    }
+    setActiveTab("timeline");
+  };
+
   const handleCorrectCheckedInService = (newService: string) => {
     if (!isServiceType(newService)) return;
 
@@ -3751,7 +3758,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveTab("timeline")}
+                    onClick={openCheckedInTimeline}
                     className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
                   >
                     進入今日流程
@@ -3789,7 +3796,7 @@ export default function App() {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setActiveTab("timeline")}
+                    onClick={openCheckedInTimeline}
                     className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
                   >
                     進入今日共用流程
@@ -4160,7 +4167,7 @@ export default function App() {
           <div ref={timelineContainerRef} className="relative mt-2">
             <div className="absolute left-[20px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-[#F3EEFF] via-[#E6EAF0] to-[#FFF9F3]" />
 
-            {currentTimeCursorTop !== null && (
+            {showLiveTimeline && currentTimeCursorTop !== null && (
               <div
                 className="absolute left-[20px] z-30 pointer-events-none transition-all duration-700 ease-linear"
                 style={{ top: `${currentTimeCursorTop}px`, transform: "translate(-50%, -50%)" }}
