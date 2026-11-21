@@ -21,6 +21,7 @@ import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 import { createRingtoneWav } from "@/lib/communications/ringtone-wave";
+import { createConversationCache } from "@/lib/communications/conversation-cache";
 import { MessageVoiceRecorder } from "@/components/communications/MessageVoiceRecorder";
 import { HandwritingComposer } from "@/components/communications/HandwritingComposer";
 
@@ -224,6 +225,9 @@ export function CommunicationHub() {
   const openRef = useRef(open);
   const callStateRef = useRef(callState);
   const pendingMessagesRef = useRef(new Map<string, ChatMessage>());
+  // Small, session-only cache: do not persist private messages to local storage.
+  const conversationCacheRef = useRef(createConversationCache<ChatMessage>());
+  const conversationRequestsRef = useRef(new Map<string, Promise<ChatMessage[]>>());
   const refreshedAudioIdsRef = useRef(new Set<string>());
   const peersRequestRef = useRef<Promise<void> | null>(null);
   const peersFetchedAtRef = useRef(0);
@@ -420,24 +424,57 @@ export function CommunicationHub() {
     }).catch(() => undefined);
   }, [requestJson]);
 
+  const fetchConversation = useCallback((peerId: string): Promise<ChatMessage[]> => {
+    // Reuse the request if a preview prefetch, conversation opening and a
+    // Realtime refresh happen before the first request has settled.
+    const pending = conversationRequestsRef.current.get(peerId);
+    if (pending) return pending;
+
+    const task: Promise<ChatMessage[]> = requestJson(
+      `/api/communications/messages?peerId=${encodeURIComponent(peerId)}`
+    ).then((data) => Array.isArray(data?.messages) ? data.messages as ChatMessage[] : []);
+    conversationRequestsRef.current.set(peerId, task);
+    // Both fulfillment and rejection remove the pending slot; no rejected
+    // promise is left unhandled, and the caller still receives the error.
+    const clear = () => {
+      if (conversationRequestsRef.current.get(peerId) === task) {
+        conversationRequestsRef.current.delete(peerId);
+      }
+    };
+    void task.then(clear, clear);
+    return task;
+  }, [requestJson]);
+
+  const prefetchConversation = useCallback((peerId: string) => {
+    if (!peerId || conversationCacheRef.current.has(peerId)) return;
+    void fetchConversation(peerId).then((rows) => {
+      if (!conversationCacheRef.current.has(peerId)) {
+        conversationCacheRef.current.set(peerId, rows);
+      }
+    }).catch(() => undefined);
+  }, [fetchConversation]);
+
   const loadMessages = useCallback(async (
     peerId: string,
     markAsRead = true,
     showLoading = true
   ) => {
     if (!peerId) return;
-    if (showLoading) setLoadingMessages(true);
+    const cached = conversationCacheRef.current.has(peerId);
+    if (showLoading && !cached) setLoadingMessages(true);
     try {
-      const data = await requestJson(`/api/communications/messages?peerId=${encodeURIComponent(peerId)}`);
+      const savedMessages = await fetchConversation(peerId);
+      // Authorized server data only; snapshots belong to this mounted user
+      // session and are refreshed every time the conversation is reopened.
+      conversationCacheRef.current.set(peerId, savedMessages);
       if (selectedPeerIdRef.current !== peerId) return;
-      const savedMessages = (Array.isArray(data?.messages) ? data.messages : []) as ChatMessage[];
+
       const confirmedIds = new Set(savedMessages.map((message) => message.id));
       for (const id of confirmedIds) pendingMessagesRef.current.delete(id);
       const pending = Array.from(pendingMessagesRef.current.values())
         .filter((message) => message.senderId === session.user.id && message.recipientId === peerId);
       setMessages((current) => {
-        // An in-flight refresh must not erase a text message whose POST has
-        // already succeeded after the GET request began.
+        // Keep local sends visible if the GET started before the POST finished.
         const unsynced = current.filter((message) =>
           message.senderId === session.user.id
           && message.recipientId === peerId
@@ -455,11 +492,36 @@ export function CommunicationHub() {
         void markRead(peerId);
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "無法讀取訊息。");
+      if (selectedPeerIdRef.current === peerId) {
+        setErrorMessage(error instanceof Error ? error.message : "無法讀取訊息。");
+      }
     } finally {
-      if (showLoading) setLoadingMessages(false);
+      // An older peer's response must not remove the newly selected peer's
+      // loading indicator.
+      if (showLoading && selectedPeerIdRef.current === peerId) {
+        setLoadingMessages(false);
+      }
     }
-  }, [markRead, requestJson, session.user.id]);
+  }, [fetchConversation, markRead, session.user.id]);
+
+  const openConversation = useCallback((peerId: string) => {
+    // Update the ref synchronously so a fast response from another peer can
+    // never overwrite the selected conversation on this click.
+    selectedPeerIdRef.current = peerId;
+    const cached = conversationCacheRef.current.get(peerId);
+    setMessages(cached ?? []);
+    setLoadingMessages(cached === undefined);
+    setErrorMessage("");
+    setSelectedPeerId(peerId);
+  }, []);
+
+  // Keep the cached snapshot current after an optimistic send or a Realtime
+  // update. Only already-authorized, already-fetched conversations are cached.
+  useEffect(() => {
+    if (selectedPeerId && conversationCacheRef.current.has(selectedPeerId)) {
+      conversationCacheRef.current.set(selectedPeerId, messages);
+    }
+  }, [messages, selectedPeerId]);
 
   const handleRealtimeMessage = useCallback((
     row: Record<string, unknown>,
@@ -486,6 +548,14 @@ export function CommunicationHub() {
         processedMessageInsertIdsRef.current.clear();
       }
       processedMessageInsertIdsRef.current.add(messageId);
+    }
+
+    const cached = conversationCacheRef.current.get(peerId);
+    if (cached) {
+      const existing = cached.find((message) => message.id === messageId);
+      conversationCacheRef.current.set(peerId, upsertMessage(
+        cached, realtimeRowToMessage(row, existing)
+      ));
     }
 
     const isSelectedConversation = selectedPeerIdRef.current === peerId;
@@ -528,17 +598,29 @@ export function CommunicationHub() {
     return () => window.clearTimeout(timer);
   }, [canUse, loadPeers]);
 
+  // Prefetch only the first two eligible conversations while the contact
+  // list is visible. This is bounded and never marks unread messages as read.
+  useEffect(() => {
+    if (!open || selectedPeerId || peers.length === 0) return;
+    const timer = window.setTimeout(() => {
+      peers.slice(0, 2).forEach((peer) => prefetchConversation(peer.id));
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [open, selectedPeerId, peers, prefetchConversation]);
+
   useEffect(() => {
     if (!open || !selectedPeerId) return;
     const timer = window.setTimeout(() => {
-      void loadMessages(selectedPeerId);
+      // Cached history is already on screen; refresh privately in the
+      // background, without displaying a full-page spinner again.
+      void loadMessages(selectedPeerId, true, !conversationCacheRef.current.has(selectedPeerId));
     }, 0);
     return () => window.clearTimeout(timer);
   }, [open, selectedPeerId, loadMessages]);
 
   useEffect(() => {
     if (open && selectedPeerId) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
     }
   }, [messages, open, selectedPeerId]);
 
@@ -1175,7 +1257,7 @@ export function CommunicationHub() {
         <div className="fixed bottom-[9.5rem] right-3 z-[75] flex h-[min(72vh,620px)] w-[calc(100vw-1.5rem)] max-w-[420px] flex-col overflow-hidden rounded-[28px] border border-[#E6EAF0] bg-white shadow-2xl">
           <div className="flex items-center gap-3 border-b border-[#E6EAF0] bg-[#FFF9F3] px-4 py-3">
             {selectedPeer && (
-              <button type="button" onClick={() => setSelectedPeerId("")} className="rounded-full p-2 text-[#6D55A3]">
+              <button type="button" onClick={() => { selectedPeerIdRef.current = ""; setSelectedPeerId(""); }} className="rounded-full p-2 text-[#6D55A3]">
                 <ArrowLeft className="h-5 w-5" />
               </button>
             )}
@@ -1230,7 +1312,9 @@ export function CommunicationHub() {
                     <button
                       key={peer.id}
                       type="button"
-                      onClick={() => setSelectedPeerId(peer.id)}
+                      onPointerEnter={() => prefetchConversation(peer.id)}
+                      onPointerDown={() => prefetchConversation(peer.id)}
+                      onClick={() => openConversation(peer.id)}
                       className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left hover:bg-[#FFF9F3]"
                     >
                       <SystemAvatar config={peer.avatarConfig} displayName={peer.displayName} size={46} />
