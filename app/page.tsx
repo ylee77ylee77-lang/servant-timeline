@@ -1376,7 +1376,9 @@ export default function App() {
       return;
     }
 
-    const sampleText = `提醒您，${formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)}後，18點，要集合專招。`;
+    const sampleText = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds) === 0
+      ? "提醒您，現在要集合專招。"
+      : `提醒您，${formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)}後，18點，要集合專招。`;
 
     try {
       setIsVoicePreviewing(true);
