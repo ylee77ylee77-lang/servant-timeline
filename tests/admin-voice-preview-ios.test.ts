@@ -46,7 +46,7 @@ test("successful MP3 synthesis always provides explicit native iOS playback cont
   assert.ok(source.includes("preload=\"metadata\""));
   assert.ok(source.includes("controls"));
   assert.ok(source.includes('src={voicePreviewClip.url}'));
-  assert.ok(source.includes("若沒有自動出聲，請按上方播放鍵"));
+  assert.ok(source.includes("若無聲音，請比較"));
 });
 
 test("preview synthesis and playback failures are not silent or mistaken for success", () => {
