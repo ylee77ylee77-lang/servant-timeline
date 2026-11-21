@@ -11,9 +11,17 @@ alter table public.timeline_nodes
 
 -- Keep customized prompts within the existing Google Cloud TTS 600-character bound.
 -- The application normalizes whitespace; a database constraint adds defense in depth.
-alter table public.timeline_nodes
-  add constraint timeline_nodes_voice_text_bounds_check
-  check (
+do $migration$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.timeline_nodes'::regclass
+      and conname = 'timeline_nodes_voice_text_bounds_check'
+  ) then
+    alter table public.timeline_nodes
+      add constraint timeline_nodes_voice_text_bounds_check
+      check (
     (voice_pre5_simple is null or (char_length(voice_pre5_simple) between 1 and 600 and voice_pre5_simple = btrim(voice_pre5_simple)))
     and
     (voice_pre5_standard is null or (char_length(voice_pre5_standard) between 1 and 600 and voice_pre5_standard = btrim(voice_pre5_standard)))
@@ -25,7 +33,10 @@ alter table public.timeline_nodes
     (voice_now_standard is null or (char_length(voice_now_standard) between 1 and 600 and voice_now_standard = btrim(voice_now_standard)))
     and
     (voice_now_detailed is null or (char_length(voice_now_detailed) between 1 and 600 and voice_now_detailed = btrim(voice_now_detailed)))
-  );
+      );
+  end if;
+end;
+$migration$;
 
 comment on column public.timeline_nodes.voice_pre5_simple is 'Optional early simple reminder override; null uses generated text.';
 comment on column public.timeline_nodes.voice_pre5_standard is 'Optional early standard reminder override; null uses generated text.';
