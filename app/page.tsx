@@ -3528,7 +3528,7 @@ export default function App() {
               {isCheckedIn ? "已報到" : "尚未報到"}
             </div>
           </div>
-          <div className="mt-2 flex min-w-0 items-center gap-3">
+          <div className="mt-4 flex min-w-0 items-center gap-4">
             <SystemAvatar
               config={authAvatarConfig}
               displayName={displayCheckinName || "服事同工"}
@@ -3538,7 +3538,7 @@ export default function App() {
               {displayCheckinName || "服事同工"}
             </h3>
           </div>
-          <p className="mt-2 text-sm font-bold text-[#6D55A3]">
+          <p className="mt-4 text-sm font-bold leading-6 text-[#6D55A3]">
             今日堂次：{todayService}{checkedInService ? "（已鎖定）" : ""}
           </p>
         </div>
