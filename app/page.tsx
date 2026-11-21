@@ -347,6 +347,8 @@ export default function App() {
   const [isVoiceSettingsSaving, setIsVoiceSettingsSaving] = useState(false);
   const [isVoicePreviewing, setIsVoicePreviewing] = useState(false);
   const [voicePreviewClip, setVoicePreviewClip] = useState<{ url: string; label: string } | null>(null);
+  const [voicePreviewDiagnostic, setVoicePreviewDiagnostic] = useState("");
+  const [deviceToneDiagnostic, setDeviceToneDiagnostic] = useState("");
   useEffect(() => {
     return () => {
       if (voicePreviewClip?.url) URL.revokeObjectURL(voicePreviewClip.url);
@@ -1373,6 +1375,41 @@ export default function App() {
     void processVoiceQueue();
   };
 
+  const testPreviewDeviceTone = async () => {
+    const ctx = getVoiceAudioContext();
+    if (!ctx) {
+      setDeviceToneDiagnostic("此裝置沒有可用的 WebAudio 音效功能。");
+      return;
+    }
+    try {
+      if (ctx.state !== "running") await ctx.resume();
+      if (ctx.state !== "running") {
+        setDeviceToneDiagnostic("音訊系統沒有啟動；請檢查 Safari 播放權限。");
+        return;
+      }
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const at = ctx.currentTime;
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(700, at);
+      gain.gain.setValueAtTime(0.001, at);
+      gain.gain.linearRampToValueAtTime(0.22, at + 0.035);
+      gain.gain.setValueAtTime(0.22, at + 0.48);
+      gain.gain.linearRampToValueAtTime(0.001, at + 0.55);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        gain.disconnect();
+      };
+      oscillator.start(at);
+      oscillator.stop(at + 0.6);
+      setDeviceToneDiagnostic("測試音已送往裝置音訊系統；若沒有聽到，請檢查媒體音量、靜音模式及藍牙／AirPlay 輸出。");
+    } catch (err) {
+      setDeviceToneDiagnostic(err instanceof Error ? `測試音啟動失敗：${err.message}` : "測試音無法啟動。");
+    }
+  };
+
   const previewVoiceDraft = async () => {
     if (isVoicePreviewing) return;
 
@@ -1386,6 +1423,7 @@ export default function App() {
     try {
       setIsVoicePreviewing(true);
       setVoicePreviewClip(null);
+      setVoicePreviewDiagnostic(`正在向 Google 語音服務產生${voiceLabel}音檔…`);
 
       // Resume WebAudio immediately in the button's user gesture. iOS Safari
       // can reject HTMLAudioElement.play() called after awaiting network TTS.
@@ -1416,7 +1454,7 @@ export default function App() {
         const payload = contentType.includes("application/json")
           ? await response.json().catch(() => null)
           : { error: await response.text().catch(() => "試聽語音產生失敗") };
-        throw new Error(payload?.error || "試聽語音產生失敗");
+        throw new Error(`雲端請求 HTTP ${response.status}：${payload?.error || "試聽語音產生失敗"}`);
       }
 
       const blob = await response.blob();
@@ -1426,6 +1464,7 @@ export default function App() {
 
       // Native controls are always available for an explicit second tap,
       // even when the browser blocks automatic playback after async fetch.
+      setVoicePreviewDiagnostic(`雲端已回傳 ${voiceLabel} MP3（${Math.ceil(blob.size / 1024)} KB），正在檢查播放器…`);
       setVoicePreviewClip({ url: URL.createObjectURL(blob), label: voiceLabel });
 
       if (!ctx || ctx.state !== "running") {
@@ -1449,6 +1488,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.error("全站語音試聽失敗:", err);
+      setVoicePreviewDiagnostic(err?.message || "試聽語音失敗，請稍後再試。");
       setCustomAlert({ isOpen: true, message: err?.message || "試聽語音失敗，請稍後再試。" });
     } finally {
       setIsVoicePreviewing(false);
@@ -5191,24 +5231,54 @@ export default function App() {
                   </button>
                 </div>
 
-                {voicePreviewClip && (
-                  <div className="mt-3 rounded-xl border border-[#6D55A3]/20 bg-[#F3EEFF]/50 p-3">
-                    <div className="mb-2 text-xs font-black text-[#6D55A3]">
-                      {voicePreviewClip.label} · 試聽音檔
+                <div className="mt-3 rounded-xl border border-[#E6EAF0] bg-white p-3">
+                  <button
+                    type="button"
+                    onClick={() => void testPreviewDeviceTone()}
+                    className="min-h-11 rounded-xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-3 text-xs font-black text-[#6D55A3]"
+                  >
+                    <Volume2 className="mr-1 inline-block h-4 w-4" />
+                    測試手機音效（不使用雲端）
+                  </button>
+                  {deviceToneDiagnostic && <p role="status" className="mt-2 text-[11px] leading-5 text-[#7B7B74]">{deviceToneDiagnostic}</p>}
+                  {voicePreviewDiagnostic && <p role="status" className="mt-2 text-[11px] leading-5 text-[#7B7B74]">{voicePreviewDiagnostic}</p>}
+                  {voicePreviewClip && (
+                    <div className="mt-3 rounded-xl border border-[#6D55A3]/20 bg-[#F3EEFF]/50 p-3">
+                      <div className="mb-2 text-xs font-black text-[#6D55A3]">
+                        {voicePreviewClip.label} · 試聽音檔
+                      </div>
+                      <audio
+                        key={voicePreviewClip.url}
+                        controls
+                        preload="metadata"
+                        src={voicePreviewClip.url}
+                        aria-label={`${voicePreviewClip.label} 音檔播放器`}
+                        onLoadedMetadata={(event) => {
+                          const duration = event.currentTarget.duration;
+                          setVoicePreviewDiagnostic(Number.isFinite(duration)
+                            ? `MP3 已載入播放器（${duration.toFixed(1)} 秒）。若沒有聲音，請按播放鍵或另存 MP3 測試。`
+                            : "MP3 已載入播放器。請按播放鍵試聽。");
+                        }}
+                        onPlaying={() => setVoicePreviewDiagnostic("播放器顯示正在播放；若聽不到，請測試手機音效並檢查實際音訊輸出。")}
+                        onError={(event) => {
+                          const code = event.currentTarget.error?.code || "unknown";
+                          setVoicePreviewDiagnostic(`手機無法讀取 MP3（媒體錯誤碼 ${code}）。請使用另存音檔測試。`);
+                        }}
+                        className="block w-full"
+                      />
+                      <a
+                        href={voicePreviewClip.url}
+                        download={voicePreviewClip.label.includes("Iapetus") ? "voice-preview-male.mp3" : "voice-preview-female.mp3"}
+                        className="mt-3 inline-flex min-h-11 items-center rounded-xl border border-[#6D55A3]/20 bg-white px-3 text-xs font-black text-[#6D55A3]"
+                      >
+                        另存 MP3 檢查音檔
+                      </a>
+                      <p className="mt-2 text-[11px] leading-relaxed text-[#7B7B74]">
+                        若無聲音，請比較「手機音效」與「MP3 試聽」；這兩項測試不會改變正式提醒。
+                      </p>
                     </div>
-                    <audio
-                      key={voicePreviewClip.url}
-                      controls
-                      preload="metadata"
-                      src={voicePreviewClip.url}
-                      aria-label={`${voicePreviewClip.label} 音檔播放器`}
-                      className="block w-full"
-                    />
-                    <p className="mt-2 text-[11px] leading-relaxed text-[#7B7B74]">
-                      若沒有自動出聲，請按上方播放鍵；音檔已產生，不需要重新向雲端請求。
-                    </p>
-                  </div>
-                )}
+                  )}
+                </div>
                 <div className="text-[10px] font-bold text-[#7B7B74] mt-3">
                   套用後會更新快取版本，下一次正式提醒會使用新聲音。
                 </div>
