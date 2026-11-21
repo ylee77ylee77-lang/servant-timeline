@@ -58,6 +58,7 @@ export function PersonalPreferencesCards({
   const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲 Iapetus" : "女聲 Zephyr";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
   const lead = normalizeReminderLeadTime(settings.reminderLeadMinutes, settings.reminderLeadSeconds);
+  const hasActiveReminders = REMINDER_SWITCHES.some((item) => settings[item.key]);
   const adjustLead = (unit: "minutes" | "seconds", direction: -1 | 1) => {
     const next = stepReminderLeadTime(lead.minutes, lead.seconds, unit, direction);
     onChange({ reminderLeadMinutes: next.minutes, reminderLeadSeconds: next.seconds });
@@ -119,39 +120,57 @@ export function PersonalPreferencesCards({
         expanded={expandedPanel === "reminder"}
         onToggle={() => onToggle("reminder")}
       >
-        <h3 className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">提醒</h3>
+        <div className="mb-3 flex items-center gap-2">
+          <h3 className="text-xs font-black tracking-widest text-[#7B7B74]">提醒</h3>
+          <button
+            type="button"
+            role="switch"
+            aria-label="提醒總開關"
+            aria-checked={hasActiveReminders}
+            onClick={() => {
+              const nextEnabled = !hasActiveReminders;
+              onChange({
+                voiceReminderEnabled: nextEnabled,
+                vibrationReminderEnabled: nextEnabled,
+                reminderPre5Enabled: nextEnabled,
+                reminderNowEnabled: nextEnabled,
+              });
+            }}
+            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2 ${hasActiveReminders ? "bg-[#6D55A3]" : "bg-[#E6EAF0]"}`}
+          >
+            <span aria-hidden="true" className={`h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${hasActiveReminders ? "translate-x-6" : "translate-x-1"}`} />
+          </button>
+        </div>
         <div className="space-y-2.5">
           {REMINDER_SWITCHES.map((item) => {
             const active = settings[item.key];
+            const showAdvanceTime = item.key === "reminderPre5Enabled" && active;
             return (
-              <button
-                key={item.key}
-                type="button"
-                role="switch"
-                aria-checked={active}
-                onClick={() => onChange({ [item.key]: !active })}
-                className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl border p-3.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2 ${
-                  active
-                    ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]"
-                    : "border-[#E6EAF0] bg-white text-[#7B7B74]"
-                }`}
-              >
-                <span className="text-left">
-                  <span className="block text-sm font-black">{item.label}</span>
-                  <span className="mt-0.5 block text-[11px] font-medium leading-4 opacity-75">
-                    {item.description}
+              <div key={item.key} className="overflow-hidden rounded-2xl">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={active}
+                  onClick={() => onChange({ [item.key]: !active })}
+                  className={`flex min-h-14 w-full items-center justify-between gap-3 border p-3.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2 ${
+                    active
+                      ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]"
+                      : "border-[#E6EAF0] bg-white text-[#7B7B74]"
+                  } ${showAdvanceTime ? "border-b-0" : ""}`}
+                >
+                  <span className="text-left">
+                    <span className="block text-sm font-black">{item.label}</span>
+                    <span className="mt-0.5 block text-[11px] font-medium leading-4 opacity-75">
+                      {item.description}
+                    </span>
                   </span>
-                </span>
-                <span aria-hidden="true" className={`h-6 w-10 shrink-0 rounded-full p-1 transition-colors ${active ? "bg-[#6D55A3]" : "bg-[#E6EAF0]"}`}>
-                  <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${active ? "translate-x-4" : "translate-x-0"}`} />
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {settings.reminderPre5Enabled && (
-          <div className="mt-3 rounded-2xl border border-[#E6EAF0] bg-white p-3.5" data-reminder-lead-stepper>
+                  <span aria-hidden="true" className={`h-6 w-10 shrink-0 rounded-full p-1 transition-colors ${active ? "bg-[#6D55A3]" : "bg-[#E6EAF0]"}`}>
+                    <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${active ? "translate-x-4" : "translate-x-0"}`} />
+                  </span>
+                </button>
+                {showAdvanceTime && (
+                  <div className="border border-t-0 border-[#6D55A3]/20 bg-[#F3EEFF] px-3.5 pb-3.5" data-reminder-lead-stepper>
+                    <div className="border-t border-[#6D55A3]/10 pt-3">
             <h3 className="mb-2 text-sm font-black text-[#1F2937]">提前時間</h3>
             <div className="flex items-center justify-center gap-2 rounded-2xl bg-[#FFF9F3] px-2 py-3">
               <div className="flex items-center gap-1.5">
@@ -206,8 +225,13 @@ export function PersonalPreferencesCards({
                 <span className="text-sm font-black text-[#7B7B74]">秒</span>
               </div>
             </div>
-          </div>
-        )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         <h3 className="mb-3 mt-6 text-xs font-black tracking-widest text-[#7B7B74]">提醒內容</h3>
         <div className="grid grid-cols-3 gap-2">
