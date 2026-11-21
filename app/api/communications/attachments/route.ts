@@ -5,6 +5,7 @@ import { communicationErrorResponse, getCommunicationPeer, requireCommunicationA
 import {
   COMMUNICATION_BUCKET,
   ensureCommunicationBucket,
+  invalidateCommunicationBucketCheck,
   isAllowedCommunicationFile,
   isImageCommunicationFile,
   sanitizeAttachmentName,
@@ -52,6 +53,8 @@ export async function POST(request: NextRequest) {
         upsert: false,
       });
     if (uploadError) {
+      // A changed or deleted bucket must be reverified on the next request.
+      invalidateCommunicationBucketCheck();
       // Include only harmless error metadata, never private file paths or IDs.
       console.error("Communication attachment storage upload failed", {
         code: uploadError.name,

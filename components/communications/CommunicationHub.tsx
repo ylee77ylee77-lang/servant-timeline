@@ -1171,7 +1171,10 @@ export function CommunicationHub() {
         method: "POST",
         body: form,
       });
-      await loadMessages(peerId, false, false);
+      // Server has persisted the attachment: let the composer close now.
+      // Refresh signed image URLs and contact metadata in the background,
+      // without making the sender wait for a second network round trip.
+      void loadMessages(peerId, false, false);
       void loadPeers();
       return true;
     } catch (error) {
