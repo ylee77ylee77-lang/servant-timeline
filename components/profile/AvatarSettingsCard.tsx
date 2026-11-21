@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   ChevronLeft,
   Loader2,
@@ -10,7 +9,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
-import { AvatarDisplayModeSelector, AvatarLivePreview } from "@/components/profile/AvatarControls";
+import { AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
 import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { SettingsAccordionCard } from "@/components/profile/SettingsAccordionCard";
@@ -31,12 +30,13 @@ type AvatarView = "summary" | "manual-base" | "manual-edit";
 export function AvatarSettingsCard({
   accessToken,
   displayName,
-  previewHost,
+  expanded,
+  onToggle,
 }: {
   accessToken: string;
   displayName?: string | null;
-  /** Mount the live preview in the page's actual scrolling region. */
-  previewHost?: HTMLDivElement | null;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const { avatarConfig: initialAvatar, updateAvatarConfig } = useAuth();
   // The authenticated profile already contains the saved avatar. Reuse it
@@ -44,7 +44,6 @@ export function AvatarSettingsCard({
   const [avatar, setAvatar] = useState<AvatarConfig>(() => initialAvatar);
   const [savedAvatar, setSavedAvatar] = useState<AvatarConfig>(() => initialAvatar);
   const [view, setView] = useState<AvatarView>("summary");
-  const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [messageIsError, setMessageIsError] = useState(false);
@@ -53,6 +52,7 @@ export function AvatarSettingsCard({
   // One local draft powers instant preview. Network writes occur only when
   // the volunteer explicitly saves, never on each icon or color tap.
   const visibleAvatar = avatar;
+  const headingAvatar = view === "manual-edit" ? { ...avatar, displayMode: "custom" as const } : visibleAvatar;
   const displayDirty = (
     avatar.displayMode !== savedAvatar.displayMode
     || avatar.iconType !== savedAvatar.iconType
@@ -129,29 +129,15 @@ export function AvatarSettingsCard({
 
 
   return (
-    <>
-      {expanded && previewHost && createPortal(
-        <AvatarLivePreview
-          config={view === "manual-edit" ? { ...avatar, displayMode: "custom" } : visibleAvatar}
-          displayName={displayName}
-          sticky={false}
-        />,
-        previewHost
-      )}
-      <SettingsAccordionCard
-        panelId="avatar-settings-panel"
-        title="我的大頭貼"
-        summary={`${displayDirty ? "尚未儲存・" : ""}${AVATAR_DISPLAY_LABELS[visibleAvatar.displayMode]}`}
-        icon={<SystemAvatar config={visibleAvatar} displayName={displayName} size={52} />}
-        expanded={expanded}
-        onToggle={() => setExpanded((open) => !open)}
-      >
-      {!previewHost && (
-        <AvatarLivePreview
-          config={view === "manual-edit" ? { ...avatar, displayMode: "custom" } : visibleAvatar}
-          displayName={displayName}
-        />
-      )}
+    <SettingsAccordionCard
+      panelId="avatar-settings-panel"
+      title="大頭貼"
+      summary={`${displayDirty ? "尚未儲存・" : ""}${AVATAR_DISPLAY_LABELS[headingAvatar.displayMode]}`}
+      icon={<SystemAvatar config={headingAvatar} displayName={displayName} size={expanded ? 80 : 52} />}
+      expanded={expanded}
+      onToggle={onToggle}
+      stickyHeader
+    >
       {view === "summary" && (
         <>
           <AvatarDisplayModeSelector
@@ -297,7 +283,6 @@ export function AvatarSettingsCard({
           {message}
         </p>
       )}
-      </SettingsAccordionCard>
-    </>
+    </SettingsAccordionCard>
   );
 }
