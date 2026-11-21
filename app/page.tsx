@@ -5456,7 +5456,7 @@ export default function App() {
           renderAdminView()
         )}
 
-        <CommunicationHub />
+        <CommunicationHub key={session.user.id} />
 
         {/* 全新品牌風格 - 彈跳視窗 */}
         {detailModal.isOpen && (

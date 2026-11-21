@@ -21,7 +21,7 @@ import { AvatarEditor } from "@/components/profile/AvatarEditor";
 import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { AvatarLivePreview, AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
-import { AVATAR_DISPLAY_LABELS, getDefaultAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
+import { AVATAR_DISPLAY_LABELS, getDefaultAvatarConfig, normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 
 export type AppRole = "volunteer" | "coordinator" | "admin";
 
@@ -29,6 +29,8 @@ type AuthState = {
   session: Session;
   displayName: string;
   accountCode: string;
+  avatarConfig: AvatarConfig;
+  updateAvatarConfig: (next: AvatarConfig) => void;
   roles: AppRole[];
   isAdmin: boolean;
   isCoordinator: boolean;
@@ -47,6 +49,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [accountCode, setAccountCode] = useState("");
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(getDefaultAvatarConfig);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [isActive, setIsActive] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,6 +98,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       setDisplayName("");
       setAccountCode("");
+      setAvatarConfig(getDefaultAvatarConfig());
       setRoles([]);
       setIsActive(false);
       setMustChangePassword(false);
@@ -114,6 +118,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(true);
       setDisplayName("");
       setAccountCode("");
+      setAvatarConfig(getDefaultAvatarConfig());
       setRoles([]);
       setIsActive(false);
     }
@@ -124,7 +129,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         await Promise.all([
           supabase
             .from("profiles")
-            .select("display_name,account_code,is_active")
+            .select("display_name,account_code,is_active,avatar_config")
             .eq("id", nextSession.user.id)
             .maybeSingle(),
           supabase.from("user_roles").select("role").eq("user_id", nextSession.user.id),
@@ -141,6 +146,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setErrorMessage("");
       setDisplayName(String(profile.display_name || "同工"));
       setAccountCode(String(profile.account_code || ""));
+      setAvatarConfig(normalizeAvatarConfig(profile.avatar_config));
       setRoles(
         (roleRows ?? [])
           .map((row) => row.role)
@@ -350,18 +356,26 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     await getSupabaseBrowserClient().auth.signOut();
   }, []);
 
+  // The avatar editor persists changes through the existing authorized PUT
+  // endpoint; this only updates the already-loaded profile inside this session.
+  const updateAvatarConfig = useCallback((next: AvatarConfig) => {
+    setAvatarConfig(normalizeAvatarConfig(next));
+  }, []);
+
   const contextValue = useMemo<AuthState | null>(() => {
     if (!session || !isActive) return null;
     return {
       session,
       displayName,
       accountCode,
+      avatarConfig,
+      updateAvatarConfig,
       roles,
       isAdmin: roles.includes("admin"),
       isCoordinator: roles.includes("coordinator") || roles.includes("admin"),
       signOut,
     };
-  }, [accountCode, displayName, isActive, roles, session, signOut]);
+  }, [accountCode, avatarConfig, displayName, isActive, roles, session, signOut, updateAvatarConfig]);
 
   if (!isConfigured) {
     return <AuthMessage title="系統尚未完成登入設定" detail="請由管理員設定 Supabase 公開連線資訊後再試。" />;

@@ -10,6 +10,7 @@ import {
   MicOff,
   Volume2,
   Paperclip,
+  Pencil,
   Phone,
   PhoneOff,
   Send,
@@ -20,6 +21,9 @@ import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 import { createRingtoneWav } from "@/lib/communications/ringtone-wave";
+import { createConversationCache } from "@/lib/communications/conversation-cache";
+import { MessageVoiceRecorder } from "@/components/communications/MessageVoiceRecorder";
+import { HandwritingComposer } from "@/components/communications/HandwritingComposer";
 
 type Peer = {
   id: string;
@@ -33,6 +37,7 @@ type ChatMessage = {
   senderId: string;
   recipientId: string;
   messageType: "text" | "image" | "file";
+  deliveryStatus?: "sending" | "failed" | "sent";
   body: string;
   attachmentName: string;
   attachmentMime: string;
@@ -199,6 +204,7 @@ export function CommunicationHub() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [composerMode, setComposerMode] = useState<"voice" | "handwriting" | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [incomingCall, setIncomingCall] = useState<CallRow | null>(null);
   const [activeCall, setActiveCall] = useState<CallRow | null>(null);
@@ -215,6 +221,17 @@ export function CommunicationHub() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const selectedPeerIdRef = useRef(selectedPeerId);
+  const openRef = useRef(open);
+  const callStateRef = useRef(callState);
+  const pendingMessagesRef = useRef(new Map<string, ChatMessage>());
+  // Small, session-only cache: do not persist private messages to local storage.
+  const conversationCacheRef = useRef(createConversationCache<ChatMessage>());
+  const conversationRequestsRef = useRef(new Map<string, Promise<ChatMessage[]>>());
+  const refreshedAudioIdsRef = useRef(new Set<string>());
+  const peersRequestRef = useRef<Promise<void> | null>(null);
+  const peersFetchedAtRef = useRef(0);
+  const peersLoadedRef = useRef(false);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -230,6 +247,12 @@ export function CommunicationHub() {
   useEffect(() => {
     activeCallRef.current = activeCall;
   }, [activeCall]);
+
+  useEffect(() => {
+    selectedPeerIdRef.current = selectedPeerId;
+    openRef.current = open;
+    callStateRef.current = callState;
+  }, [selectedPeerId, open, callState]);
 
   const requestJson = useCallback(async (url: string, init?: RequestInit) => {
     const response = await fetch(url, {
@@ -353,24 +376,44 @@ export function CommunicationHub() {
     }
   }, []);
 
-  const loadPeers = useCallback(async () => {
-    if (!canUse) return;
-    setLoadingPeers(true);
-    try {
-      const data = await requestJson("/api/communications/peers");
-      setPeers(
-        Array.isArray(data?.peers)
-          ? data.peers.map((peer: Peer) => ({
-              ...peer,
-              avatarConfig: normalizeAvatarConfig(peer.avatarConfig),
-            }))
-          : []
-      );
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "無法讀取聯絡人。");
-    } finally {
-      setLoadingPeers(false);
+  const loadPeers = useCallback((force = false): Promise<void> => {
+    if (!canUse) return Promise.resolve();
+    // Multiple startup subscriptions and the chat button can request peers at
+    // nearly the same instant. Reuse one request rather than issuing duplicates.
+    if (peersRequestRef.current) return peersRequestRef.current;
+    if (!force && peersLoadedRef.current && Date.now() - peersFetchedAtRef.current < 5_000) {
+      return Promise.resolve();
     }
+
+    // Once the list has loaded, keep it visible while the latest unread counts
+    // and profile information are refreshed in the background.
+    if (!peersLoadedRef.current) setLoadingPeers(true);
+
+    const task = (async () => {
+      try {
+        const data = await requestJson("/api/communications/peers");
+        setPeers(
+          Array.isArray(data?.peers)
+            ? data.peers.map((peer: Peer) => ({
+                ...peer,
+                avatarConfig: normalizeAvatarConfig(peer.avatarConfig),
+              }))
+            : []
+        );
+        peersLoadedRef.current = true;
+        peersFetchedAtRef.current = Date.now();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "無法讀取聯絡人。");
+      } finally {
+        setLoadingPeers(false);
+      }
+    })();
+
+    peersRequestRef.current = task;
+    void task.then(() => {
+      if (peersRequestRef.current === task) peersRequestRef.current = null;
+    });
+    return task;
   }, [canUse, requestJson]);
 
   const markRead = useCallback(async (peerId: string) => {
@@ -381,16 +424,67 @@ export function CommunicationHub() {
     }).catch(() => undefined);
   }, [requestJson]);
 
+  const fetchConversation = useCallback((peerId: string): Promise<ChatMessage[]> => {
+    // Reuse the request if a preview prefetch, conversation opening and a
+    // Realtime refresh happen before the first request has settled.
+    const pending = conversationRequestsRef.current.get(peerId);
+    if (pending) return pending;
+
+    const task: Promise<ChatMessage[]> = requestJson(
+      `/api/communications/messages?peerId=${encodeURIComponent(peerId)}`
+    ).then((data) => Array.isArray(data?.messages) ? data.messages as ChatMessage[] : []);
+    conversationRequestsRef.current.set(peerId, task);
+    // Both fulfillment and rejection remove the pending slot; no rejected
+    // promise is left unhandled, and the caller still receives the error.
+    const clear = () => {
+      if (conversationRequestsRef.current.get(peerId) === task) {
+        conversationRequestsRef.current.delete(peerId);
+      }
+    };
+    void task.then(clear, clear);
+    return task;
+  }, [requestJson]);
+
+  const prefetchConversation = useCallback((peerId: string) => {
+    if (!peerId || conversationCacheRef.current.has(peerId)) return;
+    void fetchConversation(peerId).then((rows) => {
+      if (!conversationCacheRef.current.has(peerId)) {
+        conversationCacheRef.current.set(peerId, rows);
+      }
+    }).catch(() => undefined);
+  }, [fetchConversation]);
+
   const loadMessages = useCallback(async (
     peerId: string,
     markAsRead = true,
     showLoading = true
   ) => {
     if (!peerId) return;
-    if (showLoading) setLoadingMessages(true);
+    const cached = conversationCacheRef.current.has(peerId);
+    if (showLoading && !cached) setLoadingMessages(true);
     try {
-      const data = await requestJson(`/api/communications/messages?peerId=${encodeURIComponent(peerId)}`);
-      setMessages(Array.isArray(data?.messages) ? data.messages : []);
+      const savedMessages = await fetchConversation(peerId);
+      // Authorized server data only; snapshots belong to this mounted user
+      // session and are refreshed every time the conversation is reopened.
+      conversationCacheRef.current.set(peerId, savedMessages);
+      if (selectedPeerIdRef.current !== peerId) return;
+
+      const confirmedIds = new Set(savedMessages.map((message) => message.id));
+      for (const id of confirmedIds) pendingMessagesRef.current.delete(id);
+      const pending = Array.from(pendingMessagesRef.current.values())
+        .filter((message) => message.senderId === session.user.id && message.recipientId === peerId);
+      setMessages((current) => {
+        // Keep local sends visible if the GET started before the POST finished.
+        const unsynced = current.filter((message) =>
+          message.senderId === session.user.id
+          && message.recipientId === peerId
+          && !confirmedIds.has(message.id)
+        );
+        return [...pending, ...unsynced].reduce(
+          (all, item) => upsertMessage(all, item),
+          savedMessages
+        );
+      });
       if (markAsRead) {
         setPeers((current) => current.map((peer) =>
           peer.id === peerId ? { ...peer, unreadCount: 0 } : peer
@@ -398,11 +492,36 @@ export function CommunicationHub() {
         void markRead(peerId);
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "無法讀取訊息。");
+      if (selectedPeerIdRef.current === peerId) {
+        setErrorMessage(error instanceof Error ? error.message : "無法讀取訊息。");
+      }
     } finally {
-      if (showLoading) setLoadingMessages(false);
+      // An older peer's response must not remove the newly selected peer's
+      // loading indicator.
+      if (showLoading && selectedPeerIdRef.current === peerId) {
+        setLoadingMessages(false);
+      }
     }
-  }, [markRead, requestJson]);
+  }, [fetchConversation, markRead, session.user.id]);
+
+  const openConversation = useCallback((peerId: string) => {
+    // Update the ref synchronously so a fast response from another peer can
+    // never overwrite the selected conversation on this click.
+    selectedPeerIdRef.current = peerId;
+    const cached = conversationCacheRef.current.get(peerId);
+    setMessages(cached ?? []);
+    setLoadingMessages(cached === undefined);
+    setErrorMessage("");
+    setSelectedPeerId(peerId);
+  }, []);
+
+  // Keep the cached snapshot current after an optimistic send or a Realtime
+  // update. Only already-authorized, already-fetched conversations are cached.
+  useEffect(() => {
+    if (selectedPeerId && conversationCacheRef.current.has(selectedPeerId)) {
+      conversationCacheRef.current.set(selectedPeerId, messages);
+    }
+  }, [messages, selectedPeerId]);
 
   const handleRealtimeMessage = useCallback((
     row: Record<string, unknown>,
@@ -431,7 +550,15 @@ export function CommunicationHub() {
       processedMessageInsertIdsRef.current.add(messageId);
     }
 
-    const isSelectedConversation = selectedPeerId === peerId;
+    const cached = conversationCacheRef.current.get(peerId);
+    if (cached) {
+      const existing = cached.find((message) => message.id === messageId);
+      conversationCacheRef.current.set(peerId, upsertMessage(
+        cached, realtimeRowToMessage(row, existing)
+      ));
+    }
+
+    const isSelectedConversation = selectedPeerIdRef.current === peerId;
     if (isSelectedConversation) {
       setMessages((current) => {
         const existing = current.find((message) => message.id === messageId);
@@ -440,7 +567,7 @@ export function CommunicationHub() {
     }
 
     if (eventType === "INSERT" && recipientId === currentUserId) {
-      if (open && isSelectedConversation) {
+      if (openRef.current && isSelectedConversation) {
         setPeers((current) => current.map((peer) =>
           peer.id === peerId ? { ...peer, unreadCount: 0 } : peer
         ));
@@ -461,7 +588,7 @@ export function CommunicationHub() {
     ) {
       void loadMessages(peerId, false, false);
     }
-  }, [loadMessages, markRead, open, selectedPeerId, session.user.id]);
+  }, [loadMessages, markRead, session.user.id]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -471,17 +598,29 @@ export function CommunicationHub() {
     return () => window.clearTimeout(timer);
   }, [canUse, loadPeers]);
 
+  // Prefetch only the first two eligible conversations while the contact
+  // list is visible. This is bounded and never marks unread messages as read.
+  useEffect(() => {
+    if (!open || selectedPeerId || peers.length === 0) return;
+    const timer = window.setTimeout(() => {
+      peers.slice(0, 2).forEach((peer) => prefetchConversation(peer.id));
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [open, selectedPeerId, peers, prefetchConversation]);
+
   useEffect(() => {
     if (!open || !selectedPeerId) return;
     const timer = window.setTimeout(() => {
-      void loadMessages(selectedPeerId);
+      // Cached history is already on screen; refresh privately in the
+      // background, without displaying a full-page spinner again.
+      void loadMessages(selectedPeerId, true, !conversationCacheRef.current.has(selectedPeerId));
     }, 0);
     return () => window.clearTimeout(timer);
   }, [open, selectedPeerId, loadMessages]);
 
   useEffect(() => {
     if (open && selectedPeerId) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
     }
   }, [messages, open, selectedPeerId]);
 
@@ -679,7 +818,7 @@ export function CommunicationHub() {
         const latest = calls.find((call) => call.id === current.id);
         if (!latest || ["declined", "ended", "missed"].includes(latest.status)) {
           cleanupPeerConnection();
-        } else if (latest.status === "accepted" && isCallerRef.current && callState === "ringing") {
+        } else if (latest.status === "accepted" && isCallerRef.current && callStateRef.current === "ringing") {
           setCallState("connecting");
           setActiveCall(latest);
           activeCallRef.current = latest;
@@ -689,7 +828,7 @@ export function CommunicationHub() {
     } catch {
       // Realtime/poll refresh failures should not block the rest of the app.
     }
-  }, [callState, canUse, cleanupPeerConnection, loadCallSignals, requestJson, session.user.id]);
+  }, [canUse, cleanupPeerConnection, loadCallSignals, requestJson, session.user.id]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -760,13 +899,19 @@ export function CommunicationHub() {
         },
         () => void loadActiveCalls()
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          void loadPeers();
+          const peerId = selectedPeerIdRef.current;
+          if (openRef.current && peerId) void loadMessages(peerId, false, false);
+        }
+      });
 
     return () => {
       window.clearTimeout(initialRefreshTimer);
       void supabase.removeChannel(channel);
     };
-  }, [canUse, handleRealtimeMessage, loadActiveCalls, session.user.id]);
+  }, [canUse, handleRealtimeMessage, loadActiveCalls, loadMessages, loadPeers, session.user.id]);
 
   useEffect(() => {
     if (!canUse) return;
@@ -793,7 +938,13 @@ export function CommunicationHub() {
               handleRealtimeMessage(row, "INSERT");
             }
           )
-          .subscribe();
+          .subscribe((status) => {
+            if (status === "SUBSCRIBED") {
+              const peerId = selectedPeerIdRef.current;
+              if (openRef.current && peerId) void loadMessages(peerId, false, false);
+              void loadPeers();
+            }
+          });
       })
       .catch(() => undefined);
 
@@ -801,7 +952,24 @@ export function CommunicationHub() {
       disposed = true;
       if (channel) void supabase.removeChannel(channel);
     };
-  }, [canUse, handleRealtimeMessage, requestJson]);
+  }, [canUse, handleRealtimeMessage, loadMessages, loadPeers, requestJson]);
+
+  // Reconcile after the page returns online/foreground; iOS can suspend sockets.
+  useEffect(() => {
+    if (!canUse) return;
+    const syncVisible = () => {
+      if (document.visibilityState !== "visible" || !navigator.onLine) return;
+      void loadPeers();
+      const peerId = selectedPeerIdRef.current;
+      if (openRef.current && peerId) void loadMessages(peerId, true, false);
+    };
+    window.addEventListener("online", syncVisible);
+    document.addEventListener("visibilitychange", syncVisible);
+    return () => {
+      window.removeEventListener("online", syncVisible);
+      document.removeEventListener("visibilitychange", syncVisible);
+    };
+  }, [canUse, loadMessages, loadPeers]);
 
   const signalCallId = activeCall?.id ?? "";
 
@@ -830,25 +998,80 @@ export function CommunicationHub() {
 
   useEffect(() => () => cleanupPeerConnection(), [cleanupPeerConnection]);
 
-  const sendText = async () => {
-    if (!selectedPeerId || !draft.trim() || sending) return;
-    setSending(true);
-    setErrorMessage("");
+  const persistTextMessage = async (message: ChatMessage) => {
+    const id = message.id;
+    pendingMessagesRef.current.set(id, { ...message, deliveryStatus: "sending" });
+    if (selectedPeerIdRef.current === message.recipientId) {
+      setMessages((current) => upsertMessage(current, { ...message, deliveryStatus: "sending" }));
+    }
     try {
       const data = await requestJson("/api/communications/messages", {
         method: "POST",
-        body: JSON.stringify({ peerId: selectedPeerId, body: draft }),
+        body: JSON.stringify({
+          peerId: message.recipientId,
+          body: message.body,
+          clientMessageId: id,
+        }),
       });
-      const message = data?.message as ChatMessage | undefined;
-      if (message?.id) {
-        setMessages((current) => upsertMessage(current, message));
+      const saved = data?.message as ChatMessage | undefined;
+      if (!saved?.id) throw new Error("伺服器未確認訊息已儲存。");
+      pendingMessagesRef.current.delete(id);
+      if (selectedPeerIdRef.current === message.recipientId) {
+        setMessages((current) => upsertMessage(
+          current.filter((item) => item.id !== id),
+          { ...saved, deliveryStatus: "sent" }
+        ));
       }
-      setDraft("");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "訊息傳送失敗。");
+      if (!pendingMessagesRef.current.has(id)) return;
+      const failed = { ...message, deliveryStatus: "failed" as const };
+      pendingMessagesRef.current.set(id, failed);
+      if (selectedPeerIdRef.current === message.recipientId) {
+        setMessages((current) => upsertMessage(current, failed));
+      }
+      setErrorMessage(error instanceof Error ? error.message : "訊息傳送失敗，可按重試。");
+    }
+  };
+
+  const sendText = async () => {
+    const peerId = selectedPeerIdRef.current;
+    const body = draft.trim();
+    if (!peerId || !body || sending) return;
+    if (!globalThis.crypto?.randomUUID) {
+      setErrorMessage("此瀏覽器無法安全建立訊息識別碼，請更新後重試。");
+      return;
+    }
+    const now = new Date().toISOString();
+    const message: ChatMessage = {
+      id: crypto.randomUUID(),
+      senderId: session.user.id,
+      recipientId: peerId,
+      messageType: "text",
+      body,
+      attachmentName: "",
+      attachmentMime: "",
+      attachmentSize: 0,
+      attachmentUrl: "",
+      editedAt: null,
+      retractedAt: null,
+      readAt: null,
+      createdAt: now,
+      deliveryStatus: "sending",
+    };
+    setDraft("");
+    setSending(true);
+    setErrorMessage("");
+    try {
+      await persistTextMessage(message);
     } finally {
       setSending(false);
     }
+  };
+
+  const retryMessage = (message: ChatMessage) => {
+    if (message.senderId !== session.user.id || message.deliveryStatus !== "failed") return;
+    setErrorMessage("");
+    void persistTextMessage(message);
   };
 
   const editMessage = async (message: ChatMessage) => {
@@ -879,22 +1102,25 @@ export function CommunicationHub() {
     }
   };
 
-  const uploadFile = async (file: File) => {
-    if (!selectedPeerId) return;
+  const uploadFile = async (file: File): Promise<boolean> => {
+    const peerId = selectedPeerIdRef.current;
+    if (!peerId || uploading) return false;
     setUploading(true);
     setErrorMessage("");
     try {
       const form = new FormData();
-      form.append("peerId", selectedPeerId);
+      form.append("peerId", peerId);
       form.append("file", file);
       await requestJson("/api/communications/attachments", {
         method: "POST",
         body: form,
       });
-      await loadMessages(selectedPeerId, false);
-      await loadPeers();
+      await loadMessages(peerId, false, false);
+      void loadPeers();
+      return true;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "檔案傳送失敗。");
+      return false;
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1031,7 +1257,7 @@ export function CommunicationHub() {
         <div className="fixed bottom-[9.5rem] right-3 z-[75] flex h-[min(72vh,620px)] w-[calc(100vw-1.5rem)] max-w-[420px] flex-col overflow-hidden rounded-[28px] border border-[#E6EAF0] bg-white shadow-2xl">
           <div className="flex items-center gap-3 border-b border-[#E6EAF0] bg-[#FFF9F3] px-4 py-3">
             {selectedPeer && (
-              <button type="button" onClick={() => setSelectedPeerId("")} className="rounded-full p-2 text-[#6D55A3]">
+              <button type="button" onClick={() => { selectedPeerIdRef.current = ""; setSelectedPeerId(""); }} className="rounded-full p-2 text-[#6D55A3]">
                 <ArrowLeft className="h-5 w-5" />
               </button>
             )}
@@ -1086,7 +1312,9 @@ export function CommunicationHub() {
                     <button
                       key={peer.id}
                       type="button"
-                      onClick={() => setSelectedPeerId(peer.id)}
+                      onPointerEnter={() => prefetchConversation(peer.id)}
+                      onPointerDown={() => prefetchConversation(peer.id)}
+                      onClick={() => openConversation(peer.id)}
                       className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left hover:bg-[#FFF9F3]"
                     >
                       <SystemAvatar config={peer.avatarConfig} displayName={peer.displayName} size={46} />
@@ -1125,6 +1353,19 @@ export function CommunicationHub() {
                                 <span className="italic opacity-70">此訊息已收回</span>
                               ) : message.messageType === "text" ? (
                                 <div className="whitespace-pre-wrap break-words">{renderLinkedText(message.body)}</div>
+                              ) : message.attachmentMime.startsWith("audio/") ? (
+                                <div className="min-w-[210px]">
+                                  <div className="mb-2 flex items-center gap-1.5 text-xs font-bold">
+                                    <Mic className="h-4 w-4" /> 語音留言
+                                  </div>
+                                  {message.attachmentUrl ? (
+                                    <audio controls preload="none" src={message.attachmentUrl} className="w-full max-w-[250px]" onError={() => {
+                                      if (refreshedAudioIdsRef.current.has(message.id)) return;
+                                      refreshedAudioIdsRef.current.add(message.id);
+                                      void loadMessages(selectedPeerIdRef.current, false, false);
+                                    }} />
+                                  ) : <span className="text-xs text-[#7B7B74]">載入語音中…</span>}
+                                </div>
                               ) : message.messageType === "image" ? (
                                 <a href={message.attachmentUrl} target="_blank" rel="noreferrer noopener" className="block">
                                   {/* Signed attachment URLs are dynamic and intentionally rendered without Next Image optimization. */}
@@ -1145,8 +1386,19 @@ export function CommunicationHub() {
                             <div className={`mt-1 flex items-center gap-2 px-1 text-[10px] font-medium text-[#7B7B74] ${mine ? "justify-end" : "justify-start"}`}>
                               <span>{formatTime(message.createdAt)}</span>
                               {message.editedAt && !message.retractedAt && <span>已編輯</span>}
-                              {mine && !message.retractedAt && <span>{message.readAt ? "已讀" : "未讀"}</span>}
                               {mine && !message.retractedAt && (
+                                <span className={message.deliveryStatus === "failed" ? "text-[#D73A49]" : ""}>
+                                  {message.deliveryStatus === "sending" ? "傳送中…"
+                                    : message.deliveryStatus === "failed" ? "傳送失敗"
+                                      : message.readAt ? "已讀" : "已送出"}
+                                </span>
+                              )}
+                              {mine && message.deliveryStatus === "failed" && (
+                                <button type="button" onClick={() => retryMessage(message)} className="font-bold text-[#D73A49]" aria-label="重試傳送">
+                                  重試
+                                </button>
+                              )}
+                              {mine && !message.retractedAt && message.deliveryStatus !== "sending" && message.deliveryStatus !== "failed" && (
                                 <>
                                   {message.messageType === "text" && (
                                     <button type="button" onClick={() => void editMessage(message)} className="font-bold text-[#6D55A3]">編輯</button>
@@ -1185,6 +1437,26 @@ export function CommunicationHub() {
                   >
                     {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" />}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setComposerMode("voice")}
+                    disabled={uploading}
+                    aria-label="錄製語音留言"
+                    title="語音留言"
+                    className="mb-0.5 rounded-full p-2 text-[#6D55A3] disabled:opacity-40"
+                  >
+                    <Mic className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setComposerMode("handwriting")}
+                    disabled={uploading}
+                    aria-label="手寫留言"
+                    title="手寫留言"
+                    className="mb-0.5 rounded-full p-2 text-[#6D55A3] disabled:opacity-40"
+                  >
+                    <Pencil className="h-5 w-5" />
+                  </button>
                   <textarea
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
@@ -1196,7 +1468,7 @@ export function CommunicationHub() {
                     }}
                     rows={1}
                     placeholder="輸入訊息…"
-                    className="max-h-28 min-h-11 flex-1 resize-none rounded-2xl border border-[#D9DEE7] px-3 py-2.5 text-sm outline-none focus:border-[#6D55A3]"
+                    className="max-h-28 min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-[#D9DEE7] px-3 py-2.5 text-sm outline-none focus:border-[#6D55A3]"
                   />
                   <button
                     type="button"
@@ -1208,11 +1480,18 @@ export function CommunicationHub() {
                     {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
                   </button>
                 </div>
-                <div className="mt-1 px-11 text-[10px] font-medium text-[#7B7B74]">照片／文件單檔最多 10MB</div>
+                <div className="mt-1 px-2 text-[10px] font-medium text-[#7B7B74]">語音留言最多 60 秒／4MB；手寫以圖片傳送；其他附件最多 10MB</div>
               </div>
             </>
           )}
         </div>
+      )}
+
+      {composerMode === "voice" && (
+        <MessageVoiceRecorder onClose={() => setComposerMode(null)} onSend={uploadFile} />
+      )}
+      {composerMode === "handwriting" && (
+        <HandwritingComposer onClose={() => setComposerMode(null)} onSend={uploadFile} />
       )}
 
       {incomingCall && (
