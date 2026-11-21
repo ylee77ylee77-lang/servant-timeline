@@ -7,6 +7,11 @@ const page = () => fs.readFileSync("app/page.tsx", "utf8");
 test("timeline displays the start time in soft grey above each marker without replacing the live red cursor", () => {
   const source = page();
   assert.ok(source.includes('className="absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none tabular-nums text-[#9CA3AF]"'));
+  // Normal viewing has a single start-time label above the marker, not another badge inside the card.
+  assert.ok(source.includes('{(isAdminUnlocked && isTimelineEditMode || active) && ('));
+  assert.ok(source.includes('{isAdminUnlocked && isTimelineEditMode && ('));
+  assert.ok(source.includes("renderInlineEdit('node', node.id, 'time', node.time, \"font-mono\", \"time\")"));
+  assert.ok(!source.includes('<span aria-hidden="true" className="absolute -top-2.5'));
   assert.ok(source.includes("{node.time}\n                    </span>"));
   assert.ok(source.includes('rounded-full border-[3px] border-[#E6EAF0] bg-white'));
   assert.ok(source.includes('bg-[#F25D6B] animate-ping'));
