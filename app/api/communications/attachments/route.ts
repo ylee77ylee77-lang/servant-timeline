@@ -5,18 +5,21 @@ import { communicationErrorResponse, getCommunicationPeer, requireCommunicationA
 import {
   COMMUNICATION_BUCKET,
   ensureCommunicationBucket,
+  invalidateCommunicationBucketCheck,
   isAllowedCommunicationFile,
   isImageCommunicationFile,
   sanitizeAttachmentName,
 } from "@/lib/communications/storage";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { baseMediaMime, isVoiceMime, matchesVoiceSignature } from "@/lib/communications/media-types";
+import { makeCommunicationStorageKey } from "@/lib/communications/storage-key";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   let uploadedPath = "";
+  let storedUpload = false;
   try {
     const actor = await requireCommunicationActor(request);
     const form = await request.formData();
@@ -33,12 +36,14 @@ export async function POST(request: NextRequest) {
 
     await ensureCommunicationBucket();
     const safeName = sanitizeAttachmentName(file.name);
-    uploadedPath = `${actor.userId}/${peerId}/${randomUUID()}-${safeName}`;
     const bytes = Buffer.from(await file.arrayBuffer());
     const mime = baseMediaMime(file.type);
     if (isVoiceMime(mime) && !matchesVoiceSignature(bytes, mime)) {
       return NextResponse.json({ error: "語音檔案格式不正確，請重新錄製。" }, { status: 400 });
     }
+    // Storage object paths use only ASCII identifiers. Keep the original
+    // (possibly Chinese) filename as message metadata, never in the path.
+    uploadedPath = makeCommunicationStorageKey(actor.userId, peerId, randomUUID(), mime);
     const supabase = getSupabaseAdminClient();
 
     const { error: uploadError } = await supabase.storage
@@ -47,7 +52,17 @@ export async function POST(request: NextRequest) {
         contentType: mime,
         upsert: false,
       });
-    if (uploadError) throw uploadError;
+    if (uploadError) {
+      // A changed or deleted bucket must be reverified on the next request.
+      invalidateCommunicationBucketCheck();
+      // Include only harmless error metadata, never private file paths or IDs.
+      console.error("Communication attachment storage upload failed", {
+        code: uploadError.name,
+        statusCode: uploadError.statusCode,
+      });
+      throw uploadError;
+    }
+    storedUpload = true;
 
     const { data: message, error: insertError } = await supabase
       .from("communication_messages")
@@ -72,7 +87,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, messageId: message.id }, { status: 201 });
   } catch (error) {
-    if (uploadedPath) {
+    if (storedUpload && uploadedPath) {
       await getSupabaseAdminClient().storage
         .from(COMMUNICATION_BUCKET)
         .remove([uploadedPath])

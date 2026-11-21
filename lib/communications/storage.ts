@@ -48,7 +48,32 @@ export function sanitizeAttachmentName(name: string) {
   return (cleaned || "file").slice(0, 160);
 }
 
-export async function ensureCommunicationBucket() {
+// A warm server instance should not make a Storage metadata request for every
+// upload. Recheck periodically; failed checks are never cached.
+const BUCKET_CHECK_TTL_MS = 5 * 60 * 1000;
+let bucketVerifiedUntil = 0;
+let bucketVerificationInFlight: Promise<void> | null = null;
+
+export function invalidateCommunicationBucketCheck() {
+  bucketVerifiedUntil = 0;
+}
+
+export function ensureCommunicationBucket(): Promise<void> {
+  if (Date.now() < bucketVerifiedUntil) return Promise.resolve();
+  if (bucketVerificationInFlight) return bucketVerificationInFlight;
+
+  const task = verifyCommunicationBucket()
+    .then(() => {
+      bucketVerifiedUntil = Date.now() + BUCKET_CHECK_TTL_MS;
+    })
+    .finally(() => {
+      if (bucketVerificationInFlight === task) bucketVerificationInFlight = null;
+    });
+  bucketVerificationInFlight = task;
+  return task;
+}
+
+async function verifyCommunicationBucket() {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase.storage.getBucket(COMMUNICATION_BUCKET);
 
