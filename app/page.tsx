@@ -115,6 +115,7 @@ const DEFAULT_TTS_USAGE = {
 // Phase 1 rollout: coordinators first use only check-in, timeline, and personal settings.
 // Existing features remain implemented and available to admins for later rollout phases.
 const PHASE_ONE_COORDINATOR_TABS = new Set(["checkin", "timeline", "settings"]);
+type ReminderDetailLevel = "simple" | "standard" | "detailed";
 
 const formatNumber = (value: any) => Number(value || 0).toLocaleString("zh-TW");
 
@@ -336,6 +337,15 @@ export default function App() {
   const [isVoiceSettingsLoading, setIsVoiceSettingsLoading] = useState(false);
   const [isVoiceSettingsSaving, setIsVoiceSettingsSaving] = useState(false);
   const [isVoicePreviewing, setIsVoicePreviewing] = useState(false);
+  // Admin-only manual timeline preview; independent of live reminders and their queue.
+  const [timelinePreviewNodeId, setTimelinePreviewNodeId] = useState<string | null>(null);
+  const [timelinePreviewTiming, setTimelinePreviewTiming] = useState<"pre5" | "now">("pre5");
+  const [timelinePreviewDetail, setTimelinePreviewDetail] = useState<ReminderDetailLevel>("standard");
+  const [timelinePreviewStatus, setTimelinePreviewStatus] = useState<"idle" | "loading" | "playing">("idle");
+  const [timelinePreviewError, setTimelinePreviewError] = useState("");
+  const timelinePreviewRequestRef = useRef<AbortController | null>(null);
+  const timelinePreviewSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const timelinePreviewRunRef = useRef(0);
   const [recognition, setRecognition] = useState<any>(null); // SpeechRecognition 實例
   const voiceCommandBufferRef = useRef("");
   const recognitionShouldSubmitRef = useRef(false);
@@ -2202,8 +2212,8 @@ export default function App() {
     return phrase || "進行服事任務";
   };
 
-  const buildDetailedVoiceHint = (node: any) => {
-    if (personalSettings.voiceDetailLevel !== "detailed") return "";
+  const buildDetailedVoiceHint = (node: any, detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel) => {
+    if (detailLevel !== "detailed") return "";
 
     const hints: string[] = [];
 
@@ -2232,30 +2242,136 @@ export default function App() {
     return `記得${uniqueHints.join("、")}。`;
   };
 
-  const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now") => {
+  const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now", detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel) => {
     const phrase = simplifyTaskPhrase(node);
-    const detailHint = buildDetailedVoiceHint(node);
+    const detailHint = buildDetailedVoiceHint(node, detailLevel);
 
     if (reminderType === "pre5") {
-      const taskTime = formatTaskTimeForVoice(node.time);
-
-      if (personalSettings.voiceDetailLevel === "simple") {
-        return taskTime
-          ? `提醒您，五分鐘後，${taskTime}，${phrase}。`
-          : `提醒您，五分鐘後，${phrase}。`;
+      // Simple mode speaks only the action. The scheduler still fires five minutes early.
+      if (detailLevel === "simple") {
+        return `提醒您，${phrase}。`;
       }
 
+      const taskTime = formatTaskTimeForVoice(node.time);
       return taskTime
         ? `提醒您，五分鐘後，${taskTime}，要${phrase}。${detailHint}`
         : `提醒您，五分鐘後，要${phrase}。${detailHint}`;
     }
 
-    if (personalSettings.voiceDetailLevel === "simple") {
+    if (detailLevel === "simple") {
       return `可以${phrase}了。`;
     }
 
     return `可以${phrase}了。${detailHint}`;
   };
+
+
+  // An admin test uses the existing voice preview endpoint and independent WebAudio
+  // source. It never touches live reminders, their queue or their fired timestamps.
+  const stopTimelinePreviewAudio = () => {
+    timelinePreviewRunRef.current += 1;
+    timelinePreviewRequestRef.current?.abort();
+    timelinePreviewRequestRef.current = null;
+    const source = timelinePreviewSourceRef.current;
+    if (source) {
+      source.onended = null;
+      try { source.stop(); } catch { /* Already ended. */ }
+      source.disconnect();
+      timelinePreviewSourceRef.current = null;
+    }
+    setTimelinePreviewStatus("idle");
+  };
+
+  const toggleTimelinePreviewPanel = (nodeId: string) => {
+    if (!isAdmin) return;
+    stopTimelinePreviewAudio();
+    setTimelinePreviewError("");
+    setTimelinePreviewTiming("pre5");
+    setTimelinePreviewDetail(personalSettings.voiceDetailLevel);
+    setTimelinePreviewNodeId((current) => current === nodeId ? null : nodeId);
+  };
+
+  const playTimelinePreviewAudio = async (node: any) => {
+    if (!isAdmin) return;
+    stopTimelinePreviewAudio();
+    setTimelinePreviewError("");
+    setTimelinePreviewStatus("loading");
+    const runId = timelinePreviewRunRef.current;
+    const controller = new AbortController();
+    timelinePreviewRequestRef.current = controller;
+
+    try {
+      // Resume while still handling the user's tap, before any network work.
+      const context = getVoiceAudioContext();
+      if (!context) throw new Error("此裝置不支援語音試聽。");
+      if (context.state === "suspended") await context.resume();
+
+      const text = buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail);
+      const response = await fetch("/api/voice", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          preview: true,
+          voiceProfile: personalSettings.voiceProfile,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.error || "無法產生試聽語音。");
+      }
+
+      const audioData = await (await response.blob()).arrayBuffer();
+      if (timelinePreviewRunRef.current !== runId) return;
+      const decoded = await context.decodeAudioData(audioData.slice(0));
+      if (timelinePreviewRunRef.current !== runId) return;
+
+      const source = context.createBufferSource() as AudioBufferSourceNode;
+      source.buffer = decoded;
+      source.connect(context.destination);
+      timelinePreviewSourceRef.current = source;
+      source.onended = () => {
+        source.disconnect();
+        if (timelinePreviewRunRef.current !== runId) return;
+        timelinePreviewSourceRef.current = null;
+        setTimelinePreviewStatus("idle");
+      };
+      source.start();
+      setTimelinePreviewStatus("playing");
+    } catch (error) {
+      if (controller.signal.aborted || timelinePreviewRunRef.current !== runId) return;
+      setTimelinePreviewError(error instanceof Error ? error.message : "語音試聽失敗。");
+      setTimelinePreviewStatus("idle");
+    } finally {
+      if (timelinePreviewRunRef.current === runId) {
+        timelinePreviewRequestRef.current = null;
+      }
+    }
+  };
+
+  // Closing the timeline or switching services must not leave a test clip playing.
+  useEffect(() => {
+    if (timelinePreviewNodeId === null) return;
+    stopTimelinePreviewAudio();
+    setTimelinePreviewNodeId(null);
+    setTimelinePreviewError("");
+  }, [activeTab, currentService]);
+
+  useEffect(() => () => {
+    timelinePreviewRunRef.current += 1;
+    timelinePreviewRequestRef.current?.abort();
+    const source = timelinePreviewSourceRef.current;
+    if (source) {
+      source.onended = null;
+      try { source.stop(); } catch { /* Already ended. */ }
+      source.disconnect();
+      timelinePreviewSourceRef.current = null;
+    }
+  }, []);
 
   const getNextReminderInfo = () => {
     if (!personalSettings.voiceReminderEnabled) return null;
@@ -4194,6 +4310,9 @@ export default function App() {
                     }}
                     className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10"
                   >
+                    <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none tabular-nums text-[#9CA3AF]">
+                      {node.time}
+                    </span>
                     {completed ? (
                       <div className="w-7 h-7 rounded-full bg-[#00B8B8] flex items-center justify-center shadow-sm shadow-[#00B8B8]/30">
                          <Check className="w-4 h-4 text-white" strokeWidth={3} />
@@ -4211,24 +4330,112 @@ export default function App() {
                     'bg-white border border-[#E6EAF0] shadow-sm'
                   }`}>
                     
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="w-full">
+                    <div className="flex items-start justify-between gap-2 mb-4">
+                      <div className="min-w-0 flex-1">
                         <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
                           {renderInlineEdit('node', node.id, 'title', node.title, "w-full")}
                         </h3>
-                        <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
-                          <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
-                            <Clock className="w-3 h-3" />
-                            {renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}
-                          </span>
-                          {active && (
-                            <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
-                              進行中
-                            </span>
-                          )}
-                        </div>
+                        {(isAdminUnlocked && isTimelineEditMode || active) && (
+                          <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
+                            {isAdminUnlocked && isTimelineEditMode && (
+                              <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
+                                <Clock className="w-3 h-3" />
+                                {renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}
+                              </span>
+                            )}
+                            {active && (
+                              <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
+                                進行中
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          aria-expanded={timelinePreviewNodeId === node.id}
+                          aria-controls={`timeline-voice-preview-${node.id}`}
+                          aria-label={`${node.time} ${node.title} 語音試聽`}
+                          onClick={() => toggleTimelinePreviewPanel(node.id)}
+                          className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-3 text-xs font-black text-[#6D55A3] transition-colors hover:bg-[#EDE6FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3]"
+                        >
+                          <Volume2 className="h-4 w-4" />
+                          試聽
+                        </button>
+                      )}
                     </div>
+
+                    {isAdmin && timelinePreviewNodeId === node.id && (
+                      <div id={`timeline-voice-preview-${node.id}`} className="mb-4 space-y-3 rounded-2xl border border-[#6D55A3]/15 bg-[#F3EEFF]/50 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-xs font-black text-[#6D55A3]">語音提醒試聽</h4>
+                          <span className="text-[10px] font-medium text-[#7B7B74]">僅此裝置播放</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="text-[11px] font-bold text-[#7B7B74]">
+                            提醒時機
+                            <select
+                              aria-label="試聽提醒時機"
+                              value={timelinePreviewTiming}
+                              onChange={(event) => {
+                                stopTimelinePreviewAudio();
+                                setTimelinePreviewTiming(event.target.value as "pre5" | "now");
+                              }}
+                              className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
+                            >
+                              <option value="pre5">提前 5 分鐘</option>
+                              <option value="now">準點提醒</option>
+                            </select>
+                          </label>
+                          <label className="text-[11px] font-bold text-[#7B7B74]">
+                            播報內容
+                            <select
+                              aria-label="試聽播報內容"
+                              value={timelinePreviewDetail}
+                              onChange={(event) => {
+                                stopTimelinePreviewAudio();
+                                setTimelinePreviewDetail(event.target.value as ReminderDetailLevel);
+                              }}
+                              className="mt-1 w-full rounded-xl border border-[#E6EAF0] bg-white px-2 py-2.5 text-xs font-bold text-[#1F2937]"
+                            >
+                              <option value="simple">簡短</option>
+                              <option value="standard">標準</option>
+                              <option value="detailed">詳細</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div className="rounded-xl border border-[#E6EAF0] bg-white p-3">
+                          <p className="mb-1 text-[10px] font-black text-[#7B7B74]">實際產生的播報文字</p>
+                          <p aria-live="polite" className="text-xs font-medium leading-6 text-[#1F2937]">
+                            {buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail)}
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={timelinePreviewStatus === "loading"}
+                            onClick={() => void playTimelinePreviewAudio(node)}
+                            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#6D55A3] px-3 text-xs font-black text-white disabled:opacity-50"
+                          >
+                            {timelinePreviewStatus === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
+                            {timelinePreviewStatus === "loading" ? "準備中…" : timelinePreviewStatus === "playing" ? "重新播放" : "播放試聽"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={timelinePreviewStatus === "idle"}
+                            onClick={stopTimelinePreviewAudio}
+                            className="min-h-11 rounded-xl border border-[#D9DEE7] bg-white px-3 text-xs font-black text-[#6D55A3] disabled:opacity-40"
+                          >
+                            停止
+                          </button>
+                        </div>
+                        {timelinePreviewError && (
+                          <p role="alert" className="text-xs font-bold text-[#C23B4E]">{timelinePreviewError}</p>
+                        )}
+                        <p className="text-[10px] leading-4 text-[#7B7B74]">不改變正式語音提醒或任務完成狀態；正式播報仍依個人設定執行。</p>
+                      </div>
+                    )}
 
                     <div className="flex flex-col gap-2.5 mt-2 text-[13px] text-[#7B7B74]">
                       <div className="flex items-center gap-2">
