@@ -22,6 +22,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 import { createRingtoneWav } from "@/lib/communications/ringtone-wave";
 import { createConversationCache } from "@/lib/communications/conversation-cache";
+import { getChatKeyboardBounds, type ChatKeyboardBounds } from "@/lib/communications/chat-viewport";
 import { MessageVoiceRecorder } from "@/components/communications/MessageVoiceRecorder";
 import { HandwritingComposer } from "@/components/communications/HandwritingComposer";
 
@@ -202,6 +203,7 @@ export function CommunicationHub() {
   const [draft, setDraft] = useState("");
   const [loadingPeers, setLoadingPeers] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [chatKeyboardBounds, setChatKeyboardBounds] = useState<ChatKeyboardBounds | null>(null);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [composerMode, setComposerMode] = useState<"voice" | "handwriting" | null>(null);
@@ -221,6 +223,8 @@ export function CommunicationHub() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
   const selectedPeerIdRef = useRef(selectedPeerId);
   const openRef = useRef(open);
   const callStateRef = useRef(callState);
@@ -618,9 +622,61 @@ export function CommunicationHub() {
     return () => window.clearTimeout(timer);
   }, [open, selectedPeerId, loadMessages]);
 
+  // The OS keyboard shrinks the *visual* viewport on iOS without necessarily
+  // shrinking the layout viewport. Keep the conversation above the keyboard
+  // without disabling browser zoom or changing other app screens.
   useEffect(() => {
-    if (open && selectedPeerId) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+    if (!open || !selectedPeerId) return;
+    const viewport = window.visualViewport;
+    let baseHeight = Math.max(window.innerHeight, viewport?.height ?? 0);
+    let frame = 0;
+
+    const update = () => {
+      frame = 0;
+      const focused = document.activeElement === chatInputRef.current;
+      const next = getChatKeyboardBounds({
+        focused,
+        baseHeight,
+        height: viewport?.height ?? window.innerHeight,
+        width: viewport?.width ?? window.innerWidth,
+        top: viewport?.offsetTop ?? 0,
+        left: viewport?.offsetLeft ?? 0,
+      });
+      setChatKeyboardBounds((current) => (
+        current?.top === next?.top
+        && current?.left === next?.left
+        && current?.height === next?.height
+        && current?.width === next?.width
+          ? current
+          : next
+      ));
+      if (!focused) {
+        baseHeight = Math.max(window.innerHeight, viewport?.height ?? 0);
+      }
+    };
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(update);
+    };
+    viewport?.addEventListener("resize", schedule);
+    viewport?.addEventListener("scroll", schedule);
+    window.addEventListener("resize", schedule);
+    document.addEventListener("focusin", schedule);
+    document.addEventListener("focusout", schedule);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      viewport?.removeEventListener("resize", schedule);
+      viewport?.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      document.removeEventListener("focusin", schedule);
+      document.removeEventListener("focusout", schedule);
+    };
+  }, [open, selectedPeerId]);
+
+  // Scroll only the chat message pane, not the entire page. scrollIntoView
+  // could move the visual viewport unexpectedly when the iOS keyboard opens.
+  useEffect(() => {
+    if (open && selectedPeerId && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
   }, [messages, open, selectedPeerId]);
 
@@ -1254,7 +1310,18 @@ export function CommunicationHub() {
       </button>
 
       {open && (
-        <div className="fixed bottom-[9.5rem] right-3 z-[75] flex h-[min(72vh,620px)] w-[calc(100vw-1.5rem)] max-w-[420px] flex-col overflow-hidden rounded-[28px] border border-[#E6EAF0] bg-white shadow-2xl">
+        <div
+          className="fixed bottom-[9.5rem] right-3 z-[75] flex h-[min(72dvh,620px)] max-h-[calc(100dvh-10.5rem)] w-[calc(100vw-1.5rem)] max-w-[420px] flex-col overflow-hidden rounded-[28px] border border-[#E6EAF0] bg-white shadow-2xl"
+          style={selectedPeer && chatKeyboardBounds ? {
+            top: chatKeyboardBounds.top,
+            left: chatKeyboardBounds.left,
+            bottom: "auto",
+            right: "auto",
+            height: chatKeyboardBounds.height,
+            maxHeight: chatKeyboardBounds.height,
+            width: chatKeyboardBounds.width,
+          } : undefined}
+        >
           <div className="flex items-center gap-3 border-b border-[#E6EAF0] bg-[#FFF9F3] px-4 py-3">
             {selectedPeer && (
               <button type="button" onClick={() => { selectedPeerIdRef.current = ""; setSelectedPeerId(""); }} className="rounded-full p-2 text-[#6D55A3]">
@@ -1334,7 +1401,7 @@ export function CommunicationHub() {
             </div>
           ) : (
             <>
-              <div className="flex-1 overflow-y-auto bg-[#FFF9F3]/60 px-3 py-4">
+              <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto bg-[#FFF9F3]/60 px-3 py-4">
                 {loadingMessages ? (
                   <div className="flex h-full items-center justify-center text-[#6D55A3]">
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -1416,7 +1483,7 @@ export function CommunicationHub() {
                 )}
               </div>
 
-              <div className="border-t border-[#E6EAF0] bg-white p-3">
+              <div className="shrink-0 border-t border-[#E6EAF0] bg-white p-3">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1458,6 +1525,7 @@ export function CommunicationHub() {
                     <Pencil className="h-5 w-5" />
                   </button>
                   <textarea
+                    ref={chatInputRef}
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                     onKeyDown={(event) => {
@@ -1468,7 +1536,7 @@ export function CommunicationHub() {
                     }}
                     rows={1}
                     placeholder="輸入訊息…"
-                    className="max-h-28 min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-[#D9DEE7] px-3 py-2.5 text-sm outline-none focus:border-[#6D55A3]"
+                    className="max-h-28 min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-[#D9DEE7] px-3 py-2.5 text-base outline-none focus:border-[#6D55A3]"
                   />
                   <button
                     type="button"
