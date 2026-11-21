@@ -346,6 +346,12 @@ export default function App() {
   const [isVoiceSettingsLoading, setIsVoiceSettingsLoading] = useState(false);
   const [isVoiceSettingsSaving, setIsVoiceSettingsSaving] = useState(false);
   const [isVoicePreviewing, setIsVoicePreviewing] = useState(false);
+  const [voicePreviewClip, setVoicePreviewClip] = useState<{ url: string; label: string } | null>(null);
+  useEffect(() => {
+    return () => {
+      if (voicePreviewClip?.url) URL.revokeObjectURL(voicePreviewClip.url);
+    };
+  }, [voicePreviewClip?.url]);
   // Admin-only manual timeline preview; independent of live reminders and their queue.
   const [timelinePreviewNodeId, setTimelinePreviewNodeId] = useState<string | null>(null);
   const [timelinePreviewTiming, setTimelinePreviewTiming] = useState<"pre5" | "now">("pre5");
@@ -1371,22 +1377,21 @@ export default function App() {
     if (isVoicePreviewing) return;
 
     const ctx = getVoiceAudioContext();
-    if (!ctx) {
-      setCustomAlert({ isOpen: true, message: "此裝置暫時無法播放試聽音訊。" });
-      return;
-    }
-
+    const isMale = voiceSettingsDraft.voice_gender === "male";
+    const voiceLabel = isMale ? "男聲 Iapetus" : "女聲 Zephyr";
     const sampleText = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds) === 0
       ? "提醒您，現在要集合專招。"
       : `提醒您，${formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)}後，18點，要集合專招。`;
 
     try {
       setIsVoicePreviewing(true);
+      setVoicePreviewClip(null);
 
-      if (ctx.state === "suspended") {
+      // Resume WebAudio immediately in the button's user gesture. iOS Safari
+      // can reject HTMLAudioElement.play() called after awaiting network TTS.
+      if (ctx && ctx.state !== "running") {
         await ctx.resume();
       }
-      await unlockVoiceHtmlAudio();
 
       const response = await fetch("/api/voice", {
         method: "POST",
@@ -1397,7 +1402,7 @@ export default function App() {
         body: JSON.stringify({
           text: sampleText,
           preview: true,
-          voiceProfile: voiceSettingsDraft.voice_gender === "male" ? "iapetus" : "zephyr",
+          voiceProfile: isMale ? "iapetus" : "zephyr",
           voiceTuning: {
             speakingRate: toFixedVoiceNumber(voiceSettingsDraft.speaking_rate, 0.92),
             pitch: toFixedVoiceNumber(voiceSettingsDraft.pitch, 1.5),
@@ -1408,25 +1413,40 @@ export default function App() {
 
       if (!response.ok) {
         const contentType = response.headers.get("Content-Type") || "";
-        let errorPayload: any = null;
-
-        if (contentType.includes("application/json")) {
-          errorPayload = await response.json().catch(() => null);
-        } else {
-          const errorText = await response.text().catch(() => "");
-          errorPayload = { error: errorText || "試聽語音產生失敗" };
-        }
-
-        if (errorPayload?.fallbackToBrowser) {
-          await speakWithBrowserVoiceFallback(sampleText);
-          return;
-        }
-
-        throw new Error(errorPayload?.error || "試聽語音產生失敗");
+        const payload = contentType.includes("application/json")
+          ? await response.json().catch(() => null)
+          : { error: await response.text().catch(() => "試聽語音產生失敗") };
+        throw new Error(payload?.error || "試聽語音產生失敗");
       }
 
       const blob = await response.blob();
-      await playVoiceBlob(blob);
+      if (blob.size === 0 || !(response.headers.get("Content-Type") || "").includes("audio/")) {
+        throw new Error("雲端語音沒有傳回有效音檔，請稍後再試。");
+      }
+
+      // Native controls are always available for an explicit second tap,
+      // even when the browser blocks automatic playback after async fetch.
+      setVoicePreviewClip({ url: URL.createObjectURL(blob), label: voiceLabel });
+
+      if (!ctx || ctx.state !== "running") {
+        setCustomAlert({
+          isOpen: true,
+          message: "語音音檔已產生，但手機尚未允許自動播放，請按下方音檔播放器的播放鍵。"
+        });
+        return;
+      }
+
+      try {
+        const audioData = await blob.arrayBuffer();
+        const decoded = await ctx.decodeAudioData(audioData.slice(0));
+        await playVoiceBuffer(decoded);
+      } catch (playbackError) {
+        console.warn("試聽自動播放受限，請使用下方播放器:", playbackError);
+        setCustomAlert({
+          isOpen: true,
+          message: "語音音檔已產生，但自動播放受限。請按下方音檔播放器的播放鍵。"
+        });
+      }
     } catch (err: any) {
       console.error("全站語音試聽失敗:", err);
       setCustomAlert({ isOpen: true, message: err?.message || "試聽語音失敗，請稍後再試。" });
@@ -5171,6 +5191,24 @@ export default function App() {
                   </button>
                 </div>
 
+                {voicePreviewClip && (
+                  <div className="mt-3 rounded-xl border border-[#6D55A3]/20 bg-[#F3EEFF]/50 p-3">
+                    <div className="mb-2 text-xs font-black text-[#6D55A3]">
+                      {voicePreviewClip.label} · 試聽音檔
+                    </div>
+                    <audio
+                      key={voicePreviewClip.url}
+                      controls
+                      preload="metadata"
+                      src={voicePreviewClip.url}
+                      aria-label={`${voicePreviewClip.label} 音檔播放器`}
+                      className="block w-full"
+                    />
+                    <p className="mt-2 text-[11px] leading-relaxed text-[#7B7B74]">
+                      若沒有自動出聲，請按上方播放鍵；音檔已產生，不需要重新向雲端請求。
+                    </p>
+                  </div>
+                )}
                 <div className="text-[10px] font-bold text-[#7B7B74] mt-3">
                   套用後會更新快取版本，下一次正式提醒會使用新聲音。
                 </div>
