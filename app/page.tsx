@@ -115,6 +115,7 @@ const DEFAULT_TTS_USAGE = {
 // Phase 1 rollout: coordinators first use only check-in, timeline, and personal settings.
 // Existing features remain implemented and available to admins for later rollout phases.
 const PHASE_ONE_COORDINATOR_TABS = new Set(["checkin", "timeline", "settings"]);
+type ReminderDetailLevel = "simple" | "standard" | "detailed";
 
 const formatNumber = (value: any) => Number(value || 0).toLocaleString("zh-TW");
 
@@ -336,6 +337,15 @@ export default function App() {
   const [isVoiceSettingsLoading, setIsVoiceSettingsLoading] = useState(false);
   const [isVoiceSettingsSaving, setIsVoiceSettingsSaving] = useState(false);
   const [isVoicePreviewing, setIsVoicePreviewing] = useState(false);
+  // Admin-only manual timeline preview; independent of live reminders and their queue.
+  const [timelinePreviewNodeId, setTimelinePreviewNodeId] = useState<string | null>(null);
+  const [timelinePreviewTiming, setTimelinePreviewTiming] = useState<"pre5" | "now">("pre5");
+  const [timelinePreviewDetail, setTimelinePreviewDetail] = useState<ReminderDetailLevel>("standard");
+  const [timelinePreviewStatus, setTimelinePreviewStatus] = useState<"idle" | "loading" | "playing">("idle");
+  const [timelinePreviewError, setTimelinePreviewError] = useState("");
+  const timelinePreviewRequestRef = useRef<AbortController | null>(null);
+  const timelinePreviewSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const timelinePreviewRunRef = useRef(0);
   const [recognition, setRecognition] = useState<any>(null); // SpeechRecognition 實例
   const voiceCommandBufferRef = useRef("");
   const recognitionShouldSubmitRef = useRef(false);
@@ -2202,8 +2212,8 @@ export default function App() {
     return phrase || "進行服事任務";
   };
 
-  const buildDetailedVoiceHint = (node: any) => {
-    if (personalSettings.voiceDetailLevel !== "detailed") return "";
+  const buildDetailedVoiceHint = (node: any, detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel) => {
+    if (detailLevel !== "detailed") return "";
 
     const hints: string[] = [];
 
@@ -2232,14 +2242,14 @@ export default function App() {
     return `記得${uniqueHints.join("、")}。`;
   };
 
-  const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now") => {
+  const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now", detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel) => {
     const phrase = simplifyTaskPhrase(node);
-    const detailHint = buildDetailedVoiceHint(node);
+    const detailHint = buildDetailedVoiceHint(node, detailLevel);
 
     if (reminderType === "pre5") {
       const taskTime = formatTaskTimeForVoice(node.time);
 
-      if (personalSettings.voiceDetailLevel === "simple") {
+      if (detailLevel === "simple") {
         return taskTime
           ? `提醒您，五分鐘後，${taskTime}，${phrase}。`
           : `提醒您，五分鐘後，${phrase}。`;
@@ -2250,7 +2260,7 @@ export default function App() {
         : `提醒您，五分鐘後，要${phrase}。${detailHint}`;
     }
 
-    if (personalSettings.voiceDetailLevel === "simple") {
+    if (detailLevel === "simple") {
       return `可以${phrase}了。`;
     }
 
