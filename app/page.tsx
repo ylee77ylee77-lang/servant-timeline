@@ -1376,7 +1376,7 @@ export default function App() {
       return;
     }
 
-    const sampleText = "提醒您，五分鐘後，18點，要集合專招。";
+    const sampleText = `提醒您，${formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)}後，18點，要集合專招。`;
 
     try {
       setIsVoicePreviewing(true);
@@ -2471,22 +2471,26 @@ export default function App() {
   const getNextReminderInfo = () => {
     if (!personalSettings.voiceReminderEnabled) return null;
 
-    const currentMinutes = timeToMinutes(currentTime);
+    const daySeconds = 24 * 60 * 60;
+    const now = currentDate ?? new Date();
+    const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
     const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
     const reminderCandidates = currentServiceNodes.flatMap((node) => {
       const settings = getReminderSettings(node);
       if (!settings.voiceReminderEnabled) return [];
 
-      const nodeMinutes = timeToMinutes(node.time);
+      const taskSeconds = timeToMinutes(node.time) * 60;
       const candidates: any[] = [];
 
       if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled) {
+        const dueSeconds = (taskSeconds - leadSeconds + daySeconds) % daySeconds;
         candidates.push({
           node,
           reminderType: "pre5" as const,
-          reminderMinutes: nodeMinutes - 5,
-          label: "提醒"
+          secondsUntil: (dueSeconds - currentSeconds + daySeconds) % daySeconds,
+          label: "提前提醒"
         });
       }
 
@@ -2494,7 +2498,7 @@ export default function App() {
         candidates.push({
           node,
           reminderType: "now" as const,
-          reminderMinutes: nodeMinutes,
+          secondsUntil: (taskSeconds - currentSeconds + daySeconds) % daySeconds,
           label: "準點提醒"
         });
       }
@@ -2503,14 +2507,14 @@ export default function App() {
     });
 
     const nextReminder = reminderCandidates
-      .filter(item => item.reminderMinutes > currentMinutes)
-      .sort((a, b) => a.reminderMinutes - b.reminderMinutes)[0];
+      .filter(item => item.secondsUntil > 0)
+      .sort((a, b) => a.secondsUntil - b.secondsUntil)[0];
 
     if (!nextReminder) return null;
 
     return {
       ...nextReminder,
-      minutesUntil: nextReminder.reminderMinutes - currentMinutes
+      minutesUntil: Math.ceil(nextReminder.secondsUntil / 60)
     };
   };
 
