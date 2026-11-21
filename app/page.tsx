@@ -4312,7 +4312,7 @@ export default function App() {
                     }}
                     className="absolute left-0 top-4 flex items-center justify-center w-10 h-10 bg-[#FFF9F3] z-10"
                   >
-                    <span aria-hidden="true" className="absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none tabular-nums text-[#9CA3AF]">
+                    <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium leading-none tabular-nums text-[#9CA3AF]">
                       {node.time}
                     </span>
                     {completed ? (
@@ -4337,17 +4337,21 @@ export default function App() {
                         <h3 className={`text-lg font-bold tracking-tight mb-1.5 ${completed ? 'text-[#7B7B74] line-through decoration-[#E6EAF0]' : 'text-[#1F2937]'}`}>
                           {renderInlineEdit('node', node.id, 'title', node.title, "w-full")}
                         </h3>
-                        <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
-                          <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
-                            <Clock className="w-3 h-3" />
-                            {renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}
-                          </span>
-                          {active && (
-                            <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
-                              進行中
-                            </span>
-                          )}
-                        </div>
+                        {(isAdminUnlocked && isTimelineEditMode || active) && (
+                          <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-[#7B7B74]">
+                            {isAdminUnlocked && isTimelineEditMode && (
+                              <span className="flex items-center gap-1 bg-[#F3EEFF] text-[#6D55A3] px-2 py-0.5 rounded-md">
+                                <Clock className="w-3 h-3" />
+                                {renderInlineEdit('node', node.id, 'time', node.time, "font-mono", "time")}
+                              </span>
+                            )}
+                            {active && (
+                              <span className="px-2 py-0.5 text-white bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] rounded-md font-bold shadow-sm">
+                                進行中
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       {isAdmin && (
                         <button
