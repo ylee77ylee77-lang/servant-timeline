@@ -154,3 +154,9 @@ test("quick and personal test announce the same lead interval used by the test c
   assert.ok(app.includes('buildSpeech={(cue, taskTime, title, detail, leadSeconds) =>'));
   assert.ok(app.includes('testNode, cue === "advance" ? "pre5" : "now", detail, leadSeconds'));
 });
+
+test("quick-test on-screen description uses the same lead and wait constants as the clock", () => {
+  const source = card();
+  assert.ok(source.includes("${ADMIN_TEST_START_WAIT_SECONDS} 秒後播放提前提醒"));
+  assert.ok(source.includes("${ADMIN_TEST_QUICK_LEAD_SECONDS} 秒播放準點提醒"));
+});
