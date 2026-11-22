@@ -23,7 +23,7 @@ type Props = {
   configuredLeadSeconds: number;
   advanceEnabled: boolean;
   ontimeEnabled: boolean;
-  buildSpeech: (cue: AdminVoiceTestCue, taskTime: string, title: string, detail: VoiceDetailLevel) => string;
+  buildSpeech: (cue: AdminVoiceTestCue, taskTime: string, title: string, detail: VoiceDetailLevel, leadSeconds: number) => string;
 };
 
 type TestEvent = {
@@ -135,8 +135,8 @@ export function AdminVoiceTestCard({
       const testPlan = createAdminVoiceTestPlan(new Date(), secondsBefore);
       const selectedTitle = taskTitle.trim() || "服事任務";
       const speech: Record<AdminVoiceTestCue, string> = {
-        advance: buildSpeech("advance", testPlan.taskTime, selectedTitle, detailLevel),
-        ontime: buildSpeech("ontime", testPlan.taskTime, selectedTitle, detailLevel),
+        advance: buildSpeech("advance", testPlan.taskTime, selectedTitle, detailLevel, testPlan.leadSeconds),
+        ontime: buildSpeech("ontime", testPlan.taskTime, selectedTitle, detailLevel, testPlan.leadSeconds),
       };
       if (!speech.advance || !speech.ontime) throw new Error("無法建立測試語音。");
 
