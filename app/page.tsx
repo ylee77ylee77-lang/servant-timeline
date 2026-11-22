@@ -38,6 +38,7 @@ import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStat
 import { AvatarSettingsCard } from '@/components/profile/AvatarSettingsCard';
 import { SystemAvatar } from '@/components/profile/SystemAvatar';
 import { PersonalPreferencesCards } from '@/components/profile/PersonalPreferencesCards';
+import { AdminVoiceTestCard } from '@/components/voice/AdminVoiceTestCard';
 import type { SettingsPanel } from '@/components/profile/SettingsAccordionCard';
 import { CommunicationHub } from '@/components/communications/CommunicationHub';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -5486,6 +5487,34 @@ export default function App() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {isCurrentUserAdmin && (
+          <div className="mb-6">
+            <AdminVoiceTestCard
+              accessToken={session.access_token}
+              voiceProfile={personalSettings.voiceProfile}
+              detailLevel={personalSettings.voiceDetailLevel}
+              configuredLeadSeconds={getReminderLeadSeconds(
+                personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
+              )}
+              advanceEnabled={personalSettings.reminderPre5Enabled}
+              ontimeEnabled={personalSettings.reminderNowEnabled}
+              buildSpeech={(cue, taskTime, title, detail) => {
+                const [hour, minute] = taskTime.split(":");
+                const testNode = {
+                  id: "admin-timed-voice-test",
+                  title,
+                  time: hour + ":" + minute,
+                  assignee: "總招",
+                  location: "",
+                  details: "",
+                  checklist: [],
+                };
+                return buildReminderSpeechText(testNode, cue === "advance" ? "pre5" : "now", detail);
+              }}
+            />
           </div>
         )}
 
