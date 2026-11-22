@@ -44,7 +44,7 @@ import { CommunicationHub } from '@/components/communications/CommunicationHub';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
-import { getServiceActivationState } from '@/lib/services/service-activation';
+import { getServiceActivationState, isLeadServiceOpen } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
 import {
   isNearFormalVoiceReminder,
@@ -246,6 +246,16 @@ export default function App() {
   const [checkedInService, setCheckedInService] = useState("");
   const [selectedCheckInService, setSelectedCheckInService] = useState("");
   const [eligibleCheckInOptions, setEligibleCheckInOptions] = useState<EligibleCheckInOption[]>([]);
+  const [leadCheckIn, setLeadCheckIn] = useState({
+    enabled: false, checkedInTypes: [] as string[], endedService: "",
+    reportOpensAt: "", canCorrect: false,
+  });
+  const [checkInId, setCheckInId] = useState("");
+  const checkInRequestVersion = useRef(0);
+  const lastRestoredCheckInIdRef = useRef("");
+  const leadLockedServiceRef = useRef("");
+  const leadCheckInMutationRef = useRef(false);
+  const voiceQueueGenerationRef = useRef(0);
   const [currentAssignmentId, setCurrentAssignmentId] = useState("");
   const [confirmedStation, setConfirmedStation] = useState("");
   const [stationScannerOpen, setStationScannerOpen] = useState(false);
@@ -516,6 +526,8 @@ export default function App() {
   }, [session.user.id]);
 
   const restorePersistentCheckin = useCallback(async () => {
+    if (leadCheckInMutationRef.current) return;
+    const version = ++checkInRequestVersion.current;
     try {
       const response = await fetch("/api/check-in", {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -523,9 +535,54 @@ export default function App() {
       });
       if (!response.ok) return;
       const result = await response.json();
-      setEligibleCheckInOptions(normalizeEligibleCheckInOptions(result?.eligibleServices));
+      if (version !== checkInRequestVersion.current) return;
+      const eligible = normalizeEligibleCheckInOptions(result?.eligibleServices);
+      setEligibleCheckInOptions(eligible);
       const record = result?.checkIn;
-      if (!record?.id || !record?.serviceType) return;
+      const isLead = result?.isLead === true;
+      setLeadCheckIn({
+        enabled: isLead,
+        checkedInTypes: Array.isArray(result.activeCheckInTypes) ? result.activeCheckInTypes : [],
+        endedService: String(result.endedServiceType || ""),
+        reportOpensAt: String(result.leadReportOpensAt || ""),
+        canCorrect: result.canCorrect === true,
+      });
+      if (!record?.id || !isServiceType(record.serviceType)) {
+        if (isLead || leadLockedServiceRef.current) {
+          if (leadLockedServiceRef.current) {
+            stopVoiceAssistantForServiceEnd();
+            handleCloseStationScanner();
+          }
+          leadLockedServiceRef.current = "";
+          hasManuallySwitchedRef.current = false;
+          setCheckInId("");
+          lastRestoredCheckInIdRef.current = "";
+          setCheckinStatus("not_checked_in");
+          setCheckedInAt("");
+          setCheckedInDay(null);
+          setCheckedInService("");
+          setCurrentAssignmentId("");
+          setConfirmedStation("");
+          setAssignedStation("");
+        }
+        if (isLead) {
+          const preferred = result.leadServiceTypes?.[0] || "";
+          setSelectedCheckInService((previous) =>
+            eligible.some(({ serviceType }) => serviceType === previous) ? previous : preferred
+          );
+        }
+        return;
+      }
+      setCheckInId(record.id);
+      const checkInChanged = record.id !== lastRestoredCheckInIdRef.current;
+      lastRestoredCheckInIdRef.current = record.id;
+      const previousLeadService = leadLockedServiceRef.current;
+      leadLockedServiceRef.current = isLead ? record.serviceType : "";
+      if (previousLeadService && previousLeadService !== record.serviceType) {
+        clearServiceVoiceQueue();
+        handleCloseStationScanner();
+        setAssignedStation("");
+      }
 
       const checkedInDate = new Date(record.checkedInAt);
       setCheckedInAt(new Intl.DateTimeFormat("zh-TW", {
@@ -539,7 +596,9 @@ export default function App() {
       setCurrentAssignmentId(String(record.assignmentId || ""));
       setCurrentService(String(record.serviceType));
       hasManuallySwitchedRef.current = true;
-      if (isCoordinator && !isAdmin) setViewedTimelineService(String(record.serviceType));
+      if (isCoordinator && !isAdmin && checkInChanged) {
+        setViewedTimelineService(record.serviceType);
+      }
       setConfirmedStation(String(record.stationName || ""));
       setCheckinStatus(record.stationName || record.status === "station_confirmed" ? "station_confirmed" : "checked_in");
     } catch (error) {
@@ -549,7 +608,29 @@ export default function App() {
 
   useEffect(() => {
     void restorePersistentCheckin();
-  }, [restorePersistentCheckin]);
+    if (!isCoordinator || isAdmin) return;
+    const refresh = () => {
+      if (!document.hidden) void restorePersistentCheckin();
+    };
+    let previousMinute = -1;
+    const timer = window.setInterval(() => {
+      const minute = Math.floor(Date.now() / 60000);
+      if (minute === previousMinute) return;
+      previousMinute = minute;
+      refresh();
+    }, 1000);
+    previousMinute = Math.floor(Date.now() / 60000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("pageshow", refresh);
+    window.addEventListener("online", refresh);
+    return () => {
+      ++checkInRequestVersion.current;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("pageshow", refresh);
+      window.removeEventListener("online", refresh);
+    };
+  }, [restorePersistentCheckin, isCoordinator, isAdmin]);
 
   const updatePersonalSettings = (patch: Partial<typeof personalSettings>) => {
     setPersonalSettings(prev => ({ ...prev, ...patch }));
@@ -935,15 +1016,28 @@ export default function App() {
 
   const isCurrentServiceVoiceClosed = () => {
     if (!isServiceType(currentService)) return true;
-    return !getServiceActivationState(new Date()).activeServiceTypes.includes(currentService);
+    const activation = getServiceActivationState();
+    return leadLockedServiceRef.current === currentService
+      ? !isLeadServiceOpen(currentService, activation)
+      : !activation.activeServiceTypes.includes(currentService);
+  };
+
+  const clearServiceVoiceQueue = () => {
+    ++voiceQueueGenerationRef.current;
+    stopVoiceStartupConfirmation();
+    setReturnCuePendingAt(null);
+    voiceQueueRef.current = [];
+    const audio = voiceHtmlAudioRef.current;
+    if (audio && !audio.paused) {
+      audio.pause();
+      audio.dispatchEvent(new Event("ended"));
+    }
+    window.speechSynthesis?.cancel();
   };
 
   const stopVoiceAssistantForServiceEnd = () => {
-    stopVoiceStartupConfirmation();
-    setReturnCuePendingAt(null);
+    clearServiceVoiceQueue();
     setIsVoiceEnabled(false);
-    voiceQueueRef.current = [];
-    voiceProcessingRef.current = false;
     setVoiceAssistantMessage("本場服事已結束，語音助理已自動關閉。");
     void releaseVoiceWakeLock();
   };
@@ -1347,20 +1441,25 @@ export default function App() {
   const processVoiceQueue = async () => {
     if (voiceProcessingRef.current) return;
     voiceProcessingRef.current = true;
+    const generation = voiceQueueGenerationRef.current;
+    const isCurrent = () => generation === voiceQueueGenerationRef.current;
 
     try {
-      while (voiceQueueRef.current.length > 0) {
+      while (isCurrent() && voiceQueueRef.current.length > 0) {
         const nextText = voiceQueueRef.current.shift();
         if (!nextText) continue;
 
         try {
           await playSoftDing();
           await wait(360);
+          if (!isCurrent()) break;
           const blob = await fetchVoiceBlob(nextText);
+          if (!isCurrent()) break;
           if (!blob) throw new Error("語音音檔不存在。");
           await playVoiceBlob(blob);
           await wait(850);
         } catch (err: any) {
+          if (!isCurrent()) break;
           // 已經播放過第一次提示音；若雲端 TTS 超過月用量或暫時不可用，退回瀏覽器語音，不再補第二聲。
           console.error("語音助理播放失敗:", err);
 
@@ -1377,8 +1476,14 @@ export default function App() {
       }
     } finally {
       voiceProcessingRef.current = false;
+      if (!isCurrent() && voiceQueueRef.current.length) {
+        // Use the current render's service when processing a newly queued reminder.
+        queueMicrotask(() => processVoiceQueueRef.current());
+      }
     }
   };
+  const processVoiceQueueRef = useRef(processVoiceQueue);
+  useEffect(() => { processVoiceQueueRef.current = processVoiceQueue; });
 
   const speak = (text: string) => {
     const cleanText = String(text || "").trim();
@@ -1995,15 +2100,18 @@ export default function App() {
   ]);
 
 
-  const fetchData = async (isBackgroundSync = false, requestedServiceType = "") => {
+  const fetchData = async (isBackgroundSync = false, requestedServiceType = "", signal?: AbortSignal) => {
     try {
       if (!isBackgroundSync) setFetchError("");
+      const leadService = leadCheckIn.enabled ? (requestedServiceType || checkedInService) : "";
+      requestedServiceType ||= leadService;
       const serviceContextUrl = isServiceType(requestedServiceType)
         ? `/api/service-context?serviceType=${encodeURIComponent(requestedServiceType)}`
         : "/api/service-context";
       const response = await fetch(serviceContextUrl, {
         headers: { Authorization: `Bearer ${session.access_token}` },
         cache: "no-store",
+        signal,
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "無法載入個人服事任務。");
@@ -2014,6 +2122,8 @@ export default function App() {
         assignedStation: String(result.assignedStation || ""),
         checkIn: result.checkIn ?? null,
       };
+      if (signal?.aborted) return;
+      if (leadService && result.service?.service_type !== leadService) return;
       setMyServiceContext(nextMyServiceContext);
       setCurrentAssignmentId(String(result.assignment?.id || ""));
       setAssignedStation(nextMyServiceContext.assignedStation);
@@ -2029,7 +2139,7 @@ export default function App() {
       const nodesData = await supabaseFetch('timeline_nodes?order=time.asc');
       const checklistData = await supabaseFetch('checklist_items?order=sort_order.asc,id.asc');
 
-      if (nodesData && checklistData) {
+      if (!signal?.aborted && nodesData && checklistData) {
         const formattedNodes = nodesData.map((node: any) => ({
           ...node,
           voice_reminder_enabled: node.voice_reminder_enabled !== false,
@@ -2040,24 +2150,29 @@ export default function App() {
         setNodes(formattedNodes);
       }
     } catch (error: any) {
+      if (signal?.aborted) return;
       console.error("讀取資料失敗:", error);
       if (!isBackgroundSync) setFetchError(error.message);
     } finally {
-      if (!isBackgroundSync) setIsLoading(false);
+      if (!signal?.aborted && !isBackgroundSync) setIsLoading(false);
     }
   };
 
+  const leadContextService = leadCheckIn.enabled ? checkedInService : "";
   useEffect(() => {
     if (hasValidKeys) {
-      fetchData(); 
+      const controller = new AbortController();
+      void fetchData(false, leadContextService, controller.signal);
       const syncTimer = setInterval(() => {
-        fetchData(true); 
+        void fetchData(true, leadContextService, controller.signal);
       }, 10000);
-      return () => clearInterval(syncTimer); 
-    } else {
-      setIsLoading(false);
+      return () => {
+        controller.abort();
+        clearInterval(syncTimer);
+      };
     }
-  }, []);
+    setIsLoading(false);
+  }, [leadContextService, session.access_token]);
 
   // Shared timeline previews use a read-only coordinator-validated endpoint.
   // Personal assignments and live voice reminders still use their existing data source.
@@ -2990,7 +3105,7 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab !== "checkin") return;
-    if (checkinStatus !== "not_checked_in") return;
+    if (checkinStatus !== "not_checked_in" && !leadCheckIn.enabled) return;
 
     void checkWifiConnection({ silent: true });
 
@@ -3023,10 +3138,11 @@ export default function App() {
       window.removeEventListener("offline", handleOffline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeTab, checkinStatus, checkWifiConnection]);
+  }, [activeTab, checkinStatus, checkWifiConnection, leadCheckIn.enabled]);
 
 
-  const handleLocalCheckin = async () => {
+  const handleLocalCheckin = async (targetService = selectedCheckInService, correct = false) => {
+    if (leadCheckInMutationRef.current) return;
     if (!wifiVerified) {
       setCustomAlert({ isOpen: true, message: CHECK_IN_NETWORK_MESSAGES.unavailable });
       return;
@@ -3034,7 +3150,7 @@ export default function App() {
 
     const selectedOption = getSelectedCheckInOption(
       eligibleCheckInOptions,
-      selectedCheckInService
+      targetService
     );
     if (!selectedOption) {
       setCustomAlert({ isOpen: true, message: "請先選擇並確認你本次服事的堂次。" });
@@ -3042,6 +3158,8 @@ export default function App() {
     }
 
     const { serviceType } = selectedOption;
+    leadCheckInMutationRef.current = true;
+    ++checkInRequestVersion.current;
     setIsCheckinSyncing(true);
     try {
       const response = await fetch("/api/check-in", {
@@ -3050,7 +3168,9 @@ export default function App() {
           Authorization: `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ action: "check_in", serviceType }),
+        body: JSON.stringify(correct
+          ? { action: "correct_service", serviceType, checkInId }
+          : { action: "check_in", serviceType }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "報到失敗，請稍後再試。");
@@ -3068,6 +3188,14 @@ export default function App() {
       if (!isServiceType(lockedServiceType)) {
         throw new Error("伺服器未能確認報到堂次，請重新整理後再試。");
       }
+      if (leadCheckIn.enabled && leadLockedServiceRef.current !== lockedServiceType) {
+        clearServiceVoiceQueue();
+        handleCloseStationScanner();
+        setAssignedStation("");
+        leadLockedServiceRef.current = lockedServiceType;
+      }
+      setCheckInId(result.checkIn.id);
+      lastRestoredCheckInIdRef.current = result.checkIn.id;
       setCheckedInService(lockedServiceType);
       setSelectedCheckInService("");
       const resolvedAssignmentId = String(
@@ -3092,14 +3220,16 @@ export default function App() {
             }
           : previous
       );
-      void fetchData(true, lockedServiceType);
+      if (!leadCheckIn.enabled) void fetchData(true, lockedServiceType);
       triggerVibration([200, 100, 200]);
       if (isCoordinator) setActiveTab("timeline");
     } catch (error) {
       setCustomAlert({ isOpen: true, message: error instanceof Error ? error.message : "報到失敗，請稍後再試。" });
       return;
     } finally {
+      leadCheckInMutationRef.current = false;
       setIsCheckinSyncing(false);
+      if (leadCheckIn.enabled) void restorePersistentCheckin();
     }
 
     // Volunteers retain their confirmation card. Coordinators open the timeline.
@@ -3111,6 +3241,21 @@ export default function App() {
         });
       }, 180);
     }
+  };
+
+  const confirmLeadCheckInChange = (serviceType: string, correct: boolean) => {
+    setCustomConfirm({
+      isOpen: true,
+      message: correct
+        ? `將「${checkedInService}」更正為「${serviceType}」？原堂的有效報到將撤銷。`
+        : `報到「${serviceType}」，並保留「${checkedInService}」的報到紀錄？`,
+      confirmLabel: correct ? `確認改為${serviceType}` : `報到${serviceType}`,
+      onConfirm: () => {
+        if (lastRestoredCheckInIdRef.current === checkInId) {
+          void handleLocalCheckin(serviceType, correct);
+        }
+      },
+    });
   };
 
   const openCheckedInTimeline = () => {
@@ -3155,6 +3300,13 @@ export default function App() {
     const checkinMinutes = checkedInAt ? timeTextToMinutes(checkedInAt) : (now.getHours() * 60 + now.getMinutes());
     const checkinLabel = `${weekdayLabels[checkinDay]} ${checkedInAt || `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`}`;
 
+    if (leadLockedServiceRef.current === badgeService && isServiceType(badgeService)
+      && isLeadServiceOpen(badgeService, getServiceActivationState(now))) {
+      return {
+        isReasonable: true, checkinLabel, reason: `報到時間符合「${badgeService}」報到時段。`,
+        activeServices: [badgeService],
+      };
+    }
     const activeWindows = serviceTimeWindows.filter((window) => {
       return window.day === checkinDay
         && checkinMinutes >= timeTextToMinutes(window.start)
@@ -4064,6 +4216,10 @@ export default function App() {
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
+    const nextOptions = leadCheckIn.enabled && isCheckedIn
+      ? eligibleCheckInOptions.filter(({ serviceType }) =>
+          serviceType !== checkedInService && !leadCheckIn.checkedInTypes.includes(serviceType))
+      : [];
     const todayService = isCheckedIn ? (checkedInService || currentService || "待確認") : "待確認";
     const selectedOption = getSelectedCheckInOption(
       eligibleCheckInOptions,
@@ -4090,7 +4246,7 @@ export default function App() {
                 ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
                 : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
             }`}>
-              {isCheckedIn ? "已報到" : "尚未報到"}
+              {isCheckedIn ? "已報到" : leadCheckIn.endedService ? "本堂服事已結束" : "尚未報到"}
             </div>
           </div>
           <div className="mt-4 flex min-w-0 items-center gap-4">
@@ -4106,10 +4262,39 @@ export default function App() {
           <p className="mt-4 text-sm font-bold leading-6 text-[#6D55A3]">
             今日堂次：{todayService}{checkedInService ? "（已鎖定）" : ""}
           </p>
+          {leadCheckIn.endedService && !isCheckedIn && (
+            <p className="mt-1 text-xs text-[#64645F]">{leadCheckIn.endedService}報到紀錄已保留。</p>
+          )}
         </div>
 
             <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
-              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">請完成報到</h3>
+              <h3 className="text-[16px] font-black text-[#1F2937] mb-2">{isCheckedIn ? "本堂報到" : "請完成報到"}</h3>
+              {leadCheckIn.reportOpensAt && (
+                <p className="mb-3 text-xs font-bold text-[#64645F]">主二堂總招報到於 {leadCheckIn.reportOpensAt} 開放。</p>
+              )}
+              {nextOptions.map(({ serviceType }) => {
+                const canReportNext = checkedInService === "主一堂" && serviceType === "主二堂";
+                const canCorrect = leadCheckIn.canCorrect && !stationReady;
+                if (!canReportNext && !canCorrect) return null;
+                return (
+                  <div key={serviceType} className="mb-3 flex flex-wrap gap-2">
+                    {canReportNext && (
+                      <button type="button" disabled={isCheckinSyncing}
+                        className="min-h-11 rounded-xl bg-white px-3 font-bold text-[#6D55A3] border disabled:opacity-50"
+                        onClick={() => confirmLeadCheckInChange(serviceType, false)}>
+                        報到下一堂（{serviceType}）
+                      </button>
+                    )}
+                    {canCorrect && (
+                      <button type="button" disabled={isCheckinSyncing}
+                        className="min-h-11 rounded-xl bg-white px-3 font-bold text-[#6D55A3] border disabled:opacity-50"
+                        onClick={() => confirmLeadCheckInChange(serviceType, true)}>
+                        更正堂次（{serviceType}）
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               {!isCheckedIn && (
                 <fieldset className="mb-5">
                   <legend className="text-xs font-black text-[#7B7B74] mb-2">

@@ -3,6 +3,9 @@ import { requireActiveUser } from "@/lib/auth/require-admin";
 import { isChurchNetworkRequest } from "@/lib/network/church-wifi";
 import { isServiceType, STATION_OPTIONS_BY_SERVICE } from "@/lib/services/catalog";
 import { ensureCheckInAssignment } from "@/lib/services/check-in-assignment";
+import { isUuid } from "@/lib/services/check-in";
+import { getLeadCheckInScope } from "@/lib/services/lead-check-in";
+import { isLeadServiceOpen } from "@/lib/services/service-activation";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
@@ -30,6 +33,15 @@ export async function GET(request: NextRequest) {
     const services = current.services.filter((service) =>
       ["published", "completed"].includes(String(service.status))
     );
+    const leadScope = await getLeadCheckInScope(request, user, services.map(({ id }) => id));
+    const isLead = leadScope.enabled;
+    const openServices = services.filter((service) =>
+      service.status === "published" && isServiceType(service.service_type)
+      && (isLead ? isLeadServiceOpen(service.service_type, current)
+        : current.activeServiceTypes.includes(service.service_type))
+    );
+    const leadServiceTypes = openServices.filter(({ id }) => leadScope.assignedServiceIds.has(id))
+      .map(({ service_type }) => service_type);
     if (!services.length) {
       return NextResponse.json({
         checkIn: null,
@@ -38,30 +50,28 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const publishedServices = services.filter((service) =>
-      service.status === "published"
-      && isServiceType(service.service_type)
-      && current.activeServiceTypes.includes(service.service_type)
-    );
-    const { data: assignments, error: assignmentError } = publishedServices.length
+    const { data: assignments, error: assignmentError } = openServices.length
       ? await supabase
           .from("service_assignments")
           .select("id,service_id,role_label,status,created_at")
           .eq("user_id", user.userId)
-          .in("service_id", publishedServices.map((service) => service.id))
+          .in("service_id", openServices.map((service) => service.id))
           .order("created_at", { ascending: true })
       : { data: [], error: null };
     if (assignmentError) throw assignmentError;
 
-    const eligibleServices = publishedServices.flatMap((service) => {
+    const eligibleServices = openServices.flatMap((service) => {
       if (!isServiceType(service.service_type)) return [];
 
       const serviceAssignments = (assignments ?? []).filter(
         (assignment) => assignment.service_id === service.id
       );
-      const activeAssignment = serviceAssignments.find((assignment) =>
+      const activeAssignments = serviceAssignments.filter((assignment) =>
         ["scheduled", "confirmed"].includes(String(assignment.status))
       );
+      const activeAssignment = (isLead
+        ? activeAssignments.find((assignment) => assignment.role_label === "總招")
+        : undefined) ?? activeAssignments[0];
       const blocked = !activeAssignment && serviceAssignments.some((assignment) =>
         ["declined", "cancelled"].includes(String(assignment.status))
       );
@@ -73,25 +83,40 @@ export async function GET(request: NextRequest) {
       }];
     });
 
-    const { data: checkIn, error: checkInError } = await supabase
+    const { data: checkIns, error: checkInError } = await supabase
       .from("service_check_ins")
       .select("id,service_id,assignment_id,status,checked_in_at")
       .eq("user_id", user.userId)
       .in("service_id", services.map((service) => service.id))
       .in("status", ["checked_in", "station_confirmed"])
-      .order("checked_in_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("checked_in_at", { ascending: false });
     if (checkInError) throw checkInError;
-    if (!checkIn) {
-      return NextResponse.json({
-        checkIn: null,
-        eligibleServices,
-        activeServiceTypes: current.activeServiceTypes,
-      });
-    }
+    const activeIds = new Set(openServices.map(({ id }) => id));
+    const activeCheckIns = (checkIns ?? []).filter((row) => activeIds.has(row.service_id));
+    const checkIn = (isLead ? activeCheckIns : checkIns ?? [])[0];
+    const responseContext = {
+      eligibleServices,
+      activeServiceTypes: current.activeServiceTypes,
+      isLead,
+      leadServiceTypes,
+      leadReportOpensAt: services.some((service) => service.service_type === "主二堂"
+        && leadScope.assignedServiceIds.has(service.id)) && current.minuteOfDay < 8 * 60 ? "08:00" : null,
+      activeCheckInTypes: openServices.filter(({ id }) =>
+        activeCheckIns.some((row) => row.service_id === id)
+      ).map(({ service_type }) => service_type),
+      endedServiceType: isLead
+        ? services.find(({ id }) => id === checkIns?.find((row) => !activeIds.has(row.service_id))?.service_id)
+          ?.service_type ?? null
+        : null,
+    };
+    if (!checkIn) return NextResponse.json({ ...responseContext, checkIn: null });
 
     const service = services.find((item) => item.id === checkIn.service_id);
+    const { data: taskStates, error: taskError } = isLead && checkIn.assignment_id
+      ? await supabase.from("assignment_checklist_states").select("id")
+        .eq("assignment_id", checkIn.assignment_id).limit(1)
+      : { data: [], error: null };
+    if (taskError) throw taskError;
     const { data: confirmation, error: confirmationError } = await supabase
       .from("check_in_station_confirmations")
       .select("station_name_snapshot,confirmed_at,confirmation_source")
@@ -102,8 +127,8 @@ export async function GET(request: NextRequest) {
     if (confirmationError) throw confirmationError;
 
     return NextResponse.json({
-      eligibleServices,
-      activeServiceTypes: current.activeServiceTypes,
+      ...responseContext,
+      canCorrect: isLead && checkIn.status === "checked_in" && !confirmation && !taskStates?.length,
       checkIn: {
         id: checkIn.id,
         assignmentId: checkIn.assignment_id,
@@ -135,21 +160,48 @@ export async function POST(request: NextRequest) {
     }
 
     const current = await ensureCurrentServices();
-    if (!current.activeServiceTypes.includes(serviceType)) {
-      return NextResponse.json(
-        { error: "目前不在此堂次的開放時間內。" },
-        { status: 409 }
-      );
+    const published = current.services.filter((item) => item.status === "published");
+    const leadScope = await getLeadCheckInScope(request, user, current.services
+      .filter(({ status }) => status === "published" || status === "completed").map(({ id }) => id));
+    const service = published.find((item) => item.service_type === serviceType);
+    if (!(leadScope.enabled ? isLeadServiceOpen(serviceType, current) : current.activeServiceTypes.includes(serviceType))) {
+      return NextResponse.json({ error: "目前不在此堂次的開放時間內。" }, { status: 409 });
+    }
+    if (!service) {
+      return NextResponse.json({ error: "今日場次目前未開放，請聯絡總招。" }, { status: 409 });
     }
 
-    const service = current.services.find((item) =>
-      item.service_type === serviceType && item.status === "published"
-    );
-    if (!service) {
-      return NextResponse.json(
-        { error: "今日場次目前未開放，請聯絡總招。" },
-        { status: 409 }
-      );
+    if (action === "correct_service") {
+      if (!leadScope.enabled) {
+        return NextResponse.json({ error: "僅總招可更正自己的堂次。" }, { status: 403 });
+      }
+      const sourceId = body.checkInId;
+      if (typeof sourceId !== "string" || !isUuid(sourceId)) {
+        return NextResponse.json({ error: "找不到原堂報到紀錄，請重新整理。" }, { status: 400 });
+      }
+      const db = getSupabaseAdminClient();
+      const { data: source, error: sourceError } = await db
+        .from("service_check_ins").select("service_id").eq("id", sourceId)
+        .eq("user_id", user.userId).maybeSingle();
+      if (sourceError) throw sourceError;
+      const sourceService = published.find(({ id }) => id === source?.service_id);
+      if (!sourceService || sourceService.id === service.id || !isServiceType(sourceService.service_type)
+        || !isLeadServiceOpen(sourceService.service_type, current)) {
+        return NextResponse.json({ error: "原堂已結束或無法更正，請確認目前報到狀態。" }, { status: 409 });
+      }
+      const { data, error } = await db.rpc("correct_lead_check_in", {
+        p_user_id: user.userId,
+        p_check_in_id: sourceId,
+        p_target_service_id: service.id,
+        p_ministry_group: user.ministryGroup || null,
+      });
+      if (error?.code === "P0001" || error?.code === "23505") {
+        return NextResponse.json({ error: "無法更正堂次。請確認原堂尚無崗位或任務紀錄，且目標堂次可以報到。" }, { status: 409 });
+      }
+      if (error) throw error;
+      const checkIn = Array.isArray(data) ? data[0] : data;
+      if (!checkIn?.id) throw new Error("Missing corrected check-in");
+      return NextResponse.json({ serviceType, assignmentId: checkIn.assignment_id, checkIn });
     }
 
     // Authenticated clients have no direct INSERT grant on operational check-in
@@ -165,8 +217,19 @@ export async function POST(request: NextRequest) {
     if (lookupError) throw lookupError;
 
     if (existingCheckIn?.status === "cancelled") {
+      if (leadScope.enabled && action === "check_in") {
+        const { data, error } = await supabase.rpc("reopen_corrected_lead_check_in", {
+          p_user_id: user.userId,
+          p_check_in_id: existingCheckIn.id,
+        });
+        if (error) throw error;
+        const checkIn = Array.isArray(data) ? data[0] : data;
+        if (checkIn?.id) {
+          return NextResponse.json({ ok: true, serviceType, assignmentId: checkIn.assignment_id, checkIn });
+        }
+      }
       return NextResponse.json(
-        { error: "此報到已取消，請聯絡總招重新啟用。" },
+        { error: "此報到已取消，請聯絡管理員重新啟用。" },
         { status: 409 }
       );
     }
@@ -199,6 +262,7 @@ export async function POST(request: NextRequest) {
         service,
         userId: user.userId,
         ministryGroup: user.ministryGroup,
+        preferredRole: leadScope.assignedServiceIds.has(service.id) ? "總招" : undefined,
       });
       const { data, error } = await supabase
         .from("service_check_ins")

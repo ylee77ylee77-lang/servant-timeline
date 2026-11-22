@@ -116,3 +116,20 @@ export function getServiceActivationState(now = new Date()): ServiceActivationSt
 export function isServiceActiveNow(serviceType: ServiceType, now = new Date()) {
   return getServiceActivationState(now).activeServiceTypes.includes(serviceType);
 }
+
+// The lead coordinator can prepare for the second service from 08:00.
+// These are operational cutoff times, in Taipei time.
+const LEAD_SERVICE_WINDOWS = {
+  "六晚崇": { opens: 17 * 60, closes: 21 * 60 + 45 },
+  "主一堂": { opens: 0, closes: 10 * 60 + 45 },
+  "主二堂": { opens: 8 * 60, closes: 12 * 60 + 45 },
+} satisfies Record<ServiceType, { opens: number; closes: number }>;
+
+export function isLeadServiceOpen(
+  serviceType: ServiceType,
+  activation: ServiceActivationState,
+) {
+  const { opens, closes } = LEAD_SERVICE_WINDOWS[serviceType];
+  return activation.provisionServiceTypes.includes(serviceType)
+    && activation.minuteOfDay >= opens && activation.minuteOfDay < closes;
+}
