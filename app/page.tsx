@@ -5894,7 +5894,7 @@ export default function App() {
               ? "bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm"
               : "bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]"
           }`}
-          title={isVoiceEnabled ? "語音助理已開啟。若沒聽到測試語音，請解除靜音、提高媒體音量，並檢查耳機。" : "開啟或關閉語音助理"}
+          title={isVoiceEnabled ? `${VOICE_STARTUP_CONFIRMATION} 若沒聽到測試語音，請解除靜音、提高媒體音量，並檢查耳機。` : "開啟或關閉語音助理"}
           aria-pressed={isVoiceEnabled}
         >
           {isVoiceEnabled ? (
