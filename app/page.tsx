@@ -2545,7 +2545,7 @@ export default function App() {
   // Keep the existing single-tap voice button. Unlike formal reminders,
   // this fixed, server-authorized phrase is safe for a coordinator to test
   // before check-in. It never announces the upcoming task or its details.
-  const stopVoiceStartupConfirmation = () => {
+  const stopVoiceStartupConfirmation = useCallback(() => {
     voiceStartupRunRef.current += 1;
     voiceStartupRequestRef.current?.abort();
     voiceStartupRequestRef.current = null;
@@ -2556,7 +2556,10 @@ export default function App() {
       try { source.stop(); } catch { /* Already finished. */ }
       source.disconnect();
     }
-  };
+  }, []);
+
+  // Leaving this page must also stop any pending or currently playing test.
+  useEffect(() => () => stopVoiceStartupConfirmation(), [stopVoiceStartupConfirmation]);
 
   const playVoiceStartupConfirmation = async () => {
     stopVoiceStartupConfirmation();
