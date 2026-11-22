@@ -51,7 +51,7 @@ test("existing voice button stays in place and confirms each transition to ON", 
   assert.ok(toggle.includes("void releaseVoiceWakeLock();"));
   assert.ok(source.includes("onClick={handleToggleVoiceReminder}"));
   assert.ok(source.includes('aria-pressed={isVoiceEnabled}'));
-  assert.ok(source.includes('title={isVoiceEnabled ? \`\${VOICE_STARTUP_CONFIRMATION}'));
+  assert.ok(source.includes('title={isVoiceEnabled ? `${VOICE_STARTUP_CONFIRMATION}'));
 });
 
 test("startup request sends no free-form speech and uses personal voice", () => {
