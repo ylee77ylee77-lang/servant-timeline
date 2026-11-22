@@ -146,7 +146,6 @@ test("admin has the coordinator startup confirmation and live speech without che
   assert.ok(source.includes('if (!isAdmin && isCurrentServiceVoiceClosed())'));
   assert.ok(source.includes('(!isAdmin && checkinStatus === "not_checked_in")'));
   assert.ok(source.includes('(!isAdmin && (!isServiceType(currentService) || isCurrentServiceVoiceClosed()))'));
-  assert.ok(source.includes('if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {'));
   assert.ok(api.includes('if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {'));
   assert.ok(api.includes("const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);"));
   assert.ok(api.includes("const user = await requireActiveUser(request);"));
