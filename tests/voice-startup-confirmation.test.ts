@@ -32,7 +32,8 @@ test("only coordinators and administrators may test before check-in", () => {
   assert.ok(source.includes("if (!isPreview && !startupMaySkipCheckIn && isServiceType(serviceType))"));
   assert.ok(source.includes("authorizeRegularVoice(request, user.userId, serviceType)"));
   assert.ok(source.includes("if (isStartupTest && isPreview)"));
-  assert.ok(source.includes("consumeRateLimit(request, isPreview || isStartupTest)"));
+  assert.ok(source.includes('consumeRateLimit(request, isPreview || isStartupTest, isStartupTest ? user.userId : "")'));
+  assert.ok(source.includes('userScope || "shared"'));
   assert.ok(source.includes('isStartupTest ? "startup" : isPreview ? "preview" : "regular"'));
   assert.ok(source.includes("if (isPreview && !user.roles.includes(\"admin\"))"));
 });
@@ -74,13 +75,14 @@ test("startup request sends no free-form speech and uses personal voice", () => 
 test("closing voice or service cancels pending requests and active startup playback", () => {
   const source = page();
   const cancel = source.slice(
-    source.indexOf("  const stopVoiceStartupConfirmation = () => {"),
+    source.indexOf("  const stopVoiceStartupConfirmation = useCallback(() => {"),
     source.indexOf("  const playVoiceStartupConfirmation = async () => {")
   );
   assert.ok(cancel.includes("voiceStartupRunRef.current += 1"));
   assert.ok(cancel.includes("voiceStartupRequestRef.current?.abort()"));
   assert.ok(cancel.includes("source.stop()"));
   assert.ok(cancel.includes("source.disconnect()"));
+  assert.ok(source.includes("useEffect(() => () => stopVoiceStartupConfirmation(), [stopVoiceStartupConfirmation])"));
   assert.ok(source.includes('if (runId !== voiceStartupRunRef.current || controller.signal.aborted) return;'));
   assert.ok(source.includes("const stopVoiceAssistantForServiceEnd = () => {\n    stopVoiceStartupConfirmation();"));
 });
