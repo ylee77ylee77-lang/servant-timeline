@@ -2347,7 +2347,12 @@ export default function App() {
     return `記得${uniqueHints.join("、")}。`;
   };
 
-  const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now", detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel) => {
+  const buildReminderSpeechText = (
+    node: any,
+    reminderType: "pre5" | "now",
+    detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel,
+    leadSecondsOverride: number | null = null
+  ) => {
     const customText = getCustomReminderText(node, reminderType, detailLevel);
     if (customText) return customText;
     const phrase = simplifyTaskPhrase(node);
@@ -2359,9 +2364,15 @@ export default function App() {
         return `提醒您，${phrase}。`;
       }
 
-      const leadSpeech = formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
+      // The admin's 15-second quick test overrides only its spoken lead time.
+      // All formal announcements continue using the saved personal preference.
+      const effectiveLeadSeconds = leadSecondsOverride ??
+        getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
+      const leadSpeech = formatReminderLeadSpeech(
+        Math.floor(effectiveLeadSeconds / 60), effectiveLeadSeconds % 60
+      );
       const taskTime = formatTaskTimeForVoice(node.time);
-      if (getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds) === 0) {
+      if (effectiveLeadSeconds === 0) {
         return `提醒您，現在要${phrase}。${detailHint}`;
       }
       return taskTime
@@ -5501,7 +5512,7 @@ export default function App() {
               )}
               advanceEnabled={personalSettings.reminderPre5Enabled}
               ontimeEnabled={personalSettings.reminderNowEnabled}
-              buildSpeech={(cue, taskTime, title, detail) => {
+              buildSpeech={(cue, taskTime, title, detail, leadSeconds) => {
                 const [hour, minute] = taskTime.split(":");
                 const testNode = {
                   id: "admin-timed-voice-test",
@@ -5512,7 +5523,9 @@ export default function App() {
                   details: "",
                   checklist: [],
                 };
-                return buildReminderSpeechText(testNode, cue === "advance" ? "pre5" : "now", detail);
+                return buildReminderSpeechText(
+                  testNode, cue === "advance" ? "pre5" : "now", detail, leadSeconds
+                );
               }}
             />
           </div>
