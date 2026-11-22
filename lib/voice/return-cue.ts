@@ -2,8 +2,6 @@
  * Best-effort return-to-timeline cue selection. This never changes the
  * scheduled reminder state or the currently configured speech detail level.
  */
-export const RETURN_CUE_MIN_AWAY_MS = 2 * 60 * 1000;
-export const RETURN_CUE_PENDING_LIFETIME_MS = 2 * 60 * 1000;
 export const RETURN_CUE_LAST_TASK_GRACE_MINUTES = 30;
 export const RETURN_CUE_REMINDER_GUARD_SECONDS = 60;
 
@@ -23,18 +21,9 @@ function parseTaskMinute(value: unknown): number | null {
   return hour * 60 + minute;
 }
 
-export function hasBeenAwayLongEnough(awayAt: number | null, returnedAt: number): boolean {
-  return awayAt !== null
-    && Number.isFinite(awayAt)
-    && Number.isFinite(returnedAt)
-    && returnedAt - awayAt >= RETURN_CUE_MIN_AWAY_MS;
-}
-
-export function isReturnCuePendingFresh(pendingAt: number | null, at: number): boolean {
-  return pendingAt !== null
-    && Number.isFinite(at)
-    && at >= pendingAt
-    && at - pendingAt <= RETURN_CUE_PENDING_LIFETIME_MS;
+/** Only a real return from a hidden app can arm a task cue; elapsed time is irrelevant. */
+export function shouldQueueReturnCue(wasAppBackgrounded: boolean, visibilityState: string): boolean {
+  return wasAppBackgrounded && visibilityState === "visible";
 }
 
 export type SelectedReturnCue<T> = { task: T; kind: "current" | "next" };
