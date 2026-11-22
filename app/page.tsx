@@ -5230,6 +5230,9 @@ export default function App() {
                     {isVoiceSettingsSaving ? "套用中" : "套用管理預設聲音"}
                   </button>
                 </div>
+                <p className="mt-2 text-[11px] font-medium leading-5 text-[#7B7B74]">
+                  試聽前請確認手機未開啟靜音模式，並調整媒體音量。
+                </p>
 
                 <div className="mt-3 rounded-xl border border-[#E6EAF0] bg-white p-3">
                   <button
