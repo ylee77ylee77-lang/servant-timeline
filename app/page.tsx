@@ -46,10 +46,9 @@ import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/
 import { getServiceActivationState } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
 import {
-  hasBeenAwayLongEnough,
   isNearFormalVoiceReminder,
-  isReturnCuePendingFresh,
   selectReturnCueTask,
+  shouldQueueReturnCue,
 } from '@/lib/voice/return-cue';
 import { getCustomReminderText, getReminderTextField, normalizeReminderText, type ReminderDetailLevel } from '@/lib/voice/reminder-overrides';
 import {
@@ -391,8 +390,7 @@ export default function App() {
   const voiceStartupRequestRef = useRef<AbortController | null>(null);
   const voiceStartupSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const voiceStartupRunRef = useRef(0);
-  const timelineAwayAtRef = useRef<number | null>(null);
-  const previousActiveTabRef = useRef(activeTab);
+  const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
 
   // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的個人提醒設定。
@@ -2674,66 +2672,53 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [isVoiceEnabled, currentService]);
 
-  // Returning from another app, or from another in-app tab, may warrant one
-  // very short task cue. Keep it separate from the scheduled reminder clock.
+  // Only a real app/background return arms a one-off task cue. Navigation
+  // among tabs inside the app does not arm it, regardless of time elapsed.
   useEffect(() => {
-    const wasTimeline = previousActiveTabRef.current === "timeline";
-    const nowTimeline = activeTab === "timeline";
-    previousActiveTabRef.current = activeTab;
-    if (wasTimeline && !nowTimeline && timelineAwayAtRef.current === null) {
-      timelineAwayAtRef.current = Date.now();
-    } else if (!wasTimeline && nowTimeline) {
-      const returnedAt = Date.now();
-      const awayAt = timelineAwayAtRef.current;
-      timelineAwayAtRef.current = null;
-      if (hasBeenAwayLongEnough(awayAt, returnedAt)) {
-        setReturnCuePendingAt(returnedAt);
-      }
-    }
-  }, [activeTab]);
+    const markAppBackgrounded = () => {
+      appWasInBackgroundRef.current = true;
+    };
+    const handleAppForegrounded = () => {
+      if (!shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)) return;
+      // pageshow, focus and visibilitychange may all fire for one return.
+      appWasInBackgroundRef.current = false;
+      if (isVoiceEnabled) setReturnCuePendingAt(Date.now());
+    };
+    const trackAppVisibility = () => {
+      if (document.visibilityState === "hidden") markAppBackgrounded();
+      else handleAppForegrounded();
+    };
 
-  useEffect(() => {
-    const trackVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        if (activeTab === "timeline" && timelineAwayAtRef.current === null) {
-          timelineAwayAtRef.current = Date.now();
-        }
-        return;
-      }
-      if (activeTab !== "timeline") return;
-      const returnedAt = Date.now();
-      const awayAt = timelineAwayAtRef.current;
-      timelineAwayAtRef.current = null;
-      if (hasBeenAwayLongEnough(awayAt, returnedAt)) {
-        setReturnCuePendingAt(returnedAt);
-      }
-    };
-    document.addEventListener("visibilitychange", trackVisibility);
-    window.addEventListener("pageshow", trackVisibility);
-    window.addEventListener("focus", trackVisibility);
+    document.addEventListener("visibilitychange", trackAppVisibility);
+    window.addEventListener("pagehide", markAppBackgrounded);
+    window.addEventListener("pageshow", handleAppForegrounded);
+    window.addEventListener("focus", handleAppForegrounded);
     return () => {
-      document.removeEventListener("visibilitychange", trackVisibility);
-      window.removeEventListener("pageshow", trackVisibility);
-      window.removeEventListener("focus", trackVisibility);
+      document.removeEventListener("visibilitychange", trackAppVisibility);
+      window.removeEventListener("pagehide", markAppBackgrounded);
+      window.removeEventListener("pageshow", handleAppForegrounded);
+      window.removeEventListener("focus", handleAppForegrounded);
     };
-  }, [activeTab]);
+  }, [isVoiceEnabled]);
 
   useEffect(() => {
     if (returnCuePendingAt === null) return;
     if (activeTab !== "timeline" || (typeof document !== "undefined" && document.visibilityState !== "visible")) return;
 
     const now = new Date();
-    if (!isReturnCuePendingFresh(returnCuePendingAt, now.getTime())
-      || !isVoiceEnabled || !personalSettings.voiceReminderEnabled
+    if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled
       || checkinStatus === "not_checked_in" || !isServiceType(currentService)
       || isCurrentServiceVoiceClosed() || !showLiveTimeline) {
       setReturnCuePendingAt(null);
       return;
     }
-    // A suspended tab may resume before service/timeline data finish loading.
+    // A resumed page can still be loading or playing an existing announcement.
+    // Retry on the existing one-second clock rather than losing this return cue.
     if (isLoading) return;
-    setReturnCuePendingAt(null);
-    if (filteredNodes.length === 0) return;
+    if (filteredNodes.length === 0) {
+      setReturnCuePendingAt(null);
+      return;
+    }
     if (voiceProcessingRef.current || voiceQueueRef.current.length > 0
       || voiceStartupSourceRef.current) return;
 
@@ -2743,9 +2728,14 @@ export default function App() {
     if (isNearFormalVoiceReminder(
       filteredNodes, now, leadSeconds,
       personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
-    )) return;
+    )) {
+      // An imminent formal announcement already supplies the task reminder.
+      setReturnCuePendingAt(null);
+      return;
+    }
 
     const selected = selectReturnCueTask(filteredNodes, now);
+    setReturnCuePendingAt(null);
     if (!selected) return;
     const phrase = simplifyTaskPhrase(selected.task);
     speak(selected.kind === "current"
@@ -2753,7 +2743,7 @@ export default function App() {
       : `下一個任務，${phrase}。`);
   }, [
     returnCuePendingAt, activeTab, isVoiceEnabled, isLoading, checkinStatus,
-    currentService, checkedInService, showLiveTimeline, filteredNodes.length,
+    currentDate, currentService, checkedInService, showLiveTimeline, filteredNodes.length,
     personalSettings.role, personalSettings.name,
     personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
     personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
