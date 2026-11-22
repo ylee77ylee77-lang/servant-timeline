@@ -109,3 +109,13 @@ test("test cleanup cancels timer, voice network requests and active playback", (
   assert.ok(source.includes("timerRef.current = window.setInterval(tick, 250)"));
   assert.ok(source.includes("document.visibilityState") === false);
 });
+
+test("off-hours test does not depend on check-in, service dates or the live reminder switch", () => {
+  const source = card();
+  assert.ok(!source.includes("checkinStatus"));
+  assert.ok(!source.includes("getServiceActivationState"));
+  assert.ok(!source.includes("isCurrentServiceVoiceClosed"));
+  assert.ok(!source.includes("setIsVoiceEnabled"));
+  assert.ok(source.includes('preview: true'));
+  assert.ok(source.includes('aria-label="管理員即時語音測試"'));
+});
