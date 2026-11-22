@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { createHash, createSign } from "node:crypto";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { getRequestClientIp } from "@/lib/network/church-wifi";
+import { canUseRegularVoiceWithoutCheckIn, canTestVoiceBeforeCheckIn, VOICE_STARTUP_CONFIRMATION } from "@/lib/voice/startup-confirmation";
 import { isServiceType, type ServiceType } from "@/lib/services/catalog";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
@@ -633,9 +634,11 @@ const authorizeRegularVoice = async (
   return Boolean(checkIn);
 };
 
-const consumeRateLimit = (request: NextRequest, isPreview: boolean) => {
+const consumeRateLimit = (request: NextRequest, isPreview: boolean, userScope = "") => {
   const now = Date.now();
-  const key = `${getRequestClientIp(request) || "unknown"}|${isPreview ? "preview" : "regular"}`;
+  // Startup requests are per authenticated user so volunteers sharing the
+  // church Wi-Fi IP cannot exhaust each other's 20/minute test allowance.
+  const key = `${getRequestClientIp(request) || "unknown"}|${isPreview ? "preview" : "regular"}|${userScope || "shared"}`;
   const limit = isPreview ? PREVIEW_REQUESTS_PER_WINDOW : REGULAR_REQUESTS_PER_WINDOW;
   const current = rateBuckets.get(key);
 
@@ -739,9 +742,17 @@ export async function POST(request: NextRequest) {
   try {
     const user = await requireActiveUser(request);
     const body = await request.json().catch(() => ({}));
-    const speechText = normalizeSpeechText(body.text);
     const isPreview = body.preview === true;
+    const isStartupTest = body.startupTest === true;
+    const speechText = isStartupTest ? VOICE_STARTUP_CONFIRMATION : normalizeSpeechText(body.text);
     const serviceType = normalizeInput(body.serviceType || body.currentService || "");
+
+    if (isStartupTest && isPreview) {
+      return NextResponse.json(
+        { error: "語音啟動測試不可同時使用管理員預覽模式。", fallbackToBrowser: false },
+        { status: 400 }
+      );
+    }
 
     if (isPreview && !user.roles.includes("admin")) {
       return NextResponse.json(
@@ -750,7 +761,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!isPreview && !isServiceType(serviceType)) {
+    // Only a fixed startup phrase may skip check-in for coordinators.
+    // Verified admins can also skip check-in for regular live speech.
+    const startupMaySkipCheckIn = isStartupTest && canTestVoiceBeforeCheckIn(user.roles);
+    if (!isPreview && !startupMaySkipCheckIn && !isServiceType(serviceType)) {
       return NextResponse.json(
         { error: "缺少有效堂次，語音助理拒絕連線。", fallbackToBrowser: false },
         { status: 400 }
@@ -776,7 +790,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rateState = consumeRateLimit(request, isPreview);
+    const rateState = consumeRateLimit(request, isPreview || isStartupTest, isStartupTest ? user.userId : "");
     if (!rateState.allowed) {
       return NextResponse.json(
         {
@@ -792,7 +806,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!isPreview && isServiceType(serviceType)) {
+    if (!isPreview && !startupMaySkipCheckIn && isServiceType(serviceType)) {
       const current = await ensureCurrentServices();
       if (!current.activeServiceTypes.includes(serviceType)) {
         return NextResponse.json(
@@ -805,16 +819,20 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);
-      if (!isAuthorized) {
-        return NextResponse.json(
-          {
-            error: "請先完成今日已開放場次的報到，再使用語音助理。",
-            fallbackToBrowser: false,
-            reason: "active_check_in_required"
-          },
-          { status: 403 }
-        );
+      // An authenticated, active admin may use scheduled speech without
+      // check-in. Other roles must have a published-service check-in.
+      if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {
+        const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);
+        if (!isAuthorized) {
+          return NextResponse.json(
+            {
+              error: "請先完成今日已開放場次的報到，再使用語音助理。",
+              fallbackToBrowser: false,
+              reason: "active_check_in_required"
+            },
+            { status: 403 }
+          );
+        }
       }
 
     }
@@ -827,7 +845,7 @@ export async function POST(request: NextRequest) {
       ? clampNumber(previewTuning.speakingRate, profile.speakingRate, 0.8, 1.1)
       : clampNumber(globalSettings.speaking_rate, profile.speakingRate, 0.8, 1.1);
 
-    const cacheVersion = `${isPreview ? "preview" : "regular"}|chirp3-v3|${
+    const cacheVersion = `${isStartupTest ? "startup" : isPreview ? "preview" : "regular"}|chirp3-v3|${
       globalSettings.cache_version || "v1"
     }`;
     const cacheKey = createSharedAudioCacheKey(speechText, profile, speakingRate, cacheVersion);

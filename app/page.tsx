@@ -44,6 +44,12 @@ import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 import { getServiceActivationState } from '@/lib/services/service-activation';
+import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
+import {
+  isNearFormalVoiceReminder,
+  selectReturnCueTask,
+  shouldQueueReturnCue,
+} from '@/lib/voice/return-cue';
 import { getCustomReminderText, getReminderTextField, normalizeReminderText, type ReminderDetailLevel } from '@/lib/voice/reminder-overrides';
 import {
   DEFAULT_REMINDER_LEAD_MINUTES,
@@ -380,6 +386,14 @@ export default function App() {
   const voiceProcessingRef = useRef(false);
   const voiceWakeLockRef = useRef<any>(null);
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+  // Dedicated startup audio: cancel async fetch and playback on every off/on.
+  const voiceStartupRequestRef = useRef<AbortController | null>(null);
+  const voiceStartupSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const voiceStartupRunRef = useRef(0);
+  const voiceStartupCachedClipRef = useRef<{ key: string; blob: Blob } | null>(null);
+  const voiceStartupPreloadRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
+  const appWasInBackgroundRef = useRef(false);
+  const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
 
   // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的個人提醒設定。
   const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v12";
@@ -924,6 +938,8 @@ export default function App() {
   };
 
   const stopVoiceAssistantForServiceEnd = () => {
+    stopVoiceStartupConfirmation();
+    setReturnCuePendingAt(null);
     setIsVoiceEnabled(false);
     voiceQueueRef.current = [];
     voiceProcessingRef.current = false;
@@ -1927,7 +1943,11 @@ export default function App() {
       announcedNodesRef.current.clear();
       lastReminderDayRef.current = dayKey;
     }
-    if (!isVoiceEnabled || nodes.length === 0 || !personalSettings.voiceReminderEnabled) return;
+    // A fixed startup test is allowed before check-in; scheduled announcements
+    // require a check-in for non-admins. Admin role is verified by AuthProvider.
+    if (!isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
+      || isCurrentServiceVoiceClosed() || nodes.length === 0
+      || !personalSettings.voiceReminderEnabled) return;
 
     const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
     const currentServiceNodes = nodes
@@ -1959,6 +1979,8 @@ export default function App() {
   }, [
     currentDate,
     isVoiceEnabled,
+    isAdmin,
+    checkinStatus,
     nodes,
     currentService,
     personalSettings.role,
@@ -2536,91 +2558,188 @@ export default function App() {
     }
   }, []);
 
-  const getNextReminderInfo = () => {
-    if (!personalSettings.voiceReminderEnabled) return null;
+  // Keep the existing single-tap voice button. Unlike formal reminders,
+  // this fixed, server-authorized phrase is safe for a coordinator to test
+  // before check-in. It never announces the upcoming task or its details.
+  const stopVoiceStartupConfirmation = useCallback(() => {
+    voiceStartupRunRef.current += 1;
+    voiceStartupRequestRef.current?.abort();
+    voiceStartupRequestRef.current = null;
+    const source = voiceStartupSourceRef.current;
+    voiceStartupSourceRef.current = null;
+    if (source) {
+      source.onended = null;
+      try { source.stop(); } catch { /* Already finished. */ }
+      source.disconnect();
+    }
+  }, []);
 
-    const daySeconds = 24 * 60 * 60;
-    const now = currentDate ?? new Date();
-    const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-    const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
-    const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+  // Leaving this page must also stop any pending or currently playing test.
+  useEffect(() => () => stopVoiceStartupConfirmation(), [stopVoiceStartupConfirmation]);
 
-    const reminderCandidates = currentServiceNodes.flatMap((node) => {
-      const settings = getReminderSettings(node);
-      if (!settings.voiceReminderEnabled) return [];
+  const getVoiceStartupCacheKey = () =>
+    `${currentService}|${createVoiceCacheId(VOICE_STARTUP_CONFIRMATION, getVoiceProfile())}`;
 
-      const taskSeconds = timeToMinutes(node.time) * 60;
-      const candidates: any[] = [];
+  // Load the fixed confirmation once, so the button tap normally has no TTS
+  // network round trip. Keep this separate from formal task announcements.
+  const fetchVoiceStartupBlob = async (cacheKey: string, signal: AbortSignal): Promise<Blob> => {
+    const cacheUrl = `${window.location.origin}/voice-cache/startup-${encodeURIComponent(cacheKey)}.mp3`;
+    if ("caches" in window) {
+      try {
+        const storage = await caches.open(VOICE_AUDIO_CACHE_NAME);
+        const cached = await storage.match(cacheUrl);
+        if (cached && !signal.aborted) {
+          const blob = await cached.blob();
+          if (blob.size > 0) return blob;
+        }
+      } catch { /* Cache Storage is optional on private-browsing devices. */ }
+    }
+    if (signal.aborted) throw new Error("語音預載已取消。");
 
-      if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled
-          && (leadSeconds > 0 || !personalSettings.reminderNowEnabled)) {
-        const dueSeconds = (taskSeconds - leadSeconds + daySeconds) % daySeconds;
-        candidates.push({
-          node,
-          reminderType: "pre5" as const,
-          secondsUntil: (dueSeconds - currentSeconds + daySeconds) % daySeconds,
-          label: "提前提醒"
-        });
-      }
-
-      if (settings.reminderNowEnabled && personalSettings.reminderNowEnabled) {
-        candidates.push({
-          node,
-          reminderType: "now" as const,
-          secondsUntil: (taskSeconds - currentSeconds + daySeconds) % daySeconds,
-          label: "準點提醒"
-        });
-      }
-
-      return candidates;
+    const response = await fetch("/api/voice", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        startupTest: true,
+        voiceProfile: personalSettings.voiceProfile,
+        serviceType: currentService
+      }),
+      signal
     });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || "無法產生語音啟動測試。");
+    }
+    const contentType = response.headers.get("Content-Type") || "";
+    const blob = await response.blob();
+    if (!contentType.includes("audio/") || blob.size === 0) {
+      throw new Error("語音服務未傳回有效音檔。");
+    }
 
-    const nextReminder = reminderCandidates
-      .filter(item => item.secondsUntil > 0)
-      .sort((a, b) => a.secondsUntil - b.secondsUntil)[0];
+    if ("caches" in window && !signal.aborted) {
+      // Persistence is best effort; do not delay playback waiting for a disk write.
+      void caches.open(VOICE_AUDIO_CACHE_NAME)
+        .then(cache => cache.put(cacheUrl, new Response(blob, {
+          headers: { "Content-Type": "audio/mpeg" }
+        })))
+        .catch(() => {});
+    }
+    return blob;
+  };
 
-    if (!nextReminder) return null;
+  useEffect(() => {
+    // Coordinators and admins may hear the fixed test before check-in; admins
+    // can test at any time. The server still validates the authenticated role.
+    if (!personalSettingsLoaded || !session.access_token
+      || (!isAdmin && (!isServiceType(currentService) || isCurrentServiceVoiceClosed()))
+      || !(isAdmin || isCoordinator || checkinStatus !== "not_checked_in")) return;
 
-    return {
-      ...nextReminder,
-      minutesUntil: Math.ceil(nextReminder.secondsUntil / 60)
+    const key = getVoiceStartupCacheKey();
+    if (voiceStartupCachedClipRef.current?.key === key
+      || voiceStartupPreloadRef.current?.key === key) return;
+    const controller = new AbortController();
+    const pending: Promise<Blob | null> = fetchVoiceStartupBlob(key, controller.signal)
+      .then(blob => {
+        if (controller.signal.aborted) return null;
+        voiceStartupCachedClipRef.current = { key, blob };
+        return blob;
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (voiceStartupPreloadRef.current?.promise === pending) {
+          voiceStartupPreloadRef.current = null;
+        }
+      });
+    voiceStartupPreloadRef.current = { key, promise: pending };
+    return () => {
+      controller.abort();
+      if (voiceStartupPreloadRef.current?.promise === pending) {
+        voiceStartupPreloadRef.current = null;
+      }
     };
-  };
+  }, [
+    session.access_token, personalSettingsLoaded, personalSettings.voiceProfile,
+    currentService, checkinStatus, isAdmin, isCoordinator,
+    globalVoiceSettings.cache_version, globalVoiceSettings.speaking_rate,
+    globalVoiceSettings.pitch, globalVoiceSettings.volume_gain_db
+  ]);
 
-  const buildVoiceReminderStatusText = () => {
-    const nextReminder = getNextReminderInfo();
+  const playVoiceStartupConfirmation = async () => {
+    stopVoiceStartupConfirmation();
+    const runId = voiceStartupRunRef.current;
+    const controller = new AbortController();
+    voiceStartupRequestRef.current = controller;
 
-    if (!nextReminder) {
-      return "語音助理已開啟。";
+    try {
+      const context = getVoiceAudioContext();
+      if (!context) throw new Error("這台裝置無法使用語音播放器。");
+      // Resume during the actual button tap to enable audio on mobile Safari.
+      if (context.state !== "running") await context.resume();
+      if (runId !== voiceStartupRunRef.current) return;
+      if (context.state !== "running") throw new Error("手機尚未允許播放音訊。");
+
+      const key = getVoiceStartupCacheKey();
+      let blob: Blob | null = voiceStartupCachedClipRef.current?.key === key
+        ? voiceStartupCachedClipRef.current.blob
+        : null;
+      if (!blob && voiceStartupPreloadRef.current?.key === key) {
+        blob = await voiceStartupPreloadRef.current.promise;
+      }
+      if (!blob && !controller.signal.aborted) {
+        blob = await fetchVoiceStartupBlob(key, controller.signal);
+      }
+      if (runId !== voiceStartupRunRef.current || controller.signal.aborted || !blob) return;
+      voiceStartupCachedClipRef.current = { key, blob };
+
+      const arrayBuffer = await blob.arrayBuffer();
+      const decoded = await context.decodeAudioData(arrayBuffer);
+      if (runId !== voiceStartupRunRef.current || controller.signal.aborted) return;
+      if (context.state !== "running") await context.resume();
+      if (runId !== voiceStartupRunRef.current || controller.signal.aborted) return;
+      if (context.state !== "running") throw new Error("手機音訊播放器未能啟動。");
+
+      const source = context.createBufferSource();
+      source.buffer = decoded;
+      source.connect(context.destination);
+      voiceStartupSourceRef.current = source;
+      source.onended = () => {
+        if (voiceStartupSourceRef.current === source) voiceStartupSourceRef.current = null;
+        source.disconnect();
+      };
+      source.start(context.currentTime);
+    } catch (err: unknown) {
+      if (controller.signal.aborted || runId !== voiceStartupRunRef.current) return;
+      console.error("語音助理啟動確認播放失敗:", err);
+      const reason = err instanceof Error ? err.message : "無法播放啟動確認語音。";
+      setCustomAlert({
+        isOpen: true,
+        message: `啟動語音未能播放：${reason}。請解除手機靜音模式、提高媒體音量，並檢查藍牙耳機或 AirPlay 音訊輸出。`
+      });
+    } finally {
+      if (voiceStartupRequestRef.current === controller) voiceStartupRequestRef.current = null;
     }
-
-    if (nextReminder.reminderType === "pre5") {
-      return buildReminderSpeechText(nextReminder.node, "pre5");
-    }
-
-    return "語音助理已開啟。";
-  };
-
-  const announceVoiceReminderStatus = () => {
-    speak(buildVoiceReminderStatusText());
   };
 
   const handleToggleVoiceReminder = () => {
     const nextEnabled = !isVoiceEnabled;
 
-    if (nextEnabled && isCurrentServiceVoiceClosed()) {
+    if (nextEnabled && !isAdmin && isCurrentServiceVoiceClosed()) {
       setCustomAlert({ isOpen: true, message: "本場服事已結束，語音助理已關閉。" });
       stopVoiceAssistantForServiceEnd();
       return;
     }
 
     setIsVoiceEnabled(nextEnabled);
-
     if (nextEnabled) {
-      // 一定要在使用者點擊事件當下直接播放提示音，以解鎖手機音訊權限。
       void requestVoiceWakeLock();
-      speak(buildVoiceReminderStatusText());
+      void playVoiceStartupConfirmation();
     } else {
+      stopVoiceStartupConfirmation();
+      setReturnCuePendingAt(null);
+      voiceQueueRef.current = [];
       setVoiceAssistantMessage("");
       void releaseVoiceWakeLock();
     }
@@ -2630,7 +2749,9 @@ export default function App() {
     if (!isVoiceEnabled) return;
 
     const checkVoiceClose = () => {
-      if (isCurrentServiceVoiceClosed()) {
+      // Admins retain the assistant outside worship hours for testing and
+      // administration; non-admin sessions still close when a service ends.
+      if (!isAdmin && isCurrentServiceVoiceClosed()) {
         stopVoiceAssistantForServiceEnd();
       }
     };
@@ -2638,7 +2759,85 @@ export default function App() {
     checkVoiceClose();
     const timer = window.setInterval(checkVoiceClose, 60_000);
     return () => window.clearInterval(timer);
-  }, [isVoiceEnabled, currentService]);
+  }, [isVoiceEnabled, currentService, isAdmin]);
+
+  // Only a real app/background return arms a one-off task cue. Navigation
+  // among tabs inside the app does not arm it, regardless of time elapsed.
+  useEffect(() => {
+    const markAppBackgrounded = () => {
+      appWasInBackgroundRef.current = true;
+    };
+    const handleAppForegrounded = () => {
+      if (!shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)) return;
+      // pageshow, focus and visibilitychange may all fire for one return.
+      appWasInBackgroundRef.current = false;
+      if (isVoiceEnabled) setReturnCuePendingAt(Date.now());
+    };
+    const trackAppVisibility = () => {
+      if (document.visibilityState === "hidden") markAppBackgrounded();
+      else handleAppForegrounded();
+    };
+
+    document.addEventListener("visibilitychange", trackAppVisibility);
+    window.addEventListener("pagehide", markAppBackgrounded);
+    window.addEventListener("pageshow", handleAppForegrounded);
+    window.addEventListener("focus", handleAppForegrounded);
+    return () => {
+      document.removeEventListener("visibilitychange", trackAppVisibility);
+      window.removeEventListener("pagehide", markAppBackgrounded);
+      window.removeEventListener("pageshow", handleAppForegrounded);
+      window.removeEventListener("focus", handleAppForegrounded);
+    };
+  }, [isVoiceEnabled]);
+
+  useEffect(() => {
+    if (returnCuePendingAt === null) return;
+    if (activeTab !== "timeline" || (typeof document !== "undefined" && document.visibilityState !== "visible")) return;
+
+    const now = new Date();
+    if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled
+      || (!isAdmin && checkinStatus === "not_checked_in") || !isServiceType(currentService)
+      || isCurrentServiceVoiceClosed() || !showLiveTimeline) {
+      setReturnCuePendingAt(null);
+      return;
+    }
+    // A resumed page can still be loading or playing an existing announcement.
+    // Retry on the existing one-second clock rather than losing this return cue.
+    if (isLoading) return;
+    if (filteredNodes.length === 0) {
+      setReturnCuePendingAt(null);
+      return;
+    }
+    if (voiceProcessingRef.current || voiceQueueRef.current.length > 0
+      || voiceStartupSourceRef.current) return;
+
+    const leadSeconds = getReminderLeadSeconds(
+      personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
+    );
+    if (isNearFormalVoiceReminder(
+      filteredNodes, now, leadSeconds,
+      personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
+    )) {
+      // An imminent formal announcement already supplies the task reminder.
+      setReturnCuePendingAt(null);
+      return;
+    }
+
+    const selected = selectReturnCueTask(filteredNodes, now);
+    setReturnCuePendingAt(null);
+    if (!selected) return;
+    const phrase = simplifyTaskPhrase(selected.task);
+    speak(selected.kind === "current"
+      ? `目前任務，${phrase}。`
+      : `下一個任務，${phrase}。`);
+  }, [
+    returnCuePendingAt, activeTab, isVoiceEnabled, isAdmin, isLoading, checkinStatus,
+    currentDate, currentService, checkedInService, showLiveTimeline, filteredNodes.length,
+    personalSettings.role, personalSettings.name,
+    personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
+    personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
+    personalSettings.reminderLeadSeconds
+  ]);
 
   const displayCheckinName = authDisplayName;
   const isCurrentUserAdmin = isAdmin;
@@ -5874,7 +6073,8 @@ export default function App() {
               ? "bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm"
               : "bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]"
           }`}
-          title="開啟或關閉語音助理"
+          title={isVoiceEnabled ? `${VOICE_STARTUP_CONFIRMATION} 若沒聽到測試語音，請解除靜音、提高媒體音量，並檢查耳機。` : "開啟或關閉語音助理"}
+          aria-pressed={isVoiceEnabled}
         >
           {isVoiceEnabled ? (
             <Volume2 className="w-3.5 h-3.5" />
@@ -6168,6 +6368,12 @@ export default function App() {
                 key={item.key}
                 type="button"
                 onClick={() => {
+                  if (item.key === "timeline" && isVoiceEnabled) {
+                    const audioContext = getVoiceAudioContext();
+                    if (audioContext && audioContext.state !== "running") {
+                      void audioContext.resume().catch(() => {});
+                    }
+                  }
                   setActiveTab(item.key);
                 }}
                 className={`flex min-h-[44px] flex-1 min-w-0 flex-col items-center justify-center gap-0.5 transition-all duration-300 px-1.5 py-1 rounded-xl ${
