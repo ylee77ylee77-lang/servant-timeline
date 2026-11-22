@@ -1943,7 +1943,11 @@ export default function App() {
       announcedNodesRef.current.clear();
       lastReminderDayRef.current = dayKey;
     }
-    if (!isVoiceEnabled || nodes.length === 0 || !personalSettings.voiceReminderEnabled) return;
+    // A fixed startup test is allowed before check-in; scheduled announcements
+    // require a check-in for non-admins. Admin role is verified by AuthProvider.
+    if (!isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
+      || isCurrentServiceVoiceClosed() || nodes.length === 0
+      || !personalSettings.voiceReminderEnabled) return;
 
     const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
     const currentServiceNodes = nodes
@@ -1975,6 +1979,8 @@ export default function App() {
   }, [
     currentDate,
     isVoiceEnabled,
+    isAdmin,
+    checkinStatus,
     nodes,
     currentService,
     personalSettings.role,
@@ -2625,10 +2631,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Volunteers must have checked in; coordinators/admins can test earlier.
-    // The actual endpoint continues enforcing authorization for every TTS request.
+    // Coordinators and admins may hear the fixed test before check-in; admins
+    // can test at any time. The server still validates the authenticated role.
     if (!personalSettingsLoaded || !session.access_token
-      || !isServiceType(currentService) || isCurrentServiceVoiceClosed()
+      || (!isAdmin && (!isServiceType(currentService) || isCurrentServiceVoiceClosed()))
       || !(isAdmin || isCoordinator || checkinStatus !== "not_checked_in")) return;
 
     const key = getVoiceStartupCacheKey();
@@ -2720,7 +2726,7 @@ export default function App() {
   const handleToggleVoiceReminder = () => {
     const nextEnabled = !isVoiceEnabled;
 
-    if (nextEnabled && isCurrentServiceVoiceClosed()) {
+    if (nextEnabled && !isAdmin && isCurrentServiceVoiceClosed()) {
       setCustomAlert({ isOpen: true, message: "本場服事已結束，語音助理已關閉。" });
       stopVoiceAssistantForServiceEnd();
       return;
@@ -2743,7 +2749,9 @@ export default function App() {
     if (!isVoiceEnabled) return;
 
     const checkVoiceClose = () => {
-      if (isCurrentServiceVoiceClosed()) {
+      // Admins retain the assistant outside worship hours for testing and
+      // administration; non-admin sessions still close when a service ends.
+      if (!isAdmin && isCurrentServiceVoiceClosed()) {
         stopVoiceAssistantForServiceEnd();
       }
     };
@@ -2751,7 +2759,7 @@ export default function App() {
     checkVoiceClose();
     const timer = window.setInterval(checkVoiceClose, 60_000);
     return () => window.clearInterval(timer);
-  }, [isVoiceEnabled, currentService]);
+  }, [isVoiceEnabled, currentService, isAdmin]);
 
   // Only a real app/background return arms a one-off task cue. Navigation
   // among tabs inside the app does not arm it, regardless of time elapsed.
@@ -2788,7 +2796,7 @@ export default function App() {
 
     const now = new Date();
     if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled
-      || checkinStatus === "not_checked_in" || !isServiceType(currentService)
+      || (!isAdmin && checkinStatus === "not_checked_in") || !isServiceType(currentService)
       || isCurrentServiceVoiceClosed() || !showLiveTimeline) {
       setReturnCuePendingAt(null);
       return;
@@ -2823,7 +2831,7 @@ export default function App() {
       ? `目前任務，${phrase}。`
       : `下一個任務，${phrase}。`);
   }, [
-    returnCuePendingAt, activeTab, isVoiceEnabled, isLoading, checkinStatus,
+    returnCuePendingAt, activeTab, isVoiceEnabled, isAdmin, isLoading, checkinStatus,
     currentDate, currentService, checkedInService, showLiveTimeline, filteredNodes.length,
     personalSettings.role, personalSettings.name,
     personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
