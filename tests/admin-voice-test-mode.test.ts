@@ -73,7 +73,7 @@ test("admin test is only rendered for an admin and uses the existing formal spee
   assert.ok(source.slice(placement - 90, placement).includes("isCurrentUserAdmin &&"));
   const testProps = source.slice(placement, placement + 1000);
   assert.ok(testProps.includes("session.access_token"));
-  assert.ok(testProps.includes("buildReminderSpeechText(testNode"));
+  assert.ok(testProps.includes("return buildReminderSpeechText("));
   assert.ok(testProps.includes("getReminderLeadSeconds("));
   assert.ok(testProps.includes("personalSettings.reminderPre5Enabled"));
   assert.ok(testProps.includes("personalSettings.reminderNowEnabled"));
