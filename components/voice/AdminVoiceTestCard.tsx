@@ -337,8 +337,8 @@ export function AdminVoiceTestCard({
       </div>
       <p className="mt-2 text-[11px] leading-5 text-[#7B7B74]">
         {mode === "quick"
-          ? "20 秒後播放提前提醒，再隔 15 秒播放準點提醒。兩種提醒都測試。"
-          : "依目前的提醒開關及提前時間測試；若開啟提前提醒，20 秒後先播報，再於所設定的間隔後準點播報。"}
+          ? `${ADMIN_TEST_START_WAIT_SECONDS} 秒後播放提前提醒，再隔 ${ADMIN_TEST_QUICK_LEAD_SECONDS} 秒播放準點提醒。兩種提醒都測試。`
+          : `依目前的提醒開關及提前時間測試；若開啟提前提醒，${ADMIN_TEST_START_WAIT_SECONDS} 秒後先播報，再於所設定的間隔後準點播報。`}
       </p>
 
       {plan && (
