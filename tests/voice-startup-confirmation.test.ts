@@ -57,17 +57,19 @@ test("existing voice button stays in place and confirms each transition to ON", 
 
 test("startup request sends no free-form speech and uses personal voice", () => {
   const source = page();
+  const requestStart = source.indexOf("  const fetchVoiceStartupBlob = async (");
   const start = source.indexOf("  const playVoiceStartupConfirmation = async () => {");
   const end = source.indexOf("  const handleToggleVoiceReminder = () => {", start);
-  assert.ok(start > 0 && end > start);
+  assert.ok(requestStart > 0 && start > requestStart && end > start);
+  const request = source.slice(requestStart, start);
   const startup = source.slice(start, end);
   assert.ok(startup.includes("await context.resume()"));
-  assert.ok(startup.indexOf("await context.resume()") < startup.indexOf('fetch("/api/voice"'));
-  assert.ok(startup.includes("startupTest: true"));
-  assert.ok(startup.includes("voiceProfile: personalSettings.voiceProfile"));
-  assert.ok(startup.includes("serviceType: currentService"));
-  assert.ok(!startup.includes("text: VOICE_STARTUP_CONFIRMATION"), "phrase must be fixed on server");
-  assert.ok(startup.includes("signal: controller.signal"));
+  assert.ok(request.includes('fetch("/api/voice"'));
+  assert.ok(request.includes("startupTest: true"));
+  assert.ok(request.includes("voiceProfile: personalSettings.voiceProfile"));
+  assert.ok(request.includes("serviceType: currentService"));
+  assert.ok(!request.includes("text: VOICE_STARTUP_CONFIRMATION"), "phrase must be fixed on server");
+  assert.ok(request.includes("signal"));
   assert.ok(startup.includes("context.decodeAudioData(arrayBuffer)"));
   assert.ok(startup.includes("source.start(context.currentTime)"));
 });
@@ -97,4 +99,34 @@ test("the current voice controls do not add another switch or confirmation dialo
   assert.ok(!workflow.includes('setPersonalSettings('));
   assert.ok(!workflow.includes('setVoiceSettingsDraft('));
   assert.ok(workflow.includes('請解除手機靜音模式、提高媒體音量'));
+});
+
+test("startup audio prefetches after auth, respects role/check-in, and reuses local cache", () => {
+  const source = page();
+  const start = source.indexOf("  const getVoiceStartupCacheKey = () =>");
+  const end = source.indexOf("  const handleToggleVoiceReminder = () => {", start);
+  assert.ok(start > 0 && end > start);
+  const workflow = source.slice(start, end);
+  assert.ok(workflow.includes('createVoiceCacheId(VOICE_STARTUP_CONFIRMATION, getVoiceProfile())'));
+  assert.ok(workflow.includes("personalSettingsLoaded"));
+  assert.ok(workflow.includes("session.access_token"));
+  assert.ok(workflow.includes('checkinStatus !== "not_checked_in"'));
+  assert.ok(workflow.includes('storage.match(cacheUrl)'));
+  assert.ok(workflow.includes('caches.open(VOICE_AUDIO_CACHE_NAME)'));
+  assert.ok(workflow.includes('voiceStartupPreloadRef.current?.promise'));
+  assert.ok(workflow.includes('voiceStartupCachedClipRef.current?.key === key'));
+  assert.ok(workflow.includes('blob = await fetchVoiceStartupBlob(key, controller.signal)'));
+  assert.ok(!workflow.includes("setCheckedInService("));
+  assert.ok(!workflow.includes("announcedNodesRef.current.add"));
+});
+
+test("formal reminder schedule remains global across in-app pages", () => {
+  const source = page();
+  const scheduleStart = source.indexOf("  // --- 【整合自動化】語音助理提醒核心觸發邏輯 ---");
+  const scheduleEnd = source.indexOf("  const fetchData = async", scheduleStart);
+  const schedule = source.slice(scheduleStart, scheduleEnd);
+  assert.ok(schedule.includes("if (!isVoiceEnabled"));
+  assert.ok(schedule.includes("speak(buildReminderSpeechText(node, reminderType))"));
+  assert.ok(!schedule.includes('activeTab !== "timeline"'), "formal speech must not depend on timeline page");
+  assert.ok(!schedule.includes('activeTab === "timeline"'), "formal speech must not depend on timeline page");
 });
