@@ -141,3 +141,16 @@ test("an interrupted test cancels an in-flight playback and settles its promise"
   assert.ok(source.includes("source.onended = null"));
   assert.ok(source.includes("queuedRef.current.length > 0) void playQueued()"));
 });
+
+test("quick and personal test announce the same lead interval used by the test clock", () => {
+  const source = card();
+  const app = page();
+  assert.ok(source.includes('buildSpeech("advance", testPlan.taskTime, selectedTitle, detailLevel, testPlan.leadSeconds)'));
+  assert.ok(source.includes('buildSpeech("ontime", testPlan.taskTime, selectedTitle, detailLevel, testPlan.leadSeconds)'));
+  assert.ok(app.includes("leadSecondsOverride: number | null = null"));
+  assert.ok(app.includes("const effectiveLeadSeconds = leadSecondsOverride ??"));
+  assert.ok(app.includes("Math.floor(effectiveLeadSeconds / 60), effectiveLeadSeconds % 60"));
+  assert.ok(app.includes("if (effectiveLeadSeconds === 0)"));
+  assert.ok(app.includes('buildSpeech={(cue, taskTime, title, detail, leadSeconds) =>'));
+  assert.ok(app.includes('testNode, cue === "advance" ? "pre5" : "now", detail, leadSeconds'));
+});
