@@ -1,4 +1,4 @@
-import { isReminderDue } from "./reminder-timing";
+import { isReminderDue } from "./reminder-timing.ts";
 
 /** A private, local test clock. Never shared with live schedule state. */
 export type AdminVoiceTestCue = "advance" | "ontime";
