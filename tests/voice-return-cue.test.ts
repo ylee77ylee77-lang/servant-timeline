@@ -3,11 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
   RETURN_CUE_LAST_TASK_GRACE_MINUTES,
-  RETURN_CUE_MIN_AWAY_MS,
-  RETURN_CUE_PENDING_LIFETIME_MS,
   RETURN_CUE_REMINDER_GUARD_SECONDS,
-  hasBeenAwayLongEnough,
-  isReturnCuePendingFresh,
+  shouldQueueReturnCue,
   selectReturnCueTask,
   isNearFormalVoiceReminder,
 } from "../lib/voice/return-cue.ts";
@@ -19,17 +16,12 @@ const tasks = [
   { id: "mid", title: "崗位確認", time: "18:00" },
 ];
 
-test("return cues require at least two minutes away and expire after two minutes", () => {
-  assert.equal(RETURN_CUE_MIN_AWAY_MS, 120000);
-  assert.equal(RETURN_CUE_PENDING_LIFETIME_MS, 120000);
-  assert.equal(hasBeenAwayLongEnough(null, 125000), false);
-  assert.equal(hasBeenAwayLongEnough(5000, 124999), false);
-  assert.equal(hasBeenAwayLongEnough(5000, 125000), true);
-  assert.equal(hasBeenAwayLongEnough(5000, 130000), true);
-  assert.equal(isReturnCuePendingFresh(null, 123000), false);
-  assert.equal(isReturnCuePendingFresh(5000, 125000), true);
-  assert.equal(isReturnCuePendingFresh(5000, 125001), false);
-  assert.equal(isReturnCuePendingFresh(125000, 124999), false);
+test("each external background-to-foreground return can cue immediately, without a duration threshold", () => {
+  assert.equal(shouldQueueReturnCue(false, "visible"), false);
+  assert.equal(shouldQueueReturnCue(false, "hidden"), false);
+  assert.equal(shouldQueueReturnCue(true, "hidden"), false);
+  assert.equal(shouldQueueReturnCue(true, "visible"), true);
+  assert.equal(shouldQueueReturnCue(true, "prerender"), false);
 });
 
 test("current or next cue is selected from chronologically ordered valid task times", () => {
@@ -73,11 +65,17 @@ test("scheduled reminder guard works across midnight and 15-second lead interval
 test("return-to-timeline integration reuses existing voice queue and never mutates reminders", () => {
   const source = fs.readFileSync("app/page.tsx", "utf8");
   assert.ok(source.includes('const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null)'));
-  assert.ok(source.includes('previousActiveTabRef.current === "timeline"'));
-  assert.ok(source.includes('document.addEventListener("visibilitychange", trackVisibility)'));
-  assert.ok(source.includes('window.addEventListener("pageshow", trackVisibility)'));
-  assert.ok(source.includes('window.addEventListener("focus", trackVisibility)'));
-  assert.ok(source.includes('hasBeenAwayLongEnough(awayAt, returnedAt)'));
+  assert.ok(source.includes('const appWasInBackgroundRef = useRef(false)'));
+  assert.ok(!source.includes("previousActiveTabRef"));
+  assert.ok(!source.includes("timelineAwayAtRef"));
+  assert.ok(source.includes('document.addEventListener("visibilitychange", trackAppVisibility)'));
+  assert.ok(source.includes('window.addEventListener("pagehide", markAppBackgrounded)'));
+  assert.ok(source.includes('window.addEventListener("pageshow", handleAppForegrounded)'));
+  assert.ok(source.includes('window.addEventListener("focus", handleAppForegrounded)'));
+  assert.ok(source.includes('shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)'));
+  assert.ok(source.includes('appWasInBackgroundRef.current = false'));
+  assert.ok(!source.includes("hasBeenAwayLongEnough"));
+  assert.ok(!source.includes("isReturnCuePendingFresh"));
   const cue = source.slice(
     source.indexOf("  useEffect(() => {\n    if (returnCuePendingAt === null) return;"),
     source.indexOf("  const displayCheckinName = authDisplayName;")
