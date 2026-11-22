@@ -634,9 +634,11 @@ const authorizeRegularVoice = async (
   return Boolean(checkIn);
 };
 
-const consumeRateLimit = (request: NextRequest, isPreview: boolean) => {
+const consumeRateLimit = (request: NextRequest, isPreview: boolean, userScope = "") => {
   const now = Date.now();
-  const key = `${getRequestClientIp(request) || "unknown"}|${isPreview ? "preview" : "regular"}`;
+  // Startup requests are per authenticated user so volunteers sharing the
+  // church Wi-Fi IP cannot exhaust each other's 20/minute test allowance.
+  const key = `${getRequestClientIp(request) || "unknown"}|${isPreview ? "preview" : "regular"}|${userScope || "shared"}`;
   const limit = isPreview ? PREVIEW_REQUESTS_PER_WINDOW : REGULAR_REQUESTS_PER_WINDOW;
   const current = rateBuckets.get(key);
 
@@ -788,7 +790,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rateState = consumeRateLimit(request, isPreview || isStartupTest);
+    const rateState = consumeRateLimit(request, isPreview || isStartupTest, isStartupTest ? user.userId : "");
     if (!rateState.allowed) {
       return NextResponse.json(
         {
