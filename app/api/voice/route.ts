@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import { createHash, createSign } from "node:crypto";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { getRequestClientIp } from "@/lib/network/church-wifi";
-import { canTestVoiceBeforeCheckIn, VOICE_STARTUP_CONFIRMATION } from "@/lib/voice/startup-confirmation";
+import { canUseRegularVoiceWithoutCheckIn, canTestVoiceBeforeCheckIn, VOICE_STARTUP_CONFIRMATION } from "@/lib/voice/startup-confirmation";
 import { isServiceType, type ServiceType } from "@/lib/services/catalog";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
@@ -761,8 +761,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Only a fixed startup phrase may skip check-in, and only for authenticated
-    // coordinators/admins. Regular task speech and admin preview stay protected.
+    // Only a fixed startup phrase may skip check-in for coordinators.
+    // Verified admins can also skip check-in for regular live speech.
     const startupMaySkipCheckIn = isStartupTest && canTestVoiceBeforeCheckIn(user.roles);
     if (!isPreview && !startupMaySkipCheckIn && !isServiceType(serviceType)) {
       return NextResponse.json(
@@ -819,16 +819,20 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);
-      if (!isAuthorized) {
-        return NextResponse.json(
-          {
-            error: "請先完成今日已開放場次的報到，再使用語音助理。",
-            fallbackToBrowser: false,
-            reason: "active_check_in_required"
-          },
-          { status: 403 }
-        );
+      // An authenticated, active admin may use scheduled speech without
+      // check-in. Other roles must have a published-service check-in.
+      if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {
+        const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);
+        if (!isAuthorized) {
+          return NextResponse.json(
+            {
+              error: "請先完成今日已開放場次的報到，再使用語音助理。",
+              fallbackToBrowser: false,
+              reason: "active_check_in_required"
+            },
+            { status: 403 }
+          );
+        }
       }
 
     }
