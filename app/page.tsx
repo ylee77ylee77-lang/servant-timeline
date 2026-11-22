@@ -45,6 +45,12 @@ import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 import { getServiceActivationState } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
+import {
+  hasBeenAwayLongEnough,
+  isNearFormalVoiceReminder,
+  isReturnCuePendingFresh,
+  selectReturnCueTask,
+} from '@/lib/voice/return-cue';
 import { getCustomReminderText, getReminderTextField, normalizeReminderText, type ReminderDetailLevel } from '@/lib/voice/reminder-overrides';
 import {
   DEFAULT_REMINDER_LEAD_MINUTES,
@@ -385,6 +391,9 @@ export default function App() {
   const voiceStartupRequestRef = useRef<AbortController | null>(null);
   const voiceStartupSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const voiceStartupRunRef = useRef(0);
+  const timelineAwayAtRef = useRef<number | null>(null);
+  const previousActiveTabRef = useRef(activeTab);
+  const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
 
   // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的個人提醒設定。
   const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v12";
@@ -930,6 +939,7 @@ export default function App() {
 
   const stopVoiceAssistantForServiceEnd = () => {
     stopVoiceStartupConfirmation();
+    setReturnCuePendingAt(null);
     setIsVoiceEnabled(false);
     voiceQueueRef.current = [];
     voiceProcessingRef.current = false;
@@ -2643,6 +2653,7 @@ export default function App() {
       void playVoiceStartupConfirmation();
     } else {
       stopVoiceStartupConfirmation();
+      setReturnCuePendingAt(null);
       voiceQueueRef.current = [];
       setVoiceAssistantMessage("");
       void releaseVoiceWakeLock();
@@ -2662,6 +2673,92 @@ export default function App() {
     const timer = window.setInterval(checkVoiceClose, 60_000);
     return () => window.clearInterval(timer);
   }, [isVoiceEnabled, currentService]);
+
+  // Returning from another app, or from another in-app tab, may warrant one
+  // very short task cue. Keep it separate from the scheduled reminder clock.
+  useEffect(() => {
+    const wasTimeline = previousActiveTabRef.current === "timeline";
+    const nowTimeline = activeTab === "timeline";
+    previousActiveTabRef.current = activeTab;
+    if (wasTimeline && !nowTimeline && timelineAwayAtRef.current === null) {
+      timelineAwayAtRef.current = Date.now();
+    } else if (!wasTimeline && nowTimeline) {
+      const returnedAt = Date.now();
+      const awayAt = timelineAwayAtRef.current;
+      timelineAwayAtRef.current = null;
+      if (hasBeenAwayLongEnough(awayAt, returnedAt)) {
+        setReturnCuePendingAt(returnedAt);
+      }
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    const trackVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        if (activeTab === "timeline" && timelineAwayAtRef.current === null) {
+          timelineAwayAtRef.current = Date.now();
+        }
+        return;
+      }
+      if (activeTab !== "timeline") return;
+      const returnedAt = Date.now();
+      const awayAt = timelineAwayAtRef.current;
+      timelineAwayAtRef.current = null;
+      if (hasBeenAwayLongEnough(awayAt, returnedAt)) {
+        setReturnCuePendingAt(returnedAt);
+      }
+    };
+    document.addEventListener("visibilitychange", trackVisibility);
+    window.addEventListener("pageshow", trackVisibility);
+    window.addEventListener("focus", trackVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", trackVisibility);
+      window.removeEventListener("pageshow", trackVisibility);
+      window.removeEventListener("focus", trackVisibility);
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (returnCuePendingAt === null) return;
+    if (activeTab !== "timeline" || (typeof document !== "undefined" && document.visibilityState !== "visible")) return;
+
+    const now = new Date();
+    if (!isReturnCuePendingFresh(returnCuePendingAt, now.getTime())
+      || !isVoiceEnabled || !personalSettings.voiceReminderEnabled
+      || checkinStatus === "not_checked_in" || !isServiceType(currentService)
+      || isCurrentServiceVoiceClosed() || !showLiveTimeline) {
+      setReturnCuePendingAt(null);
+      return;
+    }
+    // A suspended tab may resume before service/timeline data finish loading.
+    if (isLoading) return;
+    setReturnCuePendingAt(null);
+    if (filteredNodes.length === 0) return;
+    if (voiceProcessingRef.current || voiceQueueRef.current.length > 0
+      || voiceStartupSourceRef.current) return;
+
+    const leadSeconds = getReminderLeadSeconds(
+      personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
+    );
+    if (isNearFormalVoiceReminder(
+      filteredNodes, now, leadSeconds,
+      personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
+    )) return;
+
+    const selected = selectReturnCueTask(filteredNodes, now);
+    if (!selected) return;
+    const phrase = simplifyTaskPhrase(selected.task);
+    speak(selected.kind === "current"
+      ? `目前任務，${phrase}。`
+      : `下一個任務，${phrase}。`);
+  }, [
+    returnCuePendingAt, activeTab, isVoiceEnabled, isLoading, checkinStatus,
+    currentService, checkedInService, showLiveTimeline, filteredNodes.length,
+    personalSettings.role, personalSettings.name,
+    personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
+    personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
+    personalSettings.reminderLeadSeconds
+  ]);
 
   const displayCheckinName = authDisplayName;
   const isCurrentUserAdmin = isAdmin;
@@ -6192,6 +6289,12 @@ export default function App() {
                 key={item.key}
                 type="button"
                 onClick={() => {
+                  if (item.key === "timeline" && isVoiceEnabled) {
+                    const audioContext = getVoiceAudioContext();
+                    if (audioContext && audioContext.state !== "running") {
+                      void audioContext.resume().catch(() => {});
+                    }
+                  }
                   setActiveTab(item.key);
                 }}
                 className={`flex min-h-[44px] flex-1 min-w-0 flex-col items-center justify-center gap-0.5 transition-all duration-300 px-1.5 py-1 rounded-xl ${
