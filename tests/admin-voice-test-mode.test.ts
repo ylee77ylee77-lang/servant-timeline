@@ -119,3 +119,25 @@ test("off-hours test does not depend on check-in, service dates or the live remi
   assert.ok(source.includes('preview: true'));
   assert.ok(source.includes('aria-label="管理員即時語音測試"'));
 });
+
+test("diagnostics report scheduled trigger and actual playback separately", () => {
+  const source = card();
+  assert.ok(source.includes('expectedAt: testPlan.dueAt - secondsBefore * 1000'));
+  assert.ok(source.includes('expectedAt: testPlan.dueAt, triggeredAt: time.getTime()'));
+  assert.ok(source.includes('playbackStartedAt: Date.now()'));
+  assert.ok(source.includes('playbackEndedAt: Date.now()'));
+  assert.ok(source.includes("預定觸發"));
+  assert.ok(source.includes("實際觸發"));
+  assert.ok(source.includes("播放器開始"));
+  assert.ok(source.includes("不能證明手機喇叭或耳機實際有聲音"));
+  assert.ok(!source.includes("已完成播放</div>"));
+});
+
+test("an interrupted test cancels an in-flight playback and settles its promise", () => {
+  const source = card();
+  assert.ok(source.includes("finishPlaybackRef.current = finish"));
+  assert.ok(source.includes("finishPlaybackRef.current = null;"));
+  assert.ok(source.includes("finish?.()"));
+  assert.ok(source.includes("source.onended = null"));
+  assert.ok(source.includes("queuedRef.current.length > 0) void playQueued()"));
+});
