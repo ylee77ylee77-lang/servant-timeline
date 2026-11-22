@@ -44,6 +44,7 @@ import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 import { getServiceActivationState } from '@/lib/services/service-activation';
+import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
 import { getCustomReminderText, getReminderTextField, normalizeReminderText, type ReminderDetailLevel } from '@/lib/voice/reminder-overrides';
 import {
   DEFAULT_REMINDER_LEAD_MINUTES,
@@ -380,6 +381,10 @@ export default function App() {
   const voiceProcessingRef = useRef(false);
   const voiceWakeLockRef = useRef<any>(null);
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+  // Dedicated startup audio: cancel async fetch and playback on every off/on.
+  const voiceStartupRequestRef = useRef<AbortController | null>(null);
+  const voiceStartupSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const voiceStartupRunRef = useRef(0);
 
   // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的個人提醒設定。
   const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v12";
@@ -924,6 +929,7 @@ export default function App() {
   };
 
   const stopVoiceAssistantForServiceEnd = () => {
+    stopVoiceStartupConfirmation();
     setIsVoiceEnabled(false);
     voiceQueueRef.current = [];
     voiceProcessingRef.current = false;
@@ -2536,73 +2542,87 @@ export default function App() {
     }
   }, []);
 
-  const getNextReminderInfo = () => {
-    if (!personalSettings.voiceReminderEnabled) return null;
-
-    const daySeconds = 24 * 60 * 60;
-    const now = currentDate ?? new Date();
-    const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-    const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
-    const currentServiceNodes = [...filteredNodes].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
-
-    const reminderCandidates = currentServiceNodes.flatMap((node) => {
-      const settings = getReminderSettings(node);
-      if (!settings.voiceReminderEnabled) return [];
-
-      const taskSeconds = timeToMinutes(node.time) * 60;
-      const candidates: any[] = [];
-
-      if (settings.reminderPre5Enabled && personalSettings.reminderPre5Enabled
-          && (leadSeconds > 0 || !personalSettings.reminderNowEnabled)) {
-        const dueSeconds = (taskSeconds - leadSeconds + daySeconds) % daySeconds;
-        candidates.push({
-          node,
-          reminderType: "pre5" as const,
-          secondsUntil: (dueSeconds - currentSeconds + daySeconds) % daySeconds,
-          label: "提前提醒"
-        });
-      }
-
-      if (settings.reminderNowEnabled && personalSettings.reminderNowEnabled) {
-        candidates.push({
-          node,
-          reminderType: "now" as const,
-          secondsUntil: (taskSeconds - currentSeconds + daySeconds) % daySeconds,
-          label: "準點提醒"
-        });
-      }
-
-      return candidates;
-    });
-
-    const nextReminder = reminderCandidates
-      .filter(item => item.secondsUntil > 0)
-      .sort((a, b) => a.secondsUntil - b.secondsUntil)[0];
-
-    if (!nextReminder) return null;
-
-    return {
-      ...nextReminder,
-      minutesUntil: Math.ceil(nextReminder.secondsUntil / 60)
-    };
+  // Keep the existing single-tap voice button. Unlike formal reminders,
+  // this fixed, server-authorized phrase is safe for a coordinator to test
+  // before check-in. It never announces the upcoming task or its details.
+  const stopVoiceStartupConfirmation = () => {
+    voiceStartupRunRef.current += 1;
+    voiceStartupRequestRef.current?.abort();
+    voiceStartupRequestRef.current = null;
+    const source = voiceStartupSourceRef.current;
+    voiceStartupSourceRef.current = null;
+    if (source) {
+      source.onended = null;
+      try { source.stop(); } catch { /* Already finished. */ }
+      source.disconnect();
+    }
   };
 
-  const buildVoiceReminderStatusText = () => {
-    const nextReminder = getNextReminderInfo();
+  const playVoiceStartupConfirmation = async () => {
+    stopVoiceStartupConfirmation();
+    const runId = voiceStartupRunRef.current;
+    const controller = new AbortController();
+    voiceStartupRequestRef.current = controller;
 
-    if (!nextReminder) {
-      return "語音助理已開啟。";
+    try {
+      const context = getVoiceAudioContext();
+      if (!context) throw new Error("這台裝置無法使用語音播放器。");
+      // Resume during the actual button tap to enable audio on mobile Safari.
+      if (context.state !== "running") await context.resume();
+      if (runId !== voiceStartupRunRef.current) return;
+      if (context.state !== "running") throw new Error("手機尚未允許播放音訊。");
+
+      const response = await fetch("/api/voice", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          startupTest: true,
+          voiceProfile: personalSettings.voiceProfile,
+          serviceType: currentService
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || "無法產生語音啟動測試。");
+      }
+      const contentType = response.headers.get("Content-Type") || "";
+      const blob = await response.blob();
+      if (!contentType.includes("audio/") || blob.size === 0) {
+        throw new Error("語音服務未傳回有效音檔。");
+      }
+
+      const arrayBuffer = await blob.arrayBuffer();
+      const decoded = await context.decodeAudioData(arrayBuffer);
+      if (runId !== voiceStartupRunRef.current || controller.signal.aborted) return;
+      if (context.state !== "running") await context.resume();
+      if (runId !== voiceStartupRunRef.current || controller.signal.aborted) return;
+      if (context.state !== "running") throw new Error("手機音訊播放器未能啟動。");
+
+      const source = context.createBufferSource();
+      source.buffer = decoded;
+      source.connect(context.destination);
+      voiceStartupSourceRef.current = source;
+      source.onended = () => {
+        if (voiceStartupSourceRef.current === source) voiceStartupSourceRef.current = null;
+        source.disconnect();
+      };
+      source.start(context.currentTime);
+    } catch (err: unknown) {
+      if (controller.signal.aborted || runId !== voiceStartupRunRef.current) return;
+      console.error("語音助理啟動確認播放失敗:", err);
+      const reason = err instanceof Error ? err.message : "無法播放啟動確認語音。";
+      setCustomAlert({
+        isOpen: true,
+        message: `啟動語音未能播放：${reason}。請解除手機靜音模式、提高媒體音量，並檢查藍牙耳機或 AirPlay 音訊輸出。`
+      });
+    } finally {
+      if (voiceStartupRequestRef.current === controller) voiceStartupRequestRef.current = null;
     }
-
-    if (nextReminder.reminderType === "pre5") {
-      return buildReminderSpeechText(nextReminder.node, "pre5");
-    }
-
-    return "語音助理已開啟。";
-  };
-
-  const announceVoiceReminderStatus = () => {
-    speak(buildVoiceReminderStatusText());
   };
 
   const handleToggleVoiceReminder = () => {
@@ -2615,12 +2635,12 @@ export default function App() {
     }
 
     setIsVoiceEnabled(nextEnabled);
-
     if (nextEnabled) {
-      // 一定要在使用者點擊事件當下直接播放提示音，以解鎖手機音訊權限。
       void requestVoiceWakeLock();
-      speak(buildVoiceReminderStatusText());
+      void playVoiceStartupConfirmation();
     } else {
+      stopVoiceStartupConfirmation();
+      voiceQueueRef.current = [];
       setVoiceAssistantMessage("");
       void releaseVoiceWakeLock();
     }
@@ -5874,7 +5894,8 @@ export default function App() {
               ? "bg-[#F25D6B]/10 text-[#F25D6B] border-[#F25D6B]/20 shadow-sm"
               : "bg-white/80 text-[#7B7B74] border-[#E6EAF0] hover:bg-[#F3EEFF]"
           }`}
-          title="開啟或關閉語音助理"
+          title={isVoiceEnabled ? "語音助理已開啟。若沒聽到測試語音，請解除靜音、提高媒體音量，並檢查耳機。" : "開啟或關閉語音助理"}
+          aria-pressed={isVoiceEnabled}
         >
           {isVoiceEnabled ? (
             <Volume2 className="w-3.5 h-3.5" />
