@@ -390,6 +390,8 @@ export default function App() {
   const voiceStartupRequestRef = useRef<AbortController | null>(null);
   const voiceStartupSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const voiceStartupRunRef = useRef(0);
+  const voiceStartupCachedClipRef = useRef<{ key: string; blob: Blob } | null>(null);
+  const voiceStartupPreloadRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
   const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
 
@@ -2569,6 +2571,96 @@ export default function App() {
   // Leaving this page must also stop any pending or currently playing test.
   useEffect(() => () => stopVoiceStartupConfirmation(), [stopVoiceStartupConfirmation]);
 
+  const getVoiceStartupCacheKey = () =>
+    `${currentService}|${createVoiceCacheId(VOICE_STARTUP_CONFIRMATION, getVoiceProfile())}`;
+
+  // Load the fixed confirmation once, so the button tap normally has no TTS
+  // network round trip. Keep this separate from formal task announcements.
+  const fetchVoiceStartupBlob = async (cacheKey: string, signal: AbortSignal): Promise<Blob> => {
+    const cacheUrl = `${window.location.origin}/voice-cache/startup-${encodeURIComponent(cacheKey)}.mp3`;
+    if ("caches" in window) {
+      try {
+        const storage = await caches.open(VOICE_AUDIO_CACHE_NAME);
+        const cached = await storage.match(cacheUrl);
+        if (cached && !signal.aborted) {
+          const blob = await cached.blob();
+          if (blob.size > 0) return blob;
+        }
+      } catch { /* Cache Storage is optional on private-browsing devices. */ }
+    }
+    if (signal.aborted) throw new Error("語音預載已取消。");
+
+    const response = await fetch("/api/voice", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        startupTest: true,
+        voiceProfile: personalSettings.voiceProfile,
+        serviceType: currentService
+      }),
+      signal
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || "無法產生語音啟動測試。");
+    }
+    const contentType = response.headers.get("Content-Type") || "";
+    const blob = await response.blob();
+    if (!contentType.includes("audio/") || blob.size === 0) {
+      throw new Error("語音服務未傳回有效音檔。");
+    }
+
+    if ("caches" in window && !signal.aborted) {
+      // Persistence is best effort; do not delay playback waiting for a disk write.
+      void caches.open(VOICE_AUDIO_CACHE_NAME)
+        .then(cache => cache.put(cacheUrl, new Response(blob, {
+          headers: { "Content-Type": "audio/mpeg" }
+        })))
+        .catch(() => {});
+    }
+    return blob;
+  };
+
+  useEffect(() => {
+    // Volunteers must have checked in; coordinators/admins can test earlier.
+    // The actual endpoint continues enforcing authorization for every TTS request.
+    if (!personalSettingsLoaded || !session.access_token
+      || !isServiceType(currentService) || isCurrentServiceVoiceClosed()
+      || !(isAdmin || isCoordinator || checkinStatus !== "not_checked_in")) return;
+
+    const key = getVoiceStartupCacheKey();
+    if (voiceStartupCachedClipRef.current?.key === key
+      || voiceStartupPreloadRef.current?.key === key) return;
+    const controller = new AbortController();
+    const pending: Promise<Blob | null> = fetchVoiceStartupBlob(key, controller.signal)
+      .then(blob => {
+        if (controller.signal.aborted) return null;
+        voiceStartupCachedClipRef.current = { key, blob };
+        return blob;
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (voiceStartupPreloadRef.current?.promise === pending) {
+          voiceStartupPreloadRef.current = null;
+        }
+      });
+    voiceStartupPreloadRef.current = { key, promise: pending };
+    return () => {
+      controller.abort();
+      if (voiceStartupPreloadRef.current?.promise === pending) {
+        voiceStartupPreloadRef.current = null;
+      }
+    };
+  }, [
+    session.access_token, personalSettingsLoaded, personalSettings.voiceProfile,
+    currentService, checkinStatus, isAdmin, isCoordinator,
+    globalVoiceSettings.cache_version, globalVoiceSettings.speaking_rate,
+    globalVoiceSettings.pitch, globalVoiceSettings.volume_gain_db
+  ]);
+
   const playVoiceStartupConfirmation = async () => {
     stopVoiceStartupConfirmation();
     const runId = voiceStartupRunRef.current;
@@ -2583,29 +2675,18 @@ export default function App() {
       if (runId !== voiceStartupRunRef.current) return;
       if (context.state !== "running") throw new Error("手機尚未允許播放音訊。");
 
-      const response = await fetch("/api/voice", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          startupTest: true,
-          voiceProfile: personalSettings.voiceProfile,
-          serviceType: currentService
-        }),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error || "無法產生語音啟動測試。");
+      const key = getVoiceStartupCacheKey();
+      let blob: Blob | null = voiceStartupCachedClipRef.current?.key === key
+        ? voiceStartupCachedClipRef.current.blob
+        : null;
+      if (!blob && voiceStartupPreloadRef.current?.key === key) {
+        blob = await voiceStartupPreloadRef.current.promise;
       }
-      const contentType = response.headers.get("Content-Type") || "";
-      const blob = await response.blob();
-      if (!contentType.includes("audio/") || blob.size === 0) {
-        throw new Error("語音服務未傳回有效音檔。");
+      if (!blob && !controller.signal.aborted) {
+        blob = await fetchVoiceStartupBlob(key, controller.signal);
       }
+      if (runId !== voiceStartupRunRef.current || controller.signal.aborted || !blob) return;
+      voiceStartupCachedClipRef.current = { key, blob };
 
       const arrayBuffer = await blob.arrayBuffer();
       const decoded = await context.decodeAudioData(arrayBuffer);
@@ -2682,7 +2763,7 @@ export default function App() {
       if (!shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)) return;
       // pageshow, focus and visibilitychange may all fire for one return.
       appWasInBackgroundRef.current = false;
-      if (isVoiceEnabled) setReturnCuePendingAt(Date.now());
+      if (isVoiceEnabled && activeTab === "timeline") setReturnCuePendingAt(Date.now());
     };
     const trackAppVisibility = () => {
       if (document.visibilityState === "hidden") markAppBackgrounded();
@@ -2699,7 +2780,7 @@ export default function App() {
       window.removeEventListener("pageshow", handleAppForegrounded);
       window.removeEventListener("focus", handleAppForegrounded);
     };
-  }, [isVoiceEnabled]);
+  }, [isVoiceEnabled, activeTab]);
 
   useEffect(() => {
     if (returnCuePendingAt === null) return;
