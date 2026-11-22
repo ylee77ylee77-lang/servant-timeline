@@ -57,6 +57,15 @@ test("preview synthesis and playback failures are not silent or mistaken for suc
   assert.ok(preview.includes('setCustomAlert({ isOpen: true, message: err?.message || "試聽語音失敗，請稍後再試。" })'));
 });
 
+test("voice preview reminds iPhone users to check silent mode and media volume", () => {
+  const source = readPage();
+  assert.ok(source.includes("試聽前請確認手機未開啟靜音模式，並調整媒體音量。"));
+  const previewButton = source.indexOf('{isVoicePreviewing ? "試聽中" : "試聽 Zephyr / Iapetus"}');
+  const hint = source.indexOf("試聽前請確認手機未開啟靜音模式");
+  const deviceTest = source.indexOf("測試手機音效（不使用雲端）");
+  assert.ok(previewButton >= 0 && hint > previewButton && deviceTest > hint);
+});
+
 test("device tone isolates local audio output from cloud TTS", () => {
   const source = readPage();
   const start = source.indexOf('  const testPreviewDeviceTone = async () => {');
