@@ -46,7 +46,7 @@ export function AdminVoiceTestCard({
   const [played, setPlayed] = useState<TestEvent[]>([]);
 
   const runRef = useRef(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
