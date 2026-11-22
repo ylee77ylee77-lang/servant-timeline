@@ -20,7 +20,7 @@ test("timeline displays the start time in soft grey above each marker without re
 
 test("admin preview reuses real reminder wording for both timing and all detail levels", () => {
   const source = page();
-  assert.ok(source.includes('const buildReminderSpeechText = (node: any, reminderType: "pre5" | "now", detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel)'));
+  assert.match(source, /const buildReminderSpeechText = \(\s*node: any,\s*reminderType: "pre5" \| "now",\s*detailLevel: ReminderDetailLevel = personalSettings\.voiceDetailLevel,\s*leadSecondsOverride: number \| null = null/);
   assert.ok(source.includes('const detailHint = buildDetailedVoiceHint(node, detailLevel);'));
   assert.ok(source.includes('const customText = getCustomReminderText(node, reminderType, detailLevel);'));
   assert.ok(source.includes('if (customText) return customText;'));
@@ -37,7 +37,7 @@ test("admin preview reuses real reminder wording for both timing and all detail 
 
 test("simple early reminder is a direct task cue without mentioning delay or clock time", () => {
   const source = page();
-  const start = source.indexOf('  const buildReminderSpeechText = (node: any');
+  const start = source.indexOf('  const buildReminderSpeechText = (');
   const end = source.indexOf('  // An admin test uses the existing voice preview endpoint', start);
   assert.ok(start > 0 && end > start);
   const builder = source.slice(start, end);
@@ -49,7 +49,9 @@ test("simple early reminder is a direct task cue without mentioning delay or clo
   // Live reminders and preview must continue to call this same builder.
   assert.ok(source.includes('speak(buildReminderSpeechText(node, reminderType));'));
   assert.ok(source.includes('buildReminderSpeechText(node, timelinePreviewTiming, timelinePreviewDetail)'));
-  assert.ok(builder.includes('formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)'));
+  assert.ok(builder.includes("const effectiveLeadSeconds = leadSecondsOverride ??"));
+  assert.ok(builder.includes("getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)"));
+  assert.ok(builder.includes("Math.floor(effectiveLeadSeconds / 60), effectiveLeadSeconds % 60"));
 });
 
 test("only administrators can see and request preview audio; preview is independent from live reminders", () => {
