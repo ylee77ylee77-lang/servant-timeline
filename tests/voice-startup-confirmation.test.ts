@@ -4,6 +4,7 @@ import fs from "node:fs";
 import {
   VOICE_STARTUP_CONFIRMATION,
   canTestVoiceBeforeCheckIn,
+  canUseRegularVoiceWithoutCheckIn,
 } from "../lib/voice/startup-confirmation.ts";
 
 const page = () => fs.readFileSync("app/page.tsx", "utf8");
@@ -129,4 +130,44 @@ test("formal reminder schedule remains global across in-app pages", () => {
   assert.ok(schedule.includes("speak(buildReminderSpeechText(node, reminderType))"));
   assert.ok(!schedule.includes('activeTab !== "timeline"'), "formal speech must not depend on timeline page");
   assert.ok(!schedule.includes('activeTab === "timeline"'), "formal speech must not depend on timeline page");
+});
+
+test("admin has the coordinator startup confirmation and live speech without check-in", () => {
+  assert.equal(canTestVoiceBeforeCheckIn(["admin"]), true);
+  assert.equal(canUseRegularVoiceWithoutCheckIn(["admin"]), true);
+  assert.equal(canUseRegularVoiceWithoutCheckIn(["coordinator"]), false);
+  assert.equal(canUseRegularVoiceWithoutCheckIn(["volunteer"]), false);
+  assert.equal(canUseRegularVoiceWithoutCheckIn([]), false);
+  assert.equal(canUseRegularVoiceWithoutCheckIn(["volunteer", "admin"]), true);
+
+  const source = page();
+  const api = route();
+  assert.ok(source.includes('if (nextEnabled && !isAdmin && isCurrentServiceVoiceClosed())'));
+  assert.ok(source.includes('if (!isAdmin && isCurrentServiceVoiceClosed())'));
+  assert.ok(source.includes('(!isAdmin && checkinStatus === "not_checked_in")'));
+  assert.ok(source.includes('(!isAdmin && (!isServiceType(currentService) || isCurrentServiceVoiceClosed()))'));
+  assert.ok(source.includes('if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {'));
+  assert.ok(api.includes('if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {'));
+  assert.ok(api.includes("const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);"));
+  assert.ok(api.includes("const user = await requireActiveUser(request);"));
+  assert.ok(api.includes("const current = await ensureCurrentServices();"));
+  assert.ok(api.includes("if (!current.activeServiceTypes.includes(serviceType))"));
+});
+
+test("admin live speech and return cues are not gated by check-in; coordinator still is", () => {
+  const source = page();
+  const start = source.indexOf("  // --- 【整合自動化】語音助理提醒核心觸發邏輯 ---");
+  const end = source.indexOf("  const fetchData = async", start);
+  const live = source.slice(start, end);
+  assert.ok(live.includes('(!isAdmin && checkinStatus === "not_checked_in")'));
+  assert.ok(live.includes("isCurrentServiceVoiceClosed()"));
+  assert.ok(live.includes("isVoiceEnabled"));
+  assert.ok(live.includes("speak(buildReminderSpeechText(node, reminderType))"));
+  const cueStart = source.indexOf('  useEffect(() => {\n    if (returnCuePendingAt === null) return;');
+  const cueEnd = source.indexOf("  const displayCheckinName = authDisplayName;", cueStart);
+  assert.ok(cueStart > 0 && cueEnd > cueStart);
+  const cue = source.slice(cueStart, cueEnd);
+  assert.ok(cue.includes('(!isAdmin && checkinStatus === "not_checked_in")'));
+  assert.ok(cue.includes('isCurrentServiceVoiceClosed()'));
+  assert.ok(!cue.includes("announcedNodesRef.current.add"));
 });
