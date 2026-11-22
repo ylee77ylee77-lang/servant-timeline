@@ -26,7 +26,13 @@ type Props = {
   buildSpeech: (cue: AdminVoiceTestCue, taskTime: string, title: string, detail: VoiceDetailLevel) => string;
 };
 
-type TestEvent = { cue: AdminVoiceTestCue; heardAt: string };
+type TestEvent = {
+  cue: AdminVoiceTestCue;
+  expectedAt: number;
+  triggeredAt: number;
+  playbackStartedAt?: number;
+  playbackEndedAt?: number;
+};
 
 const formatClock = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString("zh-TW", {
@@ -43,7 +49,7 @@ export function AdminVoiceTestCard({
   const [notice, setNotice] = useState("非崇拜時間也能測試。所有音訊只供此裝置試聽，不會更改正式任務。");
   const [plan, setPlan] = useState<AdminVoiceTestPlan | null>(null);
   const [nextCueCountdown, setNextCueCountdown] = useState("");
-  const [played, setPlayed] = useState<TestEvent[]>([]);
+  const [events, setEvents] = useState<TestEvent[]>([]);
 
   const runRef = useRef(0);
   const timerRef = useRef<number | null>(null);
@@ -100,7 +106,7 @@ export function AdminVoiceTestCard({
     stopResources();
     const run = runRef.current;
     setStage("preparing");
-    setPlayed([]);
+    setEvents([]);
     setPlan(null);
     setNextCueCountdown("");
     setNotice("正在啟用手機語音播放器…");
@@ -192,8 +198,12 @@ export function AdminVoiceTestCard({
               };
               finishPlaybackRef.current = finish;
               source.onended = finish;
-              try { source.start(context.currentTime); }
-              catch (error) {
+              try {
+                source.start(context.currentTime);
+                setEvents((previous) => previous.map((item) =>
+                  item.cue === cue ? { ...item, playbackStartedAt: Date.now() } : item
+                ));
+              } catch (error) {
                 finishPlaybackRef.current = null;
                 source.onended = null;
                 source.disconnect();
@@ -202,15 +212,17 @@ export function AdminVoiceTestCard({
               }
             });
             if (run !== runRef.current) return;
-            setPlayed((previous) => [...previous, { cue, heardAt: formatClock(Date.now()) }]);
-            setNotice(cue === "advance" ? "提前提醒播放完成，等待準點提醒。" : "準點提醒播放完成。");
+            setEvents((previous) => previous.map((item) =>
+              item.cue === cue ? { ...item, playbackEndedAt: Date.now() } : item
+            ));
+            setNotice(cue === "advance" ? "提前提醒播放器已完成，等待準點提醒。" : "準點提醒播放器已完成。");
           }
 
           if (run === runRef.current && scheduledRef.current.advance
             && scheduledRef.current.ontime && queuedRef.current.length === 0) {
             setStage("completed");
             setNextCueCountdown("");
-            setNotice("定時語音測試完成。兩種提醒各自依時間觸發，沒有寫入正式報時紀錄。");
+            setNotice("定時測試結束：排定的提醒已觸發並經播放器處理；請確認手機是否實際聽見聲音。正式紀錄未變更。");
           }
         } catch (error) {
           if (run !== runRef.current) return;
@@ -238,10 +250,17 @@ export function AdminVoiceTestCard({
         // Same priority as live reminders when advance is 0 seconds.
         if (nowSelected && !scheduledRef.current.ontime && due.ontime) {
           scheduledRef.current.ontime = true;
+          setEvents((previous) => [...previous, {
+            cue: "ontime", expectedAt: testPlan.dueAt, triggeredAt: time.getTime(),
+          }]);
           queue.current.push("ontime");
           void playQueued();
         } else if (preSelected && !scheduledRef.current.advance && due.advance) {
           scheduledRef.current.advance = true;
+          setEvents((previous) => [...previous, {
+            cue: "advance", expectedAt: testPlan.dueAt - secondsBefore * 1000,
+            triggeredAt: time.getTime(),
+          }]);
           queue.current.push("advance");
           void playQueued();
         }
@@ -353,15 +372,25 @@ export function AdminVoiceTestCard({
       <p role="status" aria-live="polite" className="mt-3 text-xs font-bold leading-5 text-[#6D55A3]">
         {notice}
       </p>
-      {played.length > 0 && (
-        <div className="mt-2 text-[11px] leading-5 text-[#7B7B74]">
-          {played.map((event) => (
-            <div key={event.cue}>{event.cue === "advance" ? "提前提醒" : "準點提醒"}：{event.heardAt} 已完成播放</div>
+      {events.length > 0 && (
+        <div className="mt-3 space-y-2 text-[11px] leading-5 text-[#7B7B74]" aria-label="語音計時診斷">
+          {events.map((event) => (
+            <div key={event.cue} className="rounded-xl border border-[#E6EAF0] bg-white p-3">
+              <strong className="text-[#1F2937]">{event.cue === "advance" ? "提前提醒" : "準點提醒"}</strong>
+              <div>預定觸發：{formatClock(event.expectedAt)}</div>
+              <div>實際觸發：{formatClock(event.triggeredAt)}（偏差 {((event.triggeredAt - event.expectedAt) / 1000).toFixed(1)} 秒）</div>
+              <div>
+                {event.playbackStartedAt
+                  ? `播放器開始：${formatClock(event.playbackStartedAt)}（觸發後 ${((event.playbackStartedAt - event.triggeredAt) / 1000).toFixed(1)} 秒）`
+                  : "播放器尚未開始，正在取得語音音檔"}
+              </div>
+              {event.playbackEndedAt && <div>播放器完成：{formatClock(event.playbackEndedAt)}</div>}
+            </div>
           ))}
         </div>
       )}
       <p className="mt-3 text-[11px] leading-5 text-[#7B7B74]">
-        iPhone 請保持畫面在前景。預覽語音仍有網路合成延遲，音檔播放時間可能晚於觸發時間。
+        iPhone 請保持畫面在前景。此處的「播放器開始／完成」是程式事件，不能證明手機喇叭或耳機實際有聲音；請以耳朵確認。
       </p>
     </section>
   );
