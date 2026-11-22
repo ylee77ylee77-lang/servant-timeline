@@ -2763,7 +2763,7 @@ export default function App() {
       if (!shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)) return;
       // pageshow, focus and visibilitychange may all fire for one return.
       appWasInBackgroundRef.current = false;
-      if (isVoiceEnabled && activeTab === "timeline") setReturnCuePendingAt(Date.now());
+      if (isVoiceEnabled) setReturnCuePendingAt(Date.now());
     };
     const trackAppVisibility = () => {
       if (document.visibilityState === "hidden") markAppBackgrounded();
@@ -2780,7 +2780,7 @@ export default function App() {
       window.removeEventListener("pageshow", handleAppForegrounded);
       window.removeEventListener("focus", handleAppForegrounded);
     };
-  }, [isVoiceEnabled, activeTab]);
+  }, [isVoiceEnabled]);
 
   useEffect(() => {
     if (returnCuePendingAt === null) return;
