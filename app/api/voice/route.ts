@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { createHash, createSign } from "node:crypto";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { getRequestClientIp } from "@/lib/network/church-wifi";
+import { canTestVoiceBeforeCheckIn, VOICE_STARTUP_CONFIRMATION } from "@/lib/voice/startup-confirmation";
 import { isServiceType, type ServiceType } from "@/lib/services/catalog";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
@@ -739,9 +740,17 @@ export async function POST(request: NextRequest) {
   try {
     const user = await requireActiveUser(request);
     const body = await request.json().catch(() => ({}));
-    const speechText = normalizeSpeechText(body.text);
     const isPreview = body.preview === true;
+    const isStartupTest = body.startupTest === true;
+    const speechText = isStartupTest ? VOICE_STARTUP_CONFIRMATION : normalizeSpeechText(body.text);
     const serviceType = normalizeInput(body.serviceType || body.currentService || "");
+
+    if (isStartupTest && isPreview) {
+      return NextResponse.json(
+        { error: "語音啟動測試不可同時使用管理員預覽模式。", fallbackToBrowser: false },
+        { status: 400 }
+      );
+    }
 
     if (isPreview && !user.roles.includes("admin")) {
       return NextResponse.json(
@@ -750,7 +759,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!isPreview && !isServiceType(serviceType)) {
+    // Only a fixed startup phrase may skip check-in, and only for authenticated
+    // coordinators/admins. Regular task speech and admin preview stay protected.
+    const startupMaySkipCheckIn = isStartupTest && canTestVoiceBeforeCheckIn(user.roles);
+    if (!isPreview && !startupMaySkipCheckIn && !isServiceType(serviceType)) {
       return NextResponse.json(
         { error: "缺少有效堂次，語音助理拒絕連線。", fallbackToBrowser: false },
         { status: 400 }
@@ -776,7 +788,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rateState = consumeRateLimit(request, isPreview);
+    const rateState = consumeRateLimit(request, isPreview || isStartupTest);
     if (!rateState.allowed) {
       return NextResponse.json(
         {
@@ -792,7 +804,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!isPreview && isServiceType(serviceType)) {
+    if (!isPreview && !startupMaySkipCheckIn && isServiceType(serviceType)) {
       const current = await ensureCurrentServices();
       if (!current.activeServiceTypes.includes(serviceType)) {
         return NextResponse.json(
@@ -827,7 +839,7 @@ export async function POST(request: NextRequest) {
       ? clampNumber(previewTuning.speakingRate, profile.speakingRate, 0.8, 1.1)
       : clampNumber(globalSettings.speaking_rate, profile.speakingRate, 0.8, 1.1);
 
-    const cacheVersion = `${isPreview ? "preview" : "regular"}|chirp3-v3|${
+    const cacheVersion = `${isStartupTest ? "startup" : isPreview ? "preview" : "regular"}|chirp3-v3|${
       globalSettings.cache_version || "v1"
     }`;
     const cacheKey = createSharedAudioCacheKey(speechText, profile, speakingRate, cacheVersion);
