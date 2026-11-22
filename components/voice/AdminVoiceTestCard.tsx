@@ -50,6 +50,7 @@ export function AdminVoiceTestCard({
   const abortRef = useRef<AbortController | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const finishPlaybackRef = useRef<(() => void) | null>(null);
   const queuedRef = useRef<AdminVoiceTestCue[]>([]);
   const isPlayingRef = useRef(false);
   const scheduledRef = useRef({ advance: false, ontime: false });
@@ -70,6 +71,11 @@ export function AdminVoiceTestCard({
       try { source.stop(); } catch { /* Already stopped. */ }
       source.disconnect();
     }
+    // Stop must also settle the pending playback promise after we detach
+    // onended, or a canceled test can keep an async task suspended forever.
+    const finish = finishPlaybackRef.current;
+    finishPlaybackRef.current = null;
+    finish?.();
   }, []);
 
   useEffect(() => {
@@ -177,13 +183,19 @@ export function AdminVoiceTestCard({
               source.buffer = buffer;
               source.connect(context.destination);
               activeSourceRef.current = source;
-              source.onended = () => {
+              const finish = () => {
+                source.onended = null;
                 source.disconnect();
                 if (activeSourceRef.current === source) activeSourceRef.current = null;
+                if (finishPlaybackRef.current === finish) finishPlaybackRef.current = null;
                 resolve();
               };
+              finishPlaybackRef.current = finish;
+              source.onended = finish;
               try { source.start(context.currentTime); }
               catch (error) {
+                finishPlaybackRef.current = null;
+                source.onended = null;
                 source.disconnect();
                 if (activeSourceRef.current === source) activeSourceRef.current = null;
                 reject(error);
@@ -208,7 +220,10 @@ export function AdminVoiceTestCard({
           setNextCueCountdown("");
           setNotice("測試未完成：" + reason + " 請檢查音量、靜音、藍牙耳機及網路連線。");
         } finally {
-          if (run === runRef.current) isPlayingRef.current = false;
+          if (run === runRef.current) {
+            isPlayingRef.current = false;
+            if (queuedRef.current.length > 0) void playQueued();
+          }
         }
       };
 
