@@ -4276,7 +4276,7 @@ export default function App() {
             <div className="text-[12px] font-black leading-5 text-[#7B7B74] tracking-widest">今日服事</div>
             <div className={`absolute right-0 top-0 px-3 py-1.5 rounded-full text-[11px] font-black border ${
               isCheckedIn
-                ? "bg-[#00B9AF]/10 text-[#007575] border-[#00B9AF]/20"
+                ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
                 : "bg-[#FFF2F4] text-[#AA3146] border-[#EB5F6E]/20"
             }`}>
               {isCheckedIn ? "已報到" : leadCheckIn.endedService ? "本堂服事已結束" : "尚未報到"}
@@ -4318,7 +4318,7 @@ export default function App() {
               </div>
               {isAdminTestCheckIn && completedTestCheckIn && (
                 <div>
-                  <p role="status" className="mb-2 text-sm font-black text-[#007575]">
+                  <p role="status" className="mb-2 text-sm font-black text-[#00B8B8]">
                     {completedTestCheckIn}｜測試報到成功
                   </p>
                   <button
@@ -4393,7 +4393,7 @@ export default function App() {
                       <p className="mb-2 text-sm text-[#64645F]">請連線至教會 Wi-Fi「slllc」</p>
                     </>
                   )}
-                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#007575]" : "text-[#AA3146]"}`}>
+                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#00B8B8]" : "text-[#AA3146]"}`}>
                     {wifiVerified ? "已連線" : "請先確認網路連線後再試。"}
                   </p>
                   <div className="flex flex-wrap items-center gap-3">
@@ -4404,7 +4404,7 @@ export default function App() {
                       aria-label="重新確認現場報到資格"
                       className={`wifi-action-enter wifi-check-button inline-flex min-h-11 items-center gap-1.5 rounded-full border bg-white px-3 text-xs font-black ${
                         wifiVerified
-                          ? "border-[#00B9AF]/30 text-[#007575] hover:bg-[#00B9AF]/10"
+                          ? "border-[#00B8B8]/25 text-[#00B8B8] hover:bg-[#00B8B8]/10"
                           : "border-[#EB5F6E]/30 text-[#AA3146] hover:bg-[#FFF2F4]"
                       } ${wifiChecking ? "wifi-check-button-checking cursor-wait" : ""}`}
                     >
