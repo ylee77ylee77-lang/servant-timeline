@@ -4563,6 +4563,10 @@ export default function App() {
                       hasManuallySwitchedRef.current = true;
                       setCurrentService(completedTestCheckIn);
                       setNewNode((prev) => ({ ...prev, service_type: completedTestCheckIn }));
+                      if (isVoiceEnabled) {
+                        const context = getVoiceAudioContext();
+                        if (context && context.state !== "running") void context.resume().catch(() => {});
+                      }
                       setActiveTab("timeline");
                     }}
                     className="mb-2 w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#6D55A3]/20 hover:opacity-90 transition-opacity"
@@ -4572,6 +4576,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
+                      firstCheckinTimelineCueServiceRef.current = null;
                       setCompletedTestCheckIn("");
                       setTestCheckInService("");
                       setTestCheckInError("");
