@@ -86,7 +86,8 @@ test("successful formal or admin test check-in arms a one-off first timeline ann
 test("regular task reminders and background-return cues still use the existing shared queue", () => {
   const page = source();
   assert.ok(page.includes("speak(buildReminderSpeechText(node, reminderType))"));
-  assert.ok(page.includes('speak(selected.kind === "current"'));
+  assert.ok(page.includes('const taskSpeech = selected.kind === "current"'));
+  assert.ok(page.includes('buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)'));
   assert.ok(page.includes('shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)'));
   assert.ok(page.includes('isNearFormalVoiceReminder('));
   assert.ok(page.includes('setReturnCueRetryText(nextText)'));
