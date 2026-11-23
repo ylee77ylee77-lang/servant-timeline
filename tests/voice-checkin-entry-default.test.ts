@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { buildFirstCheckinTimelineSpeech } from "../lib/voice/return-cue.ts";
+import { VOICE_STARTUP_CONFIRMATION } from "../lib/voice/startup-confirmation.ts";
 
 const source = () => fs.readFileSync("app/page.tsx", "utf8");
 const preferences = () => fs.readFileSync("components/profile/PersonalPreferencesCards.tsx", "utf8");
@@ -88,4 +90,48 @@ test("regular task reminders and background-return cues still use the existing s
   assert.ok(page.includes('shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)'));
   assert.ok(page.includes('isNearFormalVoiceReminder('));
   assert.ok(page.includes('setReturnCueRetryText(nextText)'));
+});
+
+test("each verified first entry says activation before the brief current or next task in one clip", () => {
+  assert.equal(
+    buildFirstCheckinTimelineSpeech("目前任務，確認二樓入口站位。", VOICE_STARTUP_CONFIRMATION),
+    "語音助理已開啟。 目前任務，確認二樓入口站位。"
+  );
+  assert.equal(
+    buildFirstCheckinTimelineSpeech("下一個任務，準備迎賓。", VOICE_STARTUP_CONFIRMATION),
+    "語音助理已開啟。 下一個任務，準備迎賓。"
+  );
+  assert.equal(buildFirstCheckinTimelineSpeech("", VOICE_STARTUP_CONFIRMATION), "");
+  const page = source();
+  const start = page.indexOf("  useEffect(() => {\n    if (returnCuePendingAt === null) return;");
+  const end = page.indexOf("  // One brief announcement on the first timeline visit after a verified", start);
+  assert.ok(start > 0 && end > start);
+  const cue = page.slice(start, end);
+  assert.ok(cue.includes("const isFirstCheckinEntry = firstCheckinTimelineIntroServiceRef.current === currentService"));
+  assert.ok(cue.includes("firstCheckinTimelineIntroServiceRef.current = null"));
+  assert.ok(cue.includes("buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)"));
+  assert.ok(cue.includes(": taskSpeech, \"return\")"));
+  assert.ok(cue.includes('speak(VOICE_STARTUP_CONFIRMATION, "return")'), "if no actual task, confirm only");
+  assert.ok(cue.includes("isNearFormalVoiceReminder("), "formal reminders still have priority");
+});
+
+test("first-entry greeting is armed once after check-in, cleared on voice off, and not repeated on background return", () => {
+  const page = source();
+  assert.ok(page.includes("firstCheckinTimelineIntroServiceRef.current = service"));
+  assert.ok(page.includes("firstCheckinTimelineIntroServiceRef.current = null"));
+  assert.ok(page.includes("firstCheckinTimelineCueServiceRef.current = lockedServiceType"));
+  assert.ok(page.includes("firstCheckinTimelineCueServiceRef.current = testCheckInService"));
+  assert.ok(page.includes('shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)'));
+  const normalReturn = page.slice(
+    page.indexOf("  // Only a real app/background return arms a one-off task cue."),
+    page.indexOf("  useEffect(() => {\n    if (returnCuePendingAt === null) return;")
+  );
+  assert.ok(!normalReturn.includes("firstCheckinTimelineIntroServiceRef.current = service"));
+  const manualOff = page.slice(
+    page.indexOf("  const handleToggleVoiceReminder = () => {"),
+    page.indexOf("  // The reminder setting is the default for a new session.")
+  );
+  assert.ok(manualOff.includes("firstCheckinTimelineIntroServiceRef.current = null"));
+  assert.ok(manualOff.includes("stopVoiceStartupConfirmation()"));
+  assert.ok(page.includes("firstCheckinTimelineCueServiceRef.current = null"));
 });
