@@ -24,6 +24,9 @@ test("return cue stays in existing voice queue and awaits actual playback result
   assert.ok(source.includes('await playVoiceBlob(blob);'));
   assert.ok(source.includes('if (isReturnCue && returnCueQueuedTextRef.current === nextText)'));
   assert.ok(source.includes('setReturnCueRetryText(nextText);'));
+  assert.ok(source.includes('voiceQueueRef.current = voiceQueueRef.current.filter(item => item !== previousReturnCue);'));
+  assert.ok(source.includes('if (isLoading || (voiceAudioContextRef.current'));
+  assert.ok(source.includes('voiceAudioContextRef.current.state !== "running"'));
   assert.ok(source.includes('canRetryReturnCueAfterGesture('));
   assert.ok(source.includes('returnCueRetryCountRef.current += 1;'));
   assert.ok(source.includes('speak(returnCueRetryText, "return-retry");'));
