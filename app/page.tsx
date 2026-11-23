@@ -1534,9 +1534,13 @@ export default function App() {
       returnCueQueuedTextRef.current = cleanText;
       setReturnCueRetryText(null);
     } else {
-      // A fresh formal announcement supersedes any deferred return cue.
+      // Formal announcements supersede a queued or deferred return cue.
       setReturnCueRetryText(null);
-      if (!voiceProcessingRef.current) returnCueQueuedTextRef.current = null;
+      const previousReturnCue = returnCueQueuedTextRef.current;
+      if (previousReturnCue !== null) {
+        voiceQueueRef.current = voiceQueueRef.current.filter(item => item !== previousReturnCue);
+      }
+      returnCueQueuedTextRef.current = null;
     }
 
     // 真正人聲由 /api/voice 產生 MP3，前端以版本化 Cache Storage 與 Web Audio 預載播放。
@@ -3063,9 +3067,11 @@ export default function App() {
       setReturnCuePendingAt(null);
       return;
     }
-    // A resumed page can still be loading or playing an existing announcement.
-    // Retry on the existing one-second clock rather than losing this return cue.
-    if (isLoading) return;
+    // A resumed page can still be loading or have an interrupted AudioContext.
+    // Wait for the existing recovery handler to resume it; retry on the
+    // one-second clock rather than entering a stuck audio.play() queue.
+    if (isLoading || (voiceAudioContextRef.current
+      && voiceAudioContextRef.current.state !== "running")) return;
     if (filteredNodes.length === 0) {
       setReturnCuePendingAt(null);
       return;
