@@ -4318,7 +4318,7 @@ export default function App() {
               </div>
               {isAdminTestCheckIn && completedTestCheckIn && (
                 <div>
-                  <p role="status" className="mb-2 text-sm font-black text-[#16744C]">
+                  <p role="status" className="mb-2 text-sm font-black text-[#007575]">
                     {completedTestCheckIn}｜測試報到成功
                   </p>
                   <button
@@ -4393,7 +4393,7 @@ export default function App() {
                       <p className="mb-2 text-sm text-[#64645F]">請連線至教會 Wi-Fi「slllc」</p>
                     </>
                   )}
-                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#16744C]" : "text-[#B42337]"}`}>
+                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#007575]" : "text-[#AA3146]"}`}>
                     {wifiVerified ? "已連線" : "請先確認網路連線後再試。"}
                   </p>
                   <div className="flex flex-wrap items-center gap-3">
@@ -4404,8 +4404,8 @@ export default function App() {
                       aria-label="重新確認現場報到資格"
                       className={`wifi-action-enter wifi-check-button inline-flex min-h-11 items-center gap-1.5 rounded-full border bg-white px-3 text-xs font-black ${
                         wifiVerified
-                          ? "border-[#16744C]/30 text-[#16744C] hover:bg-[#16744C]/10"
-                          : "border-[#B42337]/30 text-[#B42337] hover:bg-[#FFF2F4]"
+                          ? "border-[#00B8B8]/30 text-[#007575] hover:bg-[#00B8B8]/10"
+                          : "border-[#F25D6B]/30 text-[#AA3146] hover:bg-[#FFF2F4]"
                       } ${wifiChecking ? "wifi-check-button-checking cursor-wait" : ""}`}
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
@@ -4419,14 +4419,14 @@ export default function App() {
                           else void handleLocalCheckin();
                         }}
                         disabled={!canSubmitCheckIn}
-                        className="min-h-11 rounded-[18px] bg-[#F25D6B] px-5 text-sm font-black text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E] disabled:opacity-50"
+                        className="min-h-11 rounded-[18px] bg-[#B73449] px-5 text-sm font-black text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#AA3146] disabled:opacity-50"
                       >
                         {onsiteSubmitting ? "同步中…" : `${isAdminTestCheckIn ? "測試報到" : "立即報到"} ${onsiteService}`}
                       </button>
                     )}
                   </div>
                   {isAdminTestCheckIn && testCheckInError && (
-                    <p role="alert" className="mt-2 text-xs font-bold text-[#B42337]">{testCheckInError}</p>
+                    <p role="alert" className="mt-2 text-xs font-bold text-[#AA3146]">{testCheckInError}</p>
                   )}
                 </section>
               )}
