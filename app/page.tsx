@@ -417,6 +417,9 @@ export default function App() {
   const voiceStartupPreloadRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
   const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
+  const [returnCueRetryText, setReturnCueRetryText] = useState<string | null>(null);
+  const returnCueQueuedTextRef = useRef<string | null>(null);
+  const returnCueRetryCountRef = useRef(0);
 
   // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的個人提醒設定。
   const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v12";
@@ -1040,6 +1043,9 @@ export default function App() {
     ++voiceQueueGenerationRef.current;
     stopVoiceStartupConfirmation();
     setReturnCuePendingAt(null);
+    setReturnCueRetryText(null);
+    returnCueQueuedTextRef.current = null;
+    returnCueRetryCountRef.current = 0;
     voiceQueueRef.current = [];
     const audio = voiceHtmlAudioRef.current;
     if (audio && !audio.paused) {
@@ -1463,6 +1469,7 @@ export default function App() {
       while (isCurrent() && voiceQueueRef.current.length > 0) {
         const nextText = voiceQueueRef.current.shift();
         if (!nextText) continue;
+        const isReturnCue = returnCueQueuedTextRef.current === nextText;
 
         try {
           await playSoftDing();
@@ -1472,9 +1479,26 @@ export default function App() {
           if (!isCurrent()) break;
           if (!blob) throw new Error("語音音檔不存在。");
           await playVoiceBlob(blob);
+          if (isReturnCue && returnCueQueuedTextRef.current === nextText) {
+            returnCueQueuedTextRef.current = null;
+            setReturnCueRetryText(null);
+          }
           await wait(850);
         } catch (err: any) {
           if (!isCurrent()) break;
+          if (isReturnCue && returnCueQueuedTextRef.current === nextText) {
+            returnCueQueuedTextRef.current = null;
+            // iOS may refuse a resumed PWA's media play() until another
+            // gesture. Preserve only this cue for one deliberate retry;
+            // network/server errors must not cause unbounded announcements.
+            if ((err?.name === "NotAllowedError" || err?.name === "AbortError")
+              && returnCueRetryCountRef.current === 0
+              && document.visibilityState === "visible") {
+              setReturnCueRetryText(nextText);
+            } else {
+              setReturnCueRetryText(null);
+            }
+          }
           // 已經播放過第一次提示音；若雲端 TTS 超過月用量或暫時不可用，退回瀏覽器語音，不再補第二聲。
           console.error("語音助理播放失敗:", err);
 
@@ -1500,10 +1524,19 @@ export default function App() {
   const processVoiceQueueRef = useRef(processVoiceQueue);
   useEffect(() => { processVoiceQueueRef.current = processVoiceQueue; });
 
-  const speak = (text: string) => {
+  const speak = (text: string, kind: "regular" | "return" | "return-retry" = "regular") => {
     const cleanText = String(text || "").trim();
     const billableCleanText = cleanTextForTtsBilling(cleanText);
     if (!billableCleanText) return;
+    if (kind !== "regular") {
+      if (kind === "return") returnCueRetryCountRef.current = 0;
+      returnCueQueuedTextRef.current = cleanText;
+      setReturnCueRetryText(null);
+    } else {
+      // A fresh formal announcement supersedes any deferred return cue.
+      setReturnCueRetryText(null);
+      if (!voiceProcessingRef.current) returnCueQueuedTextRef.current = null;
+    }
 
     // 真正人聲由 /api/voice 產生 MP3，前端以版本化 Cache Storage 與 Web Audio 預載播放。
     // 介面不顯示播報文字，避免耳機提醒變成多餘視覺干擾。
@@ -2892,6 +2925,9 @@ export default function App() {
     } else {
       stopVoiceStartupConfirmation();
       setReturnCuePendingAt(null);
+      setReturnCueRetryText(null);
+      returnCueQueuedTextRef.current = null;
+      returnCueRetryCountRef.current = 0;
       voiceQueueRef.current = [];
       setVoiceAssistantMessage("");
       void releaseVoiceWakeLock();
@@ -3022,7 +3058,7 @@ export default function App() {
     const now = new Date();
     if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled
       || (!isAdmin && checkinStatus === "not_checked_in") || !isServiceType(currentService)
-      || isCurrentServiceVoiceClosed() || !showLiveTimeline) {
+      || (!isAdmin && isCurrentServiceVoiceClosed()) || !showLiveTimeline) {
       setReturnCuePendingAt(null);
       return;
     }
@@ -3054,11 +3090,49 @@ export default function App() {
     const phrase = simplifyTaskPhrase(selected.task);
     speak(selected.kind === "current"
       ? `目前任務，${phrase}。`
-      : `下一個任務，${phrase}。`);
+      : `下一個任務，${phrase}。`, "return");
   }, [
     returnCuePendingAt, activeTab, isVoiceEnabled, isAdmin, isLoading, checkinStatus,
     currentDate, currentService, checkedInService, showLiveTimeline, filteredNodes.length,
     personalSettings.role, personalSettings.name,
+    personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
+    personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
+    personalSettings.reminderLeadSeconds
+  ]);
+
+  // A rejected iOS media play is retried once after an actual gesture.
+  // Do not bypass the volunteer's service/check-in restrictions or formal reminders.
+  useEffect(() => {
+    if (!returnCueRetryText) return;
+    const retryAfterGesture = () => {
+      if (document.visibilityState !== "visible" || activeTab !== "timeline"
+        || voiceProcessingRef.current || voiceQueueRef.current.length > 0) return;
+      if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled
+        || (!isAdmin && checkinStatus === "not_checked_in")
+        || !isServiceType(currentService)
+        || (!isAdmin && isCurrentServiceVoiceClosed()) || !showLiveTimeline) {
+        setReturnCueRetryText(null);
+        return;
+      }
+      const now = new Date();
+      const leadSeconds = getReminderLeadSeconds(
+        personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
+      );
+      if (isNearFormalVoiceReminder(
+        filteredNodes, now, leadSeconds,
+        personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
+      )) {
+        setReturnCueRetryText(null);
+        return;
+      }
+      returnCueRetryCountRef.current += 1;
+      speak(returnCueRetryText, "return-retry");
+    };
+    document.addEventListener("pointerdown", retryAfterGesture, { passive: true });
+    return () => document.removeEventListener("pointerdown", retryAfterGesture);
+  }, [
+    returnCueRetryText, activeTab, isVoiceEnabled, isAdmin, checkinStatus,
+    currentService, checkedInService, showLiveTimeline, filteredNodes.length,
     personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
     personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
     personalSettings.reminderLeadSeconds
@@ -6442,6 +6516,11 @@ export default function App() {
       {isVoiceEnabled && voiceAudioRecoveryNeeded && (
         <p role="status" className="mt-2 text-[11px] font-semibold text-[#F25D6B]">
           裝置可能已暫停語音，請輕觸畫面嘗試恢復；若仍無聲，請重新開啟語音助理並檢查音量。
+        </p>
+      )}
+      {isVoiceEnabled && returnCueRetryText && (
+        <p role="status" className="mt-2 text-[11px] font-semibold text-[#F25D6B]">
+          極簡任務提醒尚未播出，請輕觸畫面重試。
         </p>
       )}
 
