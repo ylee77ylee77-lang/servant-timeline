@@ -4398,7 +4398,7 @@ export default function App() {
                       className={`wifi-action-enter wifi-check-button inline-flex min-h-11 items-center gap-1.5 rounded-full border bg-white px-3 text-xs font-black ${
                         wifiVerified
                           ? "border-[#00B8B8]/25 text-[#00B8B8] hover:bg-[#00B8B8]/10"
-                          : "border-[#F25D6B]/20 text-[#F25D6B] hover:bg-[#FFF2F4]"
+                          : "[--wifi-glow-rgb:242,93,107] border-[#F25D6B]/20 text-[#F25D6B] hover:bg-[#FFF2F4]"
                       } ${wifiChecking ? "wifi-check-button-checking cursor-wait" : ""}`}
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
@@ -6246,13 +6246,13 @@ export default function App() {
           .wifi-action-enter { animation: wifiFadeIn 420ms cubic-bezier(0.16, 1, 0.3, 1) both; }
           .wifi-check-button { transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), background-color 240ms ease, border-color 240ms ease, color 240ms ease, opacity 240ms ease, box-shadow 260ms ease; }
           .wifi-check-button:active { transform: scale(0.96); }
-          .wifi-check-button-checking { border-color: rgba(0, 184, 184, 0.48) !important; animation: wifiGlowBreath 1200ms cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+          .wifi-check-button-checking { border-color: rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.48) !important; animation: wifiGlowBreath 1200ms cubic-bezier(0.16, 1, 0.3, 1) infinite; }
           .wifi-refresh-icon-active { transform-origin: center; animation: wifiRefreshBurst 980ms cubic-bezier(0.1, 1, 0.1, 1) both; }
           .wifi-check-label { animation: wifiTextFade 260ms ease-out both; }
           @keyframes wifiFadeIn { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
           @keyframes wifiTextFade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
-          @keyframes wifiRefreshBurst { 0% { transform: rotate(0deg) scale(0.9); filter: drop-shadow(0 0 0 rgba(0, 184, 184, 0)); } 18% { transform: rotate(430deg) scale(1.1); filter: drop-shadow(0 0 8px rgba(0, 184, 184, 0.45)); } 72% { transform: rotate(690deg) scale(1.04); filter: drop-shadow(0 0 5px rgba(0, 184, 184, 0.25)); } 88% { transform: rotate(722deg) scale(1.02); } 100% { transform: rotate(720deg) scale(1); filter: drop-shadow(0 0 0 rgba(0, 184, 184, 0)); } }
-          @keyframes wifiGlowBreath { 0% { box-shadow: 0 0 0 1px rgba(0, 184, 184, 0.14), 0 0 8px rgba(0, 184, 184, 0.18), 0 0 18px rgba(0, 184, 184, 0.10); } 50% { box-shadow: 0 0 0 1px rgba(0, 184, 184, 0.38), 0 0 14px rgba(0, 184, 184, 0.34), 0 0 34px rgba(0, 184, 184, 0.20); } 100% { box-shadow: 0 0 0 1px rgba(0, 184, 184, 0.14), 0 0 8px rgba(0, 184, 184, 0.18), 0 0 18px rgba(0, 184, 184, 0.10); } }
+          @keyframes wifiRefreshBurst { 0% { transform: rotate(0deg) scale(0.9); filter: drop-shadow(0 0 0 rgba(var(--wifi-glow-rgb, 0, 184, 184), 0)); } 18% { transform: rotate(430deg) scale(1.1); filter: drop-shadow(0 0 8px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.45)); } 72% { transform: rotate(690deg) scale(1.04); filter: drop-shadow(0 0 5px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.25)); } 88% { transform: rotate(722deg) scale(1.02); } 100% { transform: rotate(720deg) scale(1); filter: drop-shadow(0 0 0 rgba(var(--wifi-glow-rgb, 0, 184, 184), 0)); } }
+          @keyframes wifiGlowBreath { 0% { box-shadow: 0 0 0 1px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.14), 0 0 8px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.18), 0 0 18px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.10); } 50% { box-shadow: 0 0 0 1px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.38), 0 0 14px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.34), 0 0 34px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.20); } 100% { box-shadow: 0 0 0 1px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.14), 0 0 8px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.18), 0 0 18px rgba(var(--wifi-glow-rgb, 0, 184, 184), 0.10); } }
         `}</style>
         
         {/* 全新品牌風格 - 頂部 Header */}
