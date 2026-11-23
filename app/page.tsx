@@ -420,6 +420,7 @@ export default function App() {
   const voiceStartupPreloadRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
   const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
+  const firstCheckinTimelineCueServiceRef = useRef<string | null>(null);
   const [returnCueRetryText, setReturnCueRetryText] = useState<string | null>(null);
   const returnCueQueuedTextRef = useRef<string | null>(null);
   const returnCueRetryCountRef = useRef(0);
@@ -3152,6 +3153,29 @@ export default function App() {
     personalSettings.reminderLeadSeconds
   ]);
 
+  // One brief announcement on the first timeline visit after a verified
+  // check-in. An external-app return uses the same pending queue, so the
+  // two triggers cannot create duplicate current/next task announcements.
+  useEffect(() => {
+    const service = firstCheckinTimelineCueServiceRef.current;
+    if (!service || activeTab !== "timeline") return;
+    const verifiedCheckin = checkinStatus !== "not_checked_in" && checkedInService === service;
+    const verifiedAdminTest = isAdmin && completedTestCheckIn === service && currentService === service;
+    if (!verifiedCheckin && !verifiedAdminTest) return;
+    // Wait for the saved voice preference to initialize after a fast check-in.
+    if (!personalSettingsLoaded || !voicePreferenceInitialized) return;
+    firstCheckinTimelineCueServiceRef.current = null;
+    if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled) return;
+    if (returnCuePendingAt === null && !returnCueRetryText) {
+      setReturnCuePendingAt(Date.now());
+    }
+  }, [
+    activeTab, checkinStatus, checkedInService, completedTestCheckIn,
+    currentService, isAdmin, isVoiceEnabled, personalSettingsLoaded,
+    voicePreferenceInitialized, personalSettings.voiceReminderEnabled,
+    returnCuePendingAt, returnCueRetryText
+  ]);
+
   // A rejected iOS media play is retried once after an actual gesture.
   // Do not bypass the volunteer's service/check-in restrictions or formal reminders.
   useEffect(() => {
@@ -3374,6 +3398,7 @@ export default function App() {
         return;
       }
       setCompletedTestCheckIn(testCheckInService);
+      firstCheckinTimelineCueServiceRef.current = testCheckInService;
     } catch {
       setTestCheckInError("測試報到失敗，請稍後再試。");
     } finally {
@@ -3436,6 +3461,7 @@ export default function App() {
       }
       setCheckInId(result.checkIn.id);
       lastRestoredCheckInIdRef.current = result.checkIn.id;
+      firstCheckinTimelineCueServiceRef.current = lockedServiceType;
       setCheckedInService(lockedServiceType);
       setSelectedCheckInService("");
       setConfirmedCheckInService("");
@@ -3498,6 +3524,11 @@ export default function App() {
   };
 
   const openCheckedInTimeline = () => {
+    // Resume the existing audio context during this real iPhone tap.
+    if (isVoiceEnabled) {
+      const context = getVoiceAudioContext();
+      if (context && context.state !== "running") void context.resume().catch(() => {});
+    }
     if (isCoordinatorTimelinePreview && isServiceType(checkedInService)) {
       setViewedTimelineService(checkedInService);
     }
