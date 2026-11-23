@@ -74,6 +74,8 @@ test("successful formal or admin test check-in arms a one-off first timeline ann
   assert.ok(effect.includes("firstCheckinTimelineCueServiceRef.current = null"));
   assert.ok(effect.includes("!isVoiceEnabled || !personalSettings.voiceReminderEnabled"));
   assert.ok(effect.includes("returnCuePendingAt === null && !returnCueRetryText"));
+  assert.ok(effect.includes("!returnCueQueuedTextRef.current && !voiceProcessingRef.current"));
+  assert.ok(effect.includes("voiceQueueRef.current.length === 0"));
   assert.ok(effect.includes("setReturnCuePendingAt(Date.now())"));
   assert.ok(!effect.includes("setCheckinStatus("));
   assert.ok(!effect.includes("setCheckedInService("));
