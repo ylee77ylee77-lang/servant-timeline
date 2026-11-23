@@ -34,6 +34,8 @@ test("silent HTMLAudio unlock never interrupts a queued formal announcement", ()
   assert.ok(unlock.includes("audio.muted = true"));
   assert.ok(unlock.includes("voiceHtmlAudioUnlockedRef.current = true"));
   assert.ok(source.includes("if (isVoiceEnabled) voiceHtmlAudioUnlockedRef.current = false;"));
+  assert.ok(source.includes("setCurrentDate(new Date());"));
+  assert.ok(source.includes("setReturnCuePendingAt(Date.now());"));
 });
 
 test("existing screen wake lock and voice button remain, recovery notice appears only if needed", () => {
