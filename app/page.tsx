@@ -3166,7 +3166,9 @@ export default function App() {
     if (!personalSettingsLoaded || !voicePreferenceInitialized) return;
     firstCheckinTimelineCueServiceRef.current = null;
     if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled) return;
-    if (returnCuePendingAt === null && !returnCueRetryText) {
+    if (returnCuePendingAt === null && !returnCueRetryText
+      && !returnCueQueuedTextRef.current && !voiceProcessingRef.current
+      && voiceQueueRef.current.length === 0) {
       setReturnCuePendingAt(Date.now());
     }
   }, [
