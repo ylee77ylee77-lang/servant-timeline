@@ -3454,7 +3454,7 @@ export default function App() {
 
 
   const handleAdminTestCheckIn = async () => {
-    if (!isAdminTestCheckIn || !isServiceType(testCheckInService) || !wifiVerified || testCheckInPending) return;
+    if (!isAdminTestCheckIn || !isServiceType(testCheckInService) || testCheckInPending) return;
     setTestCheckInPending(true);
     setTestCheckInError("");
     try {
@@ -4580,7 +4580,8 @@ export default function App() {
     );
     const onsiteService = isAdminTestCheckIn ? testCheckInService : selectedOption?.serviceType;
     const onsiteSubmitting = isAdminTestCheckIn ? testCheckInPending : isCheckinSyncing;
-    const canSubmitCheckIn = wifiVerified && showOnsiteCheckIn && Boolean(onsiteService) && !onsiteSubmitting;
+    const canSubmitCheckIn = (isAdminTestCheckIn || wifiVerified)
+      && showOnsiteCheckIn && Boolean(onsiteService) && !onsiteSubmitting;
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -4726,13 +4727,14 @@ export default function App() {
                   {showOnsiteCheckIn && (
                     <>
                       <h4 className="mb-2 text-sm font-black text-[#1F2937]">現場報到</h4>
-                      <p className="mb-2 text-sm text-[#64645F]">請連線至教會 Wi-Fi「slllc」</p>
+                      {!isAdminTestCheckIn && <p className="mb-2 text-sm text-[#64645F]">請連線至教會 Wi-Fi「slllc」</p>}
                     </>
                   )}
-                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#00B8B8]" : "rounded-xl border border-[#F25D6B]/20 bg-[#FFF2F4] px-3 py-2 text-[#F25D6B]"}`}>
-                    {wifiVerified ? "已連線" : "請先確認網路連線後再試。"}
+                  <p role="status" className={`mb-2 text-xs font-bold ${isAdminTestCheckIn || wifiVerified ? "text-[#00B8B8]" : "rounded-xl border border-[#F25D6B]/20 bg-[#FFF2F4] px-3 py-2 text-[#F25D6B]"}`}>
+                    {isAdminTestCheckIn ? "管理員測試報到：無須連接教會 Wi-Fi" : wifiVerified ? "已連線" : "請先確認網路連線後再試。"}
                   </p>
                   <div className="flex flex-wrap items-center gap-3">
+                    {!isAdminTestCheckIn && (
                     <button
                       type="button"
                       onClick={() => void checkWifiConnection()}
@@ -4747,7 +4749,8 @@ export default function App() {
                       <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
                       <span className="wifi-check-label">{wifiChecking ? "檢查中…" : "重新檢查"}</span>
                     </button>
-                    {showOnsiteCheckIn && wifiVerified && onsiteService && (
+                    )}
+                    {showOnsiteCheckIn && (isAdminTestCheckIn || wifiVerified) && onsiteService && (
                       <button
                         type="button"
                         onClick={submitOnsiteCheckIn}
