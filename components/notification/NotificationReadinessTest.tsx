@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { BellRing, CheckCircle2, ChevronLeft, Smartphone } from "lucide-react";
 
 type TestResult = { kind: "success" | "warning" | "error"; message: string } | null;
@@ -88,9 +89,9 @@ export function NotificationReadinessTest() {
   return (
     <main className="min-h-screen bg-[#FFF9F3] px-4 py-8 text-[#1F2937]">
       <div className="mx-auto max-w-md space-y-5">
-        <a href="/" className="inline-flex min-h-11 items-center gap-2 text-sm font-bold text-[#6D55A3]">
+        <Link href="/" className="inline-flex min-h-11 items-center gap-2 text-sm font-bold text-[#6D55A3]">
           <ChevronLeft className="h-5 w-5" aria-hidden="true" /> 返回招待服事系統
-        </a>
+        </Link>
 
         <header className="rounded-[28px] border border-[#E6EAF0] bg-white p-5 shadow-sm">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#F3EEFF] text-[#6D55A3]">
