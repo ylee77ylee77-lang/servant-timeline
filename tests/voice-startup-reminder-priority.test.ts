@@ -30,7 +30,7 @@ test("startup confirmation yields when formal speech is active or queued", () =>
   const confirmation = source.slice(start, end);
   assert.match(confirmation, /if \(voiceProcessingRef\.current \|\| voiceQueueRef\.current\.length > 0\) return;/);
   assert.ok(confirmation.includes("const decoded = await context.decodeAudioData(arrayBuffer)"));
-  assert.match(confirmation, /if \(voiceProcessingRef\.current \|\| voiceQueueRef\.current\.length > 0\) \{\s*stopVoiceStartupConfirmation\(\);\s*return;/));
+  assert.match(confirmation, /if \(voiceProcessingRef\.current \|\| voiceQueueRef\.current\.length > 0\) \{\s*stopVoiceStartupConfirmation\(\);\s*return;/);
   assert.ok(confirmation.indexOf("stopVoiceStartupConfirmation();\n        return;") < confirmation.indexOf("source.start(context.currentTime)"));
 });
 
