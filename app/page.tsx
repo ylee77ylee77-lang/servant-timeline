@@ -4271,13 +4271,13 @@ export default function App() {
           <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">報到</h2>
         </div>
 
-        <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+        <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#785AA5]/5 mb-5">
           <div className="relative min-h-5">
             <div className="text-[12px] font-black leading-5 text-[#7B7B74] tracking-widest">今日服事</div>
             <div className={`absolute right-0 top-0 px-3 py-1.5 rounded-full text-[11px] font-black border ${
               isCheckedIn
-                ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
-                : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
+                ? "bg-[#00B9AF]/10 text-[#007575] border-[#00B9AF]/20"
+                : "bg-[#FFF2F4] text-[#AA3146] border-[#EB5F6E]/20"
             }`}>
               {isCheckedIn ? "已報到" : leadCheckIn.endedService ? "本堂服事已結束" : "尚未報到"}
             </div>
@@ -4292,7 +4292,7 @@ export default function App() {
               {displayCheckinName || "服事同工"}
             </h3>
           </div>
-          <p className="mt-4 text-sm font-bold leading-6 text-[#6D55A3]">
+          <p className="mt-4 text-sm font-bold leading-6 text-[#785AA5]">
             今日堂次：{todayService}{checkedInService ? (leadCheckIn.enabled ? "｜已報到" : "（已鎖定）") : ""}
           </p>
           {leadCheckIn.endedService && !isCheckedIn && (
@@ -4300,7 +4300,7 @@ export default function App() {
           )}
         </div>
 
-            <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
+            <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#785AA5]/5 mb-5">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2">
                 <h3 className="text-[16px] font-black text-[#1F2937]">
                   {isCheckedIn && !isAdminTestCheckIn ? "本堂報到" : "請完成報到"}
@@ -4310,7 +4310,7 @@ export default function App() {
                     type="button"
                     disabled={testCheckInPending || isCheckinSyncing}
                     onClick={() => setAdminFormalCheckIn(isAdminTestCheckIn)}
-                    className="min-h-11 text-xs font-bold text-[#6D55A3] disabled:opacity-50"
+                    className="min-h-11 text-xs font-bold text-[#785AA5] disabled:opacity-50"
                   >
                     {isAdminTestCheckIn ? "切換正式報到" : "切換測試報到"}
                   </button>
@@ -4328,7 +4328,7 @@ export default function App() {
                       setTestCheckInService("");
                       setTestCheckInError("");
                     }}
-                    className="min-h-11 rounded-xl border border-[#6D55A3]/25 px-3 text-sm font-bold text-[#6D55A3]"
+                    className="min-h-11 rounded-xl border border-[#785AA5]/25 px-3 text-sm font-bold text-[#785AA5]"
                   >
                     重新測試報到
                   </button>
@@ -4339,7 +4339,7 @@ export default function App() {
               )}
               {correctionOptions.map(({ serviceType }) => (
                 <button key={serviceType} type="button" disabled={isCheckinSyncing}
-                  className="mb-3 min-h-11 rounded-xl bg-white px-3 font-bold text-[#6D55A3] border disabled:opacity-50"
+                  className="mb-3 min-h-11 rounded-xl bg-white px-3 font-bold text-[#785AA5] border disabled:opacity-50"
                   onClick={() => confirmLeadCheckInChange(serviceType)}>
                   更正堂次（{serviceType}）
                 </button>
@@ -4372,9 +4372,9 @@ export default function App() {
                           aria-pressed={isSelected}
                           className={`min-h-[48px] rounded-[16px] border px-2 text-sm font-black transition-colors ${
                             isSelected
-                              ? "border-[#6D55A3] bg-[#6D55A3] text-white"
+                              ? "border-[#785AA5] bg-[#785AA5] text-white"
                               : isEligible
-                                ? "border-[#6D55A3]/25 bg-white text-[#6D55A3] hover:bg-[#F3EEFF]"
+                                ? "border-[#785AA5]/25 bg-white text-[#785AA5] hover:bg-[#F3EEFF]"
                                 : "border-[#E6EAF0] bg-[#F8F8F6] text-[#A1A19A] cursor-not-allowed"
                           }`}
                         >
@@ -4404,8 +4404,8 @@ export default function App() {
                       aria-label="重新確認現場報到資格"
                       className={`wifi-action-enter wifi-check-button inline-flex min-h-11 items-center gap-1.5 rounded-full border bg-white px-3 text-xs font-black ${
                         wifiVerified
-                          ? "border-[#00B8B8]/30 text-[#007575] hover:bg-[#00B8B8]/10"
-                          : "border-[#F25D6B]/30 text-[#AA3146] hover:bg-[#FFF2F4]"
+                          ? "border-[#00B9AF]/30 text-[#007575] hover:bg-[#00B9AF]/10"
+                          : "border-[#EB5F6E]/30 text-[#AA3146] hover:bg-[#FFF2F4]"
                       } ${wifiChecking ? "wifi-check-button-checking cursor-wait" : ""}`}
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
@@ -4419,7 +4419,7 @@ export default function App() {
                           else void handleLocalCheckin();
                         }}
                         disabled={!canSubmitCheckIn}
-                        className="min-h-11 rounded-[18px] bg-[#B73449] px-5 text-sm font-black text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#AA3146] disabled:opacity-50"
+                        className="min-h-11 rounded-[18px] bg-[#785AA5] px-5 text-sm font-black text-white shadow-lg shadow-[#785AA5]/20 hover:bg-[#6D5197] disabled:opacity-50"
                       >
                         {onsiteSubmitting ? "同步中…" : `${isAdminTestCheckIn ? "測試報到" : "立即報到"} ${onsiteService}`}
                       </button>
