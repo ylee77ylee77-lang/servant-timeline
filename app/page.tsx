@@ -4277,7 +4277,7 @@ export default function App() {
             <div className={`absolute right-0 top-0 px-3 py-1.5 rounded-full text-[11px] font-black border ${
               isCheckedIn
                 ? "bg-[#00B8B8]/10 text-[#00B8B8] border-[#00B8B8]/20"
-                : "bg-[#FFF2F4] text-[#AA3146] border-[#EB5F6E]/20"
+                : "bg-[#FFF2F4] text-[#F25D6B] border-[#F25D6B]/20"
             }`}>
               {isCheckedIn ? "已報到" : leadCheckIn.endedService ? "本堂服事已結束" : "尚未報到"}
             </div>
@@ -4393,7 +4393,7 @@ export default function App() {
                       <p className="mb-2 text-sm text-[#64645F]">請連線至教會 Wi-Fi「slllc」</p>
                     </>
                   )}
-                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#00B8B8]" : "text-[#AA3146]"}`}>
+                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#00B8B8]" : "rounded-xl border border-[#F25D6B]/20 bg-[#FFF2F4] px-3 py-2 text-[#F25D6B]"}`}>
                     {wifiVerified ? "已連線" : "請先確認網路連線後再試。"}
                   </p>
                   <div className="flex flex-wrap items-center gap-3">
@@ -4405,7 +4405,7 @@ export default function App() {
                       className={`wifi-action-enter wifi-check-button inline-flex min-h-11 items-center gap-1.5 rounded-full border bg-white px-3 text-xs font-black ${
                         wifiVerified
                           ? "border-[#00B8B8]/25 text-[#00B8B8] hover:bg-[#00B8B8]/10"
-                          : "border-[#EB5F6E]/30 text-[#AA3146] hover:bg-[#FFF2F4]"
+                          : "border-[#F25D6B]/20 text-[#F25D6B] hover:bg-[#FFF2F4]"
                       } ${wifiChecking ? "wifi-check-button-checking cursor-wait" : ""}`}
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
@@ -4426,7 +4426,7 @@ export default function App() {
                     )}
                   </div>
                   {isAdminTestCheckIn && testCheckInError && (
-                    <p role="alert" className="mt-2 text-xs font-bold text-[#AA3146]">{testCheckInError}</p>
+                    <p role="alert" className="mt-2 rounded-xl border border-[#F25D6B]/20 bg-[#FFF2F4] px-3 py-2 text-xs font-bold text-[#F25D6B]">{testCheckInError}</p>
                   )}
                 </section>
               )}
