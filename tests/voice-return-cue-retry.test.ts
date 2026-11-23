@@ -49,7 +49,8 @@ test("return cue stays opt-in, only external returns queue it, formal reminders 
   assert.ok(detect.includes('(!isAdmin && isCurrentServiceVoiceClosed())'));
   assert.ok(detect.includes('voiceProcessingRef.current || voiceQueueRef.current.length > 0'));
   assert.ok(detect.includes('isNearFormalVoiceReminder('));
-  assert.ok(detect.includes('speak(selected.kind === "current"'));
+  assert.ok(detect.includes('const taskSpeech = selected.kind === "current"'));
+  assert.ok(detect.includes('buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)'));
   assert.ok(detect.includes('"return");'));
   assert.ok(!detect.includes('announcedNodesRef.current.add'));
   assert.ok(source.includes('speak(buildReminderSpeechText(node, reminderType))'));
