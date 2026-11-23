@@ -2980,7 +2980,12 @@ export default function App() {
       if (!shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)) return;
       // pageshow, focus and visibilitychange may all fire for one return.
       appWasInBackgroundRef.current = false;
-      if (isVoiceEnabled) setReturnCuePendingAt(Date.now());
+      if (isVoiceEnabled) {
+        // iOS may have suspended the one-second clock in the background.
+        // Re-evaluate any *currently due* formal reminder immediately.
+        setCurrentDate(new Date());
+        setReturnCuePendingAt(Date.now());
+      }
     };
     const trackAppVisibility = () => {
       if (document.visibilityState === "hidden") markAppBackgrounded();
