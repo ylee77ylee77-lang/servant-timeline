@@ -81,3 +81,18 @@ export function isNearFormalVoiceReminder(
   }
   return false;
 }
+
+/**
+ * Mobile browsers may require another user gesture after a background audio
+ * interruption. Only those playback rejections get one deferred retry.
+ * An HTTP/TTS failure must not become a repeated automatic announcement.
+ */
+export function canRetryReturnCueAfterGesture(
+  errorName: string | undefined,
+  retryCount: number,
+  visibilityState: string
+): boolean {
+  return visibilityState === "visible"
+    && retryCount === 0
+    && (errorName === "NotAllowedError" || errorName === "AbortError");
+}
