@@ -3167,7 +3167,6 @@ export default function App() {
       const result = await response.json().catch(() => null);
       if (!response.ok || result?.serviceType !== testCheckInService) {
         setTestCheckInError(result?.error || "測試報到失敗，請稍後再試。");
-        void checkWifiConnection();
         return;
       }
       setCompletedTestCheckIn(testCheckInService);
