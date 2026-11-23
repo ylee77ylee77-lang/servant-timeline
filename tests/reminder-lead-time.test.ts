@@ -108,34 +108,40 @@ test("the reminder settings have no master toggle and keep independent switches"
   assert.ok(vibration > 0 && voice > vibration && advance > voice && punctual > advance && content > punctual);
 });
 
-test("voice options, lead-time picker, and reminder content use accessible nested cards", () => {
+test("voice and advance switches immediately reveal their nested settings", () => {
   const ui = read("components/profile/PersonalPreferencesCards.tsx");
-  assert.match(ui, /useState<"voice" \| "content" \| null>\(null\)/);
-  assert.match(ui, /useState\(false\)/);
-  assert.match(ui, /aria-expanded=\{openReminderSection === "voice"\}/);
-  assert.match(ui, /aria-expanded=\{openReminderSection === "content"\}/);
-  assert.match(ui, /aria-expanded=\{leadTimeExpanded\}/);
-  assert.match(ui, /aria-controls="personal-reminder-voice-options"/);
-  assert.match(ui, /aria-controls="personal-reminder-lead-options"/);
-  assert.match(ui, /aria-controls="personal-reminder-content-options"/);
-  assert.match(ui, /hidden=\{openReminderSection !== "voice"\}/);
-  assert.match(ui, /hidden=\{openReminderSection !== "content"\}/);
-  assert.match(ui, /hidden=\{!leadTimeExpanded\}/);
+  assert.match(ui, /aria-checked=\{checked\}/);
+  assert.match(ui, /aria-expanded=\{controls \? checked : undefined\}/);
+  assert.match(ui, /aria-controls=\{controls\}/);
+  assert.match(ui, /controls="personal-reminder-voice-options"/);
+  assert.match(ui, /controls="personal-reminder-lead-options"/);
+  assert.match(ui, /hidden=\{!settings\.voiceReminderEnabled\}/);
+  assert.match(ui, /hidden=\{!settings\.reminderPre5Enabled\}/);
+  assert.match(ui, /onToggle=\{\(\) => onChange\(\{ voiceReminderEnabled: !settings\.voiceReminderEnabled \}\)\}/);
+  assert.match(ui, /onToggle=\{\(\) => onChange\(\{ reminderPre5Enabled: !settings\.reminderPre5Enabled \}\)\}/);
   assert.match(ui, /data-reminder-lead-stepper/);
-  assert.match(ui, /onClick=\{\(\) => setLeadTimeExpanded\(\(current\) => !current\)\}/);
+  assert.doesNotMatch(ui, /leadTimeExpanded|openReminderSection|setOpenReminderSection|setLeadTimeExpanded/);
+  // Neither voice nor advance requires clicking a separate disclosure arrow.
+  const nested = ui.slice(ui.indexOf('{/* The voice switch directly'), ui.indexOf('data-reminder-lead-stepper'));
+  assert.doesNotMatch(nested, /<ChevronDown|onClick=\{\(\) => set.*Expanded/);
+});
+
+test("reminder content keeps its own collapsible card", () => {
+  const ui = read("components/profile/PersonalPreferencesCards.tsx");
+  assert.match(ui, /useState\(false\)/);
+  assert.match(ui, /aria-expanded=\{contentExpanded\}/);
+  assert.match(ui, /aria-controls="personal-reminder-content-options"/);
+  assert.match(ui, /hidden=\{!contentExpanded\}/);
+  assert.match(ui, /onClick=\{\(\) => setContentExpanded\(\(current\) => !current\)\}/);
   assert.match(ui, /onChange\(\{ voiceDetailLevel: option\.value \}\)/);
   assert.doesNotMatch(ui, /<select/);
-  // Disclosure buttons do not call onChange; only the adjacent switches change preferences.
-  const voiceHeader = ui.slice(ui.indexOf('aria-controls="personal-reminder-voice-options"'), ui.indexOf('</button>', ui.indexOf('aria-controls="personal-reminder-voice-options"')));
-  assert.ok(voiceHeader.includes('setOpenReminderSection('));
-  assert.ok(!voiceHeader.includes('onChange({ voiceReminderEnabled:'));
 });
 
 test("profile controls, saved preferences, speech, and upcoming cue share the same lead time", () => {
   const ui = read("components/profile/PersonalPreferencesCards.tsx");
   const page = read("app/page.tsx");
   assert.match(ui, /data-reminder-lead-stepper/);
-  assert.match(ui, /aria-expanded=\{leadTimeExpanded\}/);
+  assert.match(ui, /hidden=\{!settings\.reminderPre5Enabled\}/);
   assert.match(ui, /aria-label="增加提前提醒分鐘"/);
   assert.match(ui, /aria-label="減少提前提醒分鐘"/);
   assert.match(ui, /aria-label="增加提前提醒秒數"/);
