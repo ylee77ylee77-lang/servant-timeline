@@ -126,7 +126,7 @@ test("voice options, lead-time picker, and reminder content use accessible neste
   assert.match(ui, /onChange\(\{ voiceDetailLevel: option\.value \}\)/);
   assert.doesNotMatch(ui, /<select/);
   // Disclosure buttons do not call onChange; only the adjacent switches change preferences.
-  const voiceHeader = ui.slice(ui.indexOf('aria-controls="personal-reminder-voice-options"'), ui.indexOf('id="personal-reminder-voice-options"'));
+  const voiceHeader = ui.slice(ui.indexOf('aria-controls="personal-reminder-voice-options"'), ui.indexOf('</button>', ui.indexOf('aria-controls="personal-reminder-voice-options"')));
   assert.ok(voiceHeader.includes('setOpenReminderSection('));
   assert.ok(!voiceHeader.includes('onChange({ voiceReminderEnabled:'));
 });
