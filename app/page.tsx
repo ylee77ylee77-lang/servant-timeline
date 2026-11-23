@@ -672,7 +672,7 @@ export default function App() {
     setIsVoiceEnabled(nextEnabled);
     if (nextEnabled) {
       void requestVoiceWakeLock();
-      void playVoiceStartupConfirmation();
+      announceVoiceActivation();
     } else {
       clearServiceVoiceQueue();
       setVoiceAssistantMessage("");
@@ -2943,6 +2943,55 @@ export default function App() {
     }
   };
 
+  // Every explicit OFF -> ON action confirms activation and, when this user
+  // may hear live tasks, announces the current/next task in the SAME TTS clip.
+  // The fixed startup test remains available before check-in; it must never
+  // be used to bypass regular-task authorization for volunteers/coordinators.
+  const announceVoiceActivation = () => {
+    const mayAnnounceTasks = isServiceType(currentService)
+      && (isAdmin || (checkinStatus !== "not_checked_in" && !isCurrentServiceVoiceClosed()))
+      && showLiveTimeline && !isLoading;
+    const now = new Date();
+    const leadSeconds = getReminderLeadSeconds(
+      personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
+    );
+    const formalReminderImminent = mayAnnounceTasks
+      && (!isAdmin || !isCurrentServiceVoiceClosed())
+      && isNearFormalVoiceReminder(
+        filteredNodes, now, leadSeconds,
+        personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
+      );
+    const selected = mayAnnounceTasks && !formalReminderImminent
+      ? selectReturnCueTask(filteredNodes, now)
+      : null;
+
+    // A spoken activation already fulfills any first-entry greeting armed by
+    // this check-in. Do not replay it when the user later opens the timeline.
+    if (mayAnnounceTasks) {
+      firstCheckinTimelineCueServiceRef.current = null;
+      firstCheckinTimelineIntroServiceRef.current = null;
+      setReturnCuePendingAt(null);
+    }
+
+    if (selected) {
+      const phrase = simplifyTaskPhrase(selected.task);
+      const taskSpeech = selected.kind === "current"
+        ? `目前任務，${phrase}。`
+        : `下一個任務，${phrase}。`;
+      speak(buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION), "return");
+      return;
+    }
+
+    // Keep the cached, fast startup clip if there is no eligible task.
+    // If a formal announcement is already in flight, queue confirmation
+    // behind it instead of overlapping or silently dropping the activation.
+    if (voiceProcessingRef.current || voiceQueueRef.current.length > 0) {
+      speak(VOICE_STARTUP_CONFIRMATION, "return");
+    } else {
+      void playVoiceStartupConfirmation();
+    }
+  };
+
   const handleToggleVoiceReminder = () => {
     const nextEnabled = !isVoiceEnabled;
 
@@ -2959,7 +3008,7 @@ export default function App() {
     setIsVoiceEnabled(nextEnabled);
     if (nextEnabled) {
       void requestVoiceWakeLock();
-      void playVoiceStartupConfirmation();
+      announceVoiceActivation();
     } else {
       stopVoiceStartupConfirmation();
       setReturnCuePendingAt(null);
