@@ -209,60 +209,60 @@ export function PersonalPreferencesCards({
                 <div id="personal-reminder-lead-options" hidden={!leadTimeExpanded}>
                   <div className="border-t border-[#E6EAF0] bg-[#F3EEFF] px-3.5 pb-3.5" data-reminder-lead-stepper>
                     <div className="border-t border-[#6D55A3]/10 pt-3">
-            <h3 className="mb-2 text-sm font-black text-[#1F2937]">提前時間</h3>
-            <div className="flex items-center justify-center gap-2 rounded-2xl bg-[#FFF9F3] px-2 py-3">
-              <div className="flex items-center gap-1.5">
-                <div className="flex flex-col items-center">
-                  <button
-                    type="button"
-                    aria-label="增加提前提醒分鐘"
-                    disabled={lead.minutes >= MAX_REMINDER_LEAD_MINUTES}
-                    onClick={() => adjustLead("minutes", 1)}
-                    className="flex h-11 w-12 items-center justify-center rounded-xl text-[#6D55A3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] disabled:opacity-30"
-                  >
-                    <ChevronUp className="h-6 w-6" />
-                  </button>
-                  <span aria-live="polite" className="w-12 text-center font-mono text-2xl font-black tabular-nums text-[#1F2937]">
-                    {String(lead.minutes).padStart(2, "0")}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="減少提前提醒分鐘"
-                    disabled={lead.minutes <= 0}
-                    onClick={() => adjustLead("minutes", -1)}
-                    className="flex h-11 w-12 items-center justify-center rounded-xl text-[#6D55A3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] disabled:opacity-30"
-                  >
-                    <ChevronDown className="h-6 w-6" />
-                  </button>
-                </div>
-                <span className="text-sm font-black text-[#7B7B74]">分</span>
-              </div>
-              <span aria-hidden="true" className="self-center text-xl font-black text-[#A1A1AA]">:</span>
-              <div className="flex items-center gap-1.5">
-                <div className="flex flex-col items-center">
-                  <button
-                    type="button"
-                    aria-label="增加提前提醒秒數"
-                    onClick={() => adjustLead("seconds", 1)}
-                    className="flex h-11 w-12 items-center justify-center rounded-xl text-[#6D55A3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3]"
-                  >
-                    <ChevronUp className="h-6 w-6" />
-                  </button>
-                  <span aria-live="polite" className="w-12 text-center font-mono text-2xl font-black tabular-nums text-[#1F2937]">
-                    {String(lead.seconds).padStart(2, "0")}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="減少提前提醒秒數"
-                    onClick={() => adjustLead("seconds", -1)}
-                    className="flex h-11 w-12 items-center justify-center rounded-xl text-[#6D55A3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3]"
-                  >
-                    <ChevronDown className="h-6 w-6" />
-                  </button>
-                </div>
-                <span className="text-sm font-black text-[#7B7B74]">秒</span>
-              </div>
-            </div>
+                        <h3 className="mb-2 text-sm font-black text-[#1F2937]">提前時間</h3>
+                        <div className="flex items-center justify-center gap-2 rounded-2xl bg-[#FFF9F3] px-2 py-3">
+                          <div className="flex items-center gap-1.5">
+                            <div className="flex flex-col items-center">
+                              <button
+                                type="button"
+                                aria-label="增加提前提醒分鐘"
+                                disabled={lead.minutes >= MAX_REMINDER_LEAD_MINUTES}
+                                onClick={() => adjustLead("minutes", 1)}
+                                className="flex h-11 w-12 items-center justify-center rounded-xl text-[#6D55A3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] disabled:opacity-30"
+                              >
+                                <ChevronUp className="h-6 w-6" />
+                              </button>
+                              <span aria-live="polite" className="w-12 text-center font-mono text-2xl font-black tabular-nums text-[#1F2937]">
+                                {String(lead.minutes).padStart(2, "0")}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label="減少提前提醒分鐘"
+                                disabled={lead.minutes <= 0}
+                                onClick={() => adjustLead("minutes", -1)}
+                                className="flex h-11 w-12 items-center justify-center rounded-xl text-[#6D55A3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] disabled:opacity-30"
+                              >
+                                <ChevronDown className="h-6 w-6" />
+                              </button>
+                            </div>
+                            <span className="text-sm font-black text-[#7B7B74]">分</span>
+                          </div>
+                          <span aria-hidden="true" className="self-center text-xl font-black text-[#A1A1AA]">:</span>
+                          <div className="flex items-center gap-1.5">
+                            <div className="flex flex-col items-center">
+                              <button
+                                type="button"
+                                aria-label="增加提前提醒秒數"
+                                onClick={() => adjustLead("seconds", 1)}
+                                className="flex h-11 w-12 items-center justify-center rounded-xl text-[#6D55A3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3]"
+                              >
+                                <ChevronUp className="h-6 w-6" />
+                              </button>
+                              <span aria-live="polite" className="w-12 text-center font-mono text-2xl font-black tabular-nums text-[#1F2937]">
+                                {String(lead.seconds).padStart(2, "0")}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label="減少提前提醒秒數"
+                                onClick={() => adjustLead("seconds", -1)}
+                                className="flex h-11 w-12 items-center justify-center rounded-xl text-[#6D55A3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3]"
+                              >
+                                <ChevronDown className="h-6 w-6" />
+                              </button>
+                            </div>
+                            <span className="text-sm font-black text-[#7B7B74]">秒</span>
+                          </div>
+                        </div>
                     </div>
                   </div>
                 </div>
