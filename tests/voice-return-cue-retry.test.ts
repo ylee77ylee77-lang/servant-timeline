@@ -68,7 +68,7 @@ test("turning voice off or closing service discards retry without changing check
   }
   assert.ok(toggle.includes('setIsVoiceEnabled(nextEnabled)'));
   assert.ok(!toggle.includes('setCheckedInService('));
-  assert.ok(!toggle.includes('setPersonalSettings('));
+  assert.ok(toggle.includes('setPersonalSettings(prev => ({ ...prev, voiceReminderEnabled: nextEnabled }))'));
 });
 
 test("server-verified admins may use regular TTS outside service hours, no volunteer bypass", () => {
