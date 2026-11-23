@@ -408,6 +408,7 @@ export default function App() {
   const voiceProcessingRef = useRef(false);
   const voiceWakeLockRef = useRef<any>(null);
   const [isWakeLockActive, setIsWakeLockActive] = useState(false);
+  const [voiceAudioRecoveryNeeded, setVoiceAudioRecoveryNeeded] = useState(false);
   // Dedicated startup audio: cancel async fetch and playback on every off/on.
   const voiceStartupRequestRef = useRef<AbortController | null>(null);
   const voiceStartupSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -1337,7 +1338,8 @@ export default function App() {
 
   const unlockVoiceHtmlAudio = async () => {
     const audio = getVoiceHtmlAudio();
-    if (!audio || voiceHtmlAudioUnlockedRef.current) return;
+    // Never replace an in-flight formal reminder with the silent unlock clip.
+    if (!audio || voiceHtmlAudioUnlockedRef.current || voiceProcessingRef.current || !audio.paused) return;
     const silentWav = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAAAAAA==";
     try {
       audio.src = silentWav;
@@ -2912,17 +2914,89 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [isVoiceEnabled, currentService, isAdmin]);
 
+  // A screen wake lock does not keep iOS JavaScript alive while hidden.
+  // Recover already-existing audio sources on foreground; a real pointer
+  // gesture retries when WebKit rejects an automatic resume.
+  useEffect(() => {
+    if (!isVoiceEnabled) {
+      setVoiceAudioRecoveryNeeded(false);
+      return;
+    }
+    let disposed = false;
+    let recoveryAttempt = 0;
+    const resumeOnForeground = () => {
+      if (document.visibilityState !== "visible") return;
+      const attempt = ++recoveryAttempt;
+      const context = voiceAudioContextRef.current;
+      const audio = voiceHtmlAudioRef.current;
+      const pausedReminder = Boolean(
+        voiceProcessingRef.current && audio?.paused && !audio.ended && audio.currentSrc
+      );
+      const pending: Promise<unknown>[] = [];
+
+      if (context && context.state !== "running") {
+        try { pending.push(Promise.resolve(context.resume())); }
+        catch (error) { pending.push(Promise.reject(error)); }
+      }
+      if (pausedReminder && audio) {
+        try { pending.push(Promise.resolve(audio.play())); }
+        catch (error) { pending.push(Promise.reject(error)); }
+      }
+      if (!pending.length) {
+        setVoiceAudioRecoveryNeeded(false);
+        return;
+      }
+      const isStillSuspended = () => Boolean(
+        (context && context.state !== "running") || (pausedReminder && audio?.paused)
+      );
+      // WebKit may leave resume() pending while an audio interruption lasts.
+      // A bounded warning avoids silently waiting forever for that promise.
+      const warningTimer = window.setTimeout(() => {
+        if (!disposed && attempt === recoveryAttempt && document.visibilityState === "visible") {
+          setVoiceAudioRecoveryNeeded(isStillSuspended());
+        }
+      }, 1500);
+      void Promise.allSettled(pending)
+        .then(() => {
+          if (disposed || attempt !== recoveryAttempt || document.visibilityState !== "visible") return;
+          setVoiceAudioRecoveryNeeded(isStillSuspended());
+        })
+        .finally(() => window.clearTimeout(warningTimer));
+    };
+    const onVisible = () => resumeOnForeground();
+    const onInteraction = () => resumeOnForeground();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onVisible);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("pointerdown", onInteraction, { passive: true });
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onVisible);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("pointerdown", onInteraction);
+    };
+  }, [isVoiceEnabled]);
+
   // Only a real app/background return arms a one-off task cue. Navigation
   // among tabs inside the app does not arm it, regardless of time elapsed.
   useEffect(() => {
     const markAppBackgrounded = () => {
       appWasInBackgroundRef.current = true;
+      // A previously unlocked HTMLAudioElement may need a fresh user gesture
+      // after iOS has suspended the PWA. Do not play any audio while hidden.
+      if (isVoiceEnabled) voiceHtmlAudioUnlockedRef.current = false;
     };
     const handleAppForegrounded = () => {
       if (!shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)) return;
       // pageshow, focus and visibilitychange may all fire for one return.
       appWasInBackgroundRef.current = false;
-      if (isVoiceEnabled) setReturnCuePendingAt(Date.now());
+      if (isVoiceEnabled) {
+        // iOS may have suspended the one-second clock in the background.
+        // Re-evaluate any *currently due* formal reminder immediately.
+        setCurrentDate(new Date());
+        setReturnCuePendingAt(Date.now());
+      }
     };
     const trackAppVisibility = () => {
       if (document.visibilityState === "hidden") markAppBackgrounded();
@@ -6365,6 +6439,11 @@ export default function App() {
           </button>
         )}
       </div>
+      {isVoiceEnabled && voiceAudioRecoveryNeeded && (
+        <p role="status" className="mt-2 text-[11px] font-semibold text-[#F25D6B]">
+          裝置可能已暫停語音，請輕觸畫面嘗試恢復；若仍無聲，請重新開啟語音助理並檢查音量。
+        </p>
+      )}
 
       {(isAdminUnlocked || (isCoordinatorTimelinePreview && activeTab === "timeline")) && (
         <div className="grid grid-cols-3 gap-2.5 mt-5">
