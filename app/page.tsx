@@ -3084,6 +3084,7 @@ export default function App() {
   const checkWifiConnection = useCallback(() => {
     if (wifiCheckRequestRef.current) return wifiCheckRequestRef.current.promise;
 
+    setWifiChecking(true);
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 5000);
     const promise = (async () => {
@@ -3100,20 +3101,12 @@ export default function App() {
       } finally {
         window.clearTimeout(timeout);
         wifiCheckRequestRef.current = null;
+        setWifiChecking(false);
       }
     })();
     wifiCheckRequestRef.current = { controller, promise };
     return promise;
   }, []);
-
-  const handleWifiCheck = async () => {
-    setWifiChecking(true);
-    try {
-      await checkWifiConnection();
-    } finally {
-      setWifiChecking(false);
-    }
-  };
 
   useEffect(() => {
     if (activeTab !== "checkin") return;
@@ -4399,7 +4392,7 @@ export default function App() {
                   <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => void handleWifiCheck()}
+                      onClick={() => void checkWifiConnection()}
                       disabled={wifiChecking}
                       aria-label="重新確認現場報到資格"
                       className={`wifi-action-enter wifi-check-button inline-flex min-h-11 items-center gap-1.5 rounded-full border bg-white px-3 text-xs font-black ${
