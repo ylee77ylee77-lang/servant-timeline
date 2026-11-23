@@ -47,6 +47,7 @@ import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/
 import { getServiceActivationState, isLeadServiceOpen } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
 import {
+  buildFirstCheckinTimelineSpeech,
   canRetryReturnCueAfterGesture,
   isNearFormalVoiceReminder,
   selectReturnCueTask,
@@ -421,6 +422,9 @@ export default function App() {
   const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
   const firstCheckinTimelineCueServiceRef = useRef<string | null>(null);
+  // Only the first visit after a *new successful check-in* receives the
+  // activation greeting. Background-return cues stay task-only.
+  const firstCheckinTimelineIntroServiceRef = useRef<string | null>(null);
   const [returnCueRetryText, setReturnCueRetryText] = useState<string | null>(null);
   const returnCueQueuedTextRef = useRef<string | null>(null);
   const returnCueRetryCountRef = useRef(0);
@@ -1068,6 +1072,7 @@ export default function App() {
     ++voiceQueueGenerationRef.current;
     stopVoiceStartupConfirmation();
     setReturnCuePendingAt(null);
+    firstCheckinTimelineIntroServiceRef.current = null;
     setReturnCueRetryText(null);
     returnCueQueuedTextRef.current = null;
     returnCueRetryCountRef.current = 0;
@@ -2958,6 +2963,7 @@ export default function App() {
     } else {
       stopVoiceStartupConfirmation();
       setReturnCuePendingAt(null);
+      firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCueRetryText(null);
       returnCueQueuedTextRef.current = null;
       returnCueRetryCountRef.current = 0;
@@ -3120,6 +3126,11 @@ export default function App() {
     if (voiceAudioContextRef.current && voiceAudioContextRef.current.state !== "running") return;
     if (filteredNodes.length === 0) {
       setReturnCuePendingAt(null);
+      if (firstCheckinTimelineIntroServiceRef.current === currentService) {
+        firstCheckinTimelineIntroServiceRef.current = null;
+        // Confirm activation without pretending there is a scheduled task.
+        speak(VOICE_STARTUP_CONFIRMATION, "return");
+      }
       return;
     }
     if (voiceProcessingRef.current || voiceQueueRef.current.length > 0
@@ -3132,18 +3143,28 @@ export default function App() {
       filteredNodes, now, leadSeconds,
       personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
     )) {
-      // An imminent formal announcement already supplies the task reminder.
+      // An imminent formal announcement takes priority over the check-in cue.
+      firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
 
     const selected = selectReturnCueTask(filteredNodes, now);
     setReturnCuePendingAt(null);
-    if (!selected) return;
+    const isFirstCheckinEntry = firstCheckinTimelineIntroServiceRef.current === currentService;
+    firstCheckinTimelineIntroServiceRef.current = null;
+    if (!selected) {
+      // An empty/currently-expired timeline has no real task to announce.
+      if (isFirstCheckinEntry) speak(VOICE_STARTUP_CONFIRMATION, "return");
+      return;
+    }
     const phrase = simplifyTaskPhrase(selected.task);
-    speak(selected.kind === "current"
+    const taskSpeech = selected.kind === "current"
       ? `目前任務，${phrase}。`
-      : `下一個任務，${phrase}。`, "return");
+      : `下一個任務，${phrase}。`;
+    speak(isFirstCheckinEntry
+      ? buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)
+      : taskSpeech, "return");
   }, [
     returnCuePendingAt, activeTab, isVoiceEnabled, isAdmin, isLoading, checkinStatus,
     currentDate, currentService, checkedInService, showLiveTimeline, filteredNodes.length,
@@ -3169,6 +3190,7 @@ export default function App() {
     if (returnCuePendingAt === null && !returnCueRetryText
       && !returnCueQueuedTextRef.current && !voiceProcessingRef.current
       && voiceQueueRef.current.length === 0) {
+      firstCheckinTimelineIntroServiceRef.current = service;
       setReturnCuePendingAt(Date.now());
     }
   }, [
@@ -3400,6 +3422,7 @@ export default function App() {
         return;
       }
       setCompletedTestCheckIn(testCheckInService);
+      firstCheckinTimelineIntroServiceRef.current = null;
       firstCheckinTimelineCueServiceRef.current = testCheckInService;
     } catch {
       setTestCheckInError("測試報到失敗，請稍後再試。");
@@ -3463,6 +3486,7 @@ export default function App() {
       }
       setCheckInId(result.checkIn.id);
       lastRestoredCheckInIdRef.current = result.checkIn.id;
+      firstCheckinTimelineIntroServiceRef.current = null;
       firstCheckinTimelineCueServiceRef.current = lockedServiceType;
       setCheckedInService(lockedServiceType);
       setSelectedCheckInService("");
@@ -4585,6 +4609,7 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       firstCheckinTimelineCueServiceRef.current = null;
+                      firstCheckinTimelineIntroServiceRef.current = null;
                       setCompletedTestCheckIn("");
                       setTestCheckInService("");
                       setTestCheckInError("");
