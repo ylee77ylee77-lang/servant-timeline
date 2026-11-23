@@ -99,7 +99,8 @@ test("the current voice controls do not add another switch or confirmation dialo
   const workflow = source.slice(start, end);
   assert.ok(!workflow.includes('window.confirm('));
   assert.ok(!workflow.includes('setCheckedInService('));
-  assert.ok(!workflow.includes('setPersonalSettings('));
+  // A voice toggle now persists just its own reminder setting; it never mutates check-in or other settings.
+  assert.ok(workflow.includes('setPersonalSettings(prev => ({ ...prev, voiceReminderEnabled: nextEnabled }))'));
   assert.ok(!workflow.includes('setVoiceSettingsDraft('));
   assert.ok(workflow.includes('請解除手機靜音模式、提高媒體音量'));
 });
