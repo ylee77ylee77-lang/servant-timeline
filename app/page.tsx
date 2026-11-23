@@ -4296,7 +4296,7 @@ export default function App() {
             <div className="bg-gradient-to-br from-white to-[#F3EEFF]/50 p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#785AA5]/5 mb-5">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2">
                 <h3 className="text-[16px] font-black text-[#1F2937]">
-                  {isCheckedIn && !isAdminTestCheckIn ? "本堂報到" : "請完成報到"}
+                  {(isAdminTestCheckIn ? completedTestCheckIn : isCheckedIn) ? "完成報到" : "請完成報到"}
                 </h3>
                 {isAdmin && canShowAdminFormalCheckIn && (
                   <button
@@ -4314,6 +4314,19 @@ export default function App() {
                   <p role="status" className="mb-2 text-sm font-black text-[#00B8B8]">
                     {completedTestCheckIn}｜測試報到成功
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isServiceType(completedTestCheckIn)) return;
+                      hasManuallySwitchedRef.current = true;
+                      setCurrentService(completedTestCheckIn);
+                      setNewNode((prev) => ({ ...prev, service_type: completedTestCheckIn }));
+                      setActiveTab("timeline");
+                    }}
+                    className="mb-2 w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#6D55A3]/20 hover:opacity-90 transition-opacity"
+                  >
+                    進入{completedTestCheckIn}流程
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
