@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { BrowserQRCodeReader } from '@zxing/browser';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { AdminTestCheckIn } from '@/components/service/AdminTestCheckIn';
 import { MyServiceDashboard } from '@/components/service/MyServiceDashboard';
 import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStatusDashboard';
 import { AvatarSettingsCard } from '@/components/profile/AvatarSettingsCard';
@@ -4238,6 +4239,8 @@ export default function App() {
             首頁｜確認堂次、現場報到、等待分派
           </p>
         </div>
+
+        {isAdmin && <AdminTestCheckIn accessToken={session.access_token} />}
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
           <div className="relative min-h-5">
