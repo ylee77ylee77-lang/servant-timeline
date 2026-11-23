@@ -364,7 +364,9 @@ export default function App() {
   }, [checklistSyncModeByNode, specialTaskBlocks, specialChecklistItems]);
 
   // --- 【語音與語音助理相關狀態】 ---
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // 預設關閉語音助理
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // 等待已儲存的提醒設定載入
+  const voicePreferenceAppliedRef = useRef(false);
+  const [voicePreferenceInitialized, setVoicePreferenceInitialized] = useState(false);
   const [isListening, setIsListening] = useState(false); // 麥克風聆聽狀態
   const [isThinking, setIsThinking] = useState(false); // AI 思考狀態
   const [voiceResultText, setVoiceResultText] = useState(""); // 語音指令解析文字回饋
@@ -650,6 +652,27 @@ export default function App() {
 
   const updatePersonalSettings = (patch: Partial<typeof personalSettings>) => {
     setPersonalSettings(prev => ({ ...prev, ...patch }));
+    if (typeof patch.voiceReminderEnabled !== "boolean") return;
+    const nextEnabled = patch.voiceReminderEnabled;
+    if (nextEnabled && !isAdmin && (checkinStatus === "not_checked_in"
+      || !isServiceType(currentService) || isCurrentServiceVoiceClosed())) {
+      // Save the preferred ON state; activate after an eligible check-in.
+      voicePreferenceAppliedRef.current = false;
+      setVoicePreferenceInitialized(false);
+      return;
+    }
+    voicePreferenceAppliedRef.current = true;
+    setVoicePreferenceInitialized(true);
+    if (nextEnabled === isVoiceEnabled) return;
+    setIsVoiceEnabled(nextEnabled);
+    if (nextEnabled) {
+      void requestVoiceWakeLock();
+      void playVoiceStartupConfirmation();
+    } else {
+      clearServiceVoiceQueue();
+      setVoiceAssistantMessage("");
+      void releaseVoiceWakeLock();
+    }
   };
 
   const normalizeText = (value: any) => String(value || "").toLowerCase();
@@ -2923,6 +2946,10 @@ export default function App() {
       return;
     }
 
+    // Persist each manual on/off choice as the next session default.
+    voicePreferenceAppliedRef.current = true;
+    setVoicePreferenceInitialized(true);
+    setPersonalSettings(prev => ({ ...prev, voiceReminderEnabled: nextEnabled }));
     setIsVoiceEnabled(nextEnabled);
     if (nextEnabled) {
       void requestVoiceWakeLock();
@@ -2938,6 +2965,24 @@ export default function App() {
       void releaseVoiceWakeLock();
     }
   };
+
+  // The reminder setting is the default for a new session. Audio can only
+  // start automatically when the role/service gate allows it. Never play the
+  // startup confirmation without an explicit gesture (iOS restriction).
+  useEffect(() => {
+    if (!personalSettingsLoaded || voicePreferenceAppliedRef.current) return;
+    if (!personalSettings.voiceReminderEnabled) {
+      voicePreferenceAppliedRef.current = true;
+      setVoicePreferenceInitialized(true);
+      return;
+    }
+    if (!isAdmin && (checkinStatus === "not_checked_in"
+      || !isServiceType(currentService) || isCurrentServiceVoiceClosed())) return;
+    voicePreferenceAppliedRef.current = true;
+    setVoicePreferenceInitialized(true);
+    setIsVoiceEnabled(true);
+  }, [personalSettingsLoaded, personalSettings.voiceReminderEnabled,
+    isAdmin, checkinStatus, currentService, currentDate]);
 
   useEffect(() => {
     if (!isVoiceEnabled) return;
