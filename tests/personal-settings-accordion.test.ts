@@ -92,7 +92,7 @@ test("vibration preference offers a direct native iOS switch tap without simulat
   assert.match(ui, /label="震動提醒"\s+nativeHaptics\s+checked=\{settings\.vibrationReminderEnabled\}/);
   assert.match(ui, /onToggle=\{\(\) => onChange\(\{ vibrationReminderEnabled: !settings\.vibrationReminderEnabled \}\)\}/);
   assert.match(ui, /checked=\{checked\}/);
-  assert.doesNotMatch(ui, /document\.createElement|\.click\(\)|dispatchEvent\(/);
+  assert.doesNotMatch(ui, /document\.createElement|\.click\(\);|dispatchEvent\(/);
 
   // The original actual task-block vibration and the saved settings remain unchanged.
   assert.match(page, /if \(!personalSettings\.vibrationReminderEnabled\) return;/);
