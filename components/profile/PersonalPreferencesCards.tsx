@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { AudioLines, Bell, ChevronDown, ChevronUp } from "lucide-react";
 import { SettingsAccordionCard, type SettingsPanel } from "@/components/profile/SettingsAccordionCard";
 import { MAX_REMINDER_LEAD_MINUTES, formatReminderLeadLabel, normalizeReminderLeadTime, stepReminderLeadTime } from "@/lib/voice/reminder-timing";
@@ -40,6 +40,17 @@ const DETAIL_OPTIONS = [
 ] as const;
 
 const cardIconClass = "flex h-[52px] w-[52px] items-center justify-center rounded-full bg-[#F3EEFF] text-[#6D55A3]";
+
+type VibrationCapability = "web" | "ios-switch" | "none" | null;
+
+const subscribeToDeviceCapability = () => () => {};
+const serverVibrationCapability = (): VibrationCapability => null;
+const getVibrationCapability = (): VibrationCapability => {
+  if (typeof navigator === "undefined") return null;
+  const isAppleTouchDevice = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return typeof navigator.vibrate === "function" ? "web" : isAppleTouchDevice ? "ios-switch" : "none";
+};
 
 
 type PreferenceSwitchProps = {
@@ -127,14 +138,9 @@ export function PersonalPreferencesCards({
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
   const lead = normalizeReminderLeadTime(settings.reminderLeadMinutes, settings.reminderLeadSeconds);
   const [contentExpanded, setContentExpanded] = useState(false);
-  const [vibrationCapability, setVibrationCapability] = useState<"web" | "ios-switch" | "none" | null>(null);
-  useEffect(() => {
-    const isAppleTouchDevice = /iPhone|iPad|iPod/.test(navigator.userAgent)
-      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    setVibrationCapability(
-      typeof navigator.vibrate === "function" ? "web" : isAppleTouchDevice ? "ios-switch" : "none"
-    );
-  }, []);
+  const vibrationCapability = useSyncExternalStore(
+    subscribeToDeviceCapability, getVibrationCapability, serverVibrationCapability
+  );
   const adjustLead = (unit: "minutes" | "seconds", direction: -1 | 1) => {
     const next = stepReminderLeadTime(lead.minutes, lead.seconds, unit, direction);
     onChange({ reminderLeadMinutes: next.minutes, reminderLeadSeconds: next.seconds });
