@@ -33,7 +33,7 @@ const VOICE_OPTIONS = [
 ] as const;
 
 const REMINDER_SWITCHES = [
-  { key: "voiceReminderEnabled", label: "語音助理", description: "開啟後，才會播放個人耳機提醒。" },
+  { key: "voiceReminderEnabled", label: "語音助理", description: "預設開或關會儲存在本機；切換上方語音按鈕也會同步。" },
   { key: "vibrationReminderEnabled", label: "震動提醒", description: "進入下一個任務區塊時震動提醒。" },
   { key: "reminderPre5Enabled", label: "提前提醒", description: "任務開始前先提醒一次。" },
   { key: "reminderNowEnabled", label: "準點提醒", description: "任務時間到時提醒一次。" },
