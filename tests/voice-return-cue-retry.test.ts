@@ -25,7 +25,7 @@ test("return cue stays in existing voice queue and awaits actual playback result
   assert.ok(source.includes('if (isReturnCue && returnCueQueuedTextRef.current === nextText)'));
   assert.ok(source.includes('setReturnCueRetryText(nextText);'));
   assert.ok(source.includes('voiceQueueRef.current = voiceQueueRef.current.filter(item => item !== previousReturnCue);'));
-  assert.ok(source.includes('if (isLoading || (voiceAudioContextRef.current'));
+  assert.ok(source.includes('if (isLoading) return;'));
   assert.ok(source.includes('voiceAudioContextRef.current.state !== "running"'));
   assert.ok(source.includes('canRetryReturnCueAfterGesture('));
   assert.ok(source.includes('returnCueRetryCountRef.current += 1;'));
@@ -74,7 +74,8 @@ test("turning voice off or closing service discards retry without changing check
 test("server-verified admins may use regular TTS outside service hours, no volunteer bypass", () => {
   const api = route();
   assert.ok(api.includes('const user = await requireActiveUser(request)'));
-  assert.ok(api.includes('if (!serviceOpen && !canUseRegularVoiceWithoutCheckIn(user.roles))'));
+  const closedServiceGuard = api.slice(api.indexOf('if (!serviceOpen) {'), api.indexOf('const globalSettings = await getGlobalVoiceSettings()'));
+  assert.ok(closedServiceGuard.includes('if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {'));
   assert.ok(api.includes('if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {'));
   assert.ok(api.includes('authorizeRegularVoice(request, user.userId, serviceType)'));
   assert.ok(api.includes('consumeRateLimit('));
