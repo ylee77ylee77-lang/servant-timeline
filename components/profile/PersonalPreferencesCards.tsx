@@ -44,27 +44,40 @@ const cardIconClass = "flex h-[52px] w-[52px] items-center justify-center rounde
 
 type PreferenceSwitchProps = {
   label: string;
+  description?: string;
+  controls?: string;
   checked: boolean;
   onToggle: () => void;
 };
 
-/** Keep the toggle separate from the disclosure button to avoid unintended voice changes. */
-function PreferenceSwitch({ label, checked, onToggle }: PreferenceSwitchProps) {
+/** A single switch controls both the reminder and its nested options. */
+function PreferenceSwitch({ label, description, controls, checked, onToggle }: PreferenceSwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-label={label}
       aria-checked={checked}
+      aria-controls={controls}
+      aria-expanded={controls ? checked : undefined}
       onClick={onToggle}
-      className={"relative inline-flex h-7 w-12 shrink-0 items-center rounded-full p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2 " + (
-        checked ? "bg-[#6D55A3]" : "bg-[#E6EAF0]"
-      )}
+      className={(description
+        ? "flex min-h-14 w-full items-center justify-between gap-3 p-3.5 text-left "
+        : "inline-flex h-7 w-12 shrink-0 items-center "
+      ) + "rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2"}
     >
+      {description && (
+        <span className="min-w-0">
+          <span className="block text-sm font-black text-[#1F2937]">{label}</span>
+          <span className="mt-0.5 block text-[11px] font-medium leading-4 text-[#7B7B74]">{description}</span>
+        </span>
+      )}
       <span
         aria-hidden="true"
-        className={"block h-5 w-5 rounded-full bg-white shadow-sm transition-transform " + (checked ? "translate-x-5" : "translate-x-0")}
-      />
+        className={"inline-flex h-7 w-12 shrink-0 items-center rounded-full p-1 transition-colors " + (checked ? "bg-[#6D55A3]" : "bg-[#E6EAF0]")}
+      >
+        <span className={"block h-5 w-5 rounded-full bg-white shadow-sm transition-transform " + (checked ? "translate-x-5" : "translate-x-0")} />
+      </span>
     </button>
   );
 }
@@ -80,8 +93,7 @@ export function PersonalPreferencesCards({
   const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲 Iapetus" : "女聲 Zephyr";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
   const lead = normalizeReminderLeadTime(settings.reminderLeadMinutes, settings.reminderLeadSeconds);
-  const [openReminderSection, setOpenReminderSection] = useState<"voice" | "content" | null>(null);
-  const [leadTimeExpanded, setLeadTimeExpanded] = useState(false);
+  const [contentExpanded, setContentExpanded] = useState(false);
   const adjustLead = (unit: "minutes" | "seconds", direction: -1 | 1) => {
     const next = stepReminderLeadTime(lead.minutes, lead.seconds, unit, direction);
     onChange({ reminderLeadMinutes: next.minutes, reminderLeadSeconds: next.seconds });
@@ -157,56 +169,30 @@ export function PersonalPreferencesCards({
             />
           </div>
 
-          {/* Second level: opening voice options must not toggle audio. */}
+          {/* The voice switch directly shows or hides its third-level options. */}
           <div className="overflow-hidden rounded-2xl border border-[#E6EAF0] bg-white">
-            <div className="flex items-center gap-2 px-3.5">
-              <button
-                type="button"
-                aria-expanded={openReminderSection === "voice"}
-                aria-controls="personal-reminder-voice-options"
-                onClick={() => setOpenReminderSection((current) => current === "voice" ? null : "voice")}
-                className="flex min-h-16 min-w-0 flex-1 items-center justify-between gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2"
-              >
-                <span className="min-w-0">
-                  <span className="block text-sm font-black text-[#1F2937]">語音助理</span>
-                  <span className="mt-0.5 block text-[11px] font-medium leading-4 text-[#7B7B74]">開關會記憶在本機，並與頁首語音按鈕同步。</span>
-                </span>
-                <ChevronDown aria-hidden="true" className={"h-4 w-4 shrink-0 text-[#6D55A3] transition-transform " + (openReminderSection === "voice" ? "rotate-180" : "")} />
-              </button>
-              <PreferenceSwitch
-                label="語音助理"
-                checked={settings.voiceReminderEnabled}
-                onToggle={() => onChange({ voiceReminderEnabled: !settings.voiceReminderEnabled })}
-              />
-            </div>
+            <PreferenceSwitch
+              label="語音助理"
+              description="開關會記憶在本機，並與頁首語音按鈕同步。"
+              controls="personal-reminder-voice-options"
+              checked={settings.voiceReminderEnabled}
+              onToggle={() => onChange({ voiceReminderEnabled: !settings.voiceReminderEnabled })}
+            />
             <div
               id="personal-reminder-voice-options"
-              hidden={openReminderSection !== "voice"}
+              hidden={!settings.voiceReminderEnabled}
               className="space-y-2.5 border-t border-[#E6EAF0] bg-[#FFF9F3] p-3"
             >
-              {/* Third level: lead-time disclosure and its independent on/off switch. */}
+              {/* Enabling an advance reminder immediately reveals its time controls. */}
               <div className="overflow-hidden rounded-2xl border border-[#E6EAF0] bg-white">
-                <div className="flex items-center gap-2 px-3.5">
-                  <button
-                    type="button"
-                    aria-expanded={leadTimeExpanded}
-                    aria-controls="personal-reminder-lead-options"
-                    onClick={() => setLeadTimeExpanded((current) => !current)}
-                    className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-black text-[#1F2937]">提前提醒</span>
-                      <span className="mt-0.5 block text-[11px] font-medium leading-4 text-[#7B7B74]">提前 {formatReminderLeadLabel(lead.minutes, lead.seconds)}</span>
-                    </span>
-                    <ChevronDown aria-hidden="true" className={"h-4 w-4 shrink-0 text-[#6D55A3] transition-transform " + (leadTimeExpanded ? "rotate-180" : "")} />
-                  </button>
-                  <PreferenceSwitch
-                    label="提前提醒"
-                    checked={settings.reminderPre5Enabled}
-                    onToggle={() => onChange({ reminderPre5Enabled: !settings.reminderPre5Enabled })}
-                  />
-                </div>
-                <div id="personal-reminder-lead-options" hidden={!leadTimeExpanded}>
+                <PreferenceSwitch
+                  label="提前提醒"
+                  description={`提前 ${formatReminderLeadLabel(lead.minutes, lead.seconds)}`}
+                  controls="personal-reminder-lead-options"
+                  checked={settings.reminderPre5Enabled}
+                  onToggle={() => onChange({ reminderPre5Enabled: !settings.reminderPre5Enabled })}
+                />
+                <div id="personal-reminder-lead-options" hidden={!settings.reminderPre5Enabled}>
                   <div className="border-t border-[#E6EAF0] bg-[#F3EEFF] px-3.5 pb-3.5" data-reminder-lead-stepper>
                     <div className="border-t border-[#6D55A3]/10 pt-3">
                         <h3 className="mb-2 text-sm font-black text-[#1F2937]">提前時間</h3>
@@ -286,18 +272,18 @@ export function PersonalPreferencesCards({
           <div className="overflow-hidden rounded-2xl border border-[#E6EAF0] bg-white">
             <button
               type="button"
-              aria-expanded={openReminderSection === "content"}
+              aria-expanded={contentExpanded}
               aria-controls="personal-reminder-content-options"
-              onClick={() => setOpenReminderSection((current) => current === "content" ? null : "content")}
+              onClick={() => setContentExpanded((current) => !current)}
               className="flex min-h-14 w-full items-center justify-between gap-3 p-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2"
             >
               <span className="text-sm font-black text-[#1F2937]">提醒內容</span>
               <span className="ml-auto text-xs font-bold text-[#7B7B74]">{selectedDetail.label}</span>
-              <ChevronDown aria-hidden="true" className={"h-4 w-4 shrink-0 text-[#6D55A3] transition-transform " + (openReminderSection === "content" ? "rotate-180" : "")} />
+              <ChevronDown aria-hidden="true" className={"h-4 w-4 shrink-0 text-[#6D55A3] transition-transform " + (contentExpanded ? "rotate-180" : "")} />
             </button>
             <div
               id="personal-reminder-content-options"
-              hidden={openReminderSection !== "content"}
+              hidden={!contentExpanded}
               className="border-t border-[#E6EAF0] bg-[#FFF9F3] p-3.5"
             >
               <div className="grid grid-cols-3 gap-2">
