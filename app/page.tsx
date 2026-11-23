@@ -47,6 +47,7 @@ import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/
 import { getServiceActivationState, isLeadServiceOpen } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
 import {
+  canRetryReturnCueAfterGesture,
   isNearFormalVoiceReminder,
   selectReturnCueTask,
   shouldQueueReturnCue,
@@ -1491,9 +1492,9 @@ export default function App() {
             // iOS may refuse a resumed PWA's media play() until another
             // gesture. Preserve only this cue for one deliberate retry;
             // network/server errors must not cause unbounded announcements.
-            if ((err?.name === "NotAllowedError" || err?.name === "AbortError")
-              && returnCueRetryCountRef.current === 0
-              && document.visibilityState === "visible") {
+            if (canRetryReturnCueAfterGesture(
+              err?.name, returnCueRetryCountRef.current, document.visibilityState
+            )) {
               setReturnCueRetryText(nextText);
             } else {
               setReturnCueRetryText(null);
@@ -3075,7 +3076,7 @@ export default function App() {
     const leadSeconds = getReminderLeadSeconds(
       personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
     );
-    if (isNearFormalVoiceReminder(
+    if ((!isAdmin || !isCurrentServiceVoiceClosed()) && isNearFormalVoiceReminder(
       filteredNodes, now, leadSeconds,
       personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
     )) {
@@ -3118,7 +3119,7 @@ export default function App() {
       const leadSeconds = getReminderLeadSeconds(
         personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
       );
-      if (isNearFormalVoiceReminder(
+      if ((!isAdmin || !isCurrentServiceVoiceClosed()) && isNearFormalVoiceReminder(
         filteredNodes, now, leadSeconds,
         personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
       )) {
