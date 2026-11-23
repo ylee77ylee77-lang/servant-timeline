@@ -48,7 +48,9 @@ test("existing voice button stays in place and confirms each transition to ON", 
   assert.ok(toggle.includes("const nextEnabled = !isVoiceEnabled;"));
   assert.ok(toggle.includes("setIsVoiceEnabled(nextEnabled);"));
   assert.ok(toggle.includes("if (nextEnabled) {"));
-  assert.ok(toggle.includes("void playVoiceStartupConfirmation();"));
+  assert.ok(toggle.includes("announceVoiceActivation();"));
+  assert.ok(source.includes("const announceVoiceActivation = () => {"));
+  assert.ok(source.includes("void playVoiceStartupConfirmation();"));
   assert.ok(toggle.includes("stopVoiceStartupConfirmation();"));
   assert.ok(toggle.includes("void releaseVoiceWakeLock();"));
   assert.ok(source.includes("onClick={handleToggleVoiceReminder}"));
