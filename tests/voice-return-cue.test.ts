@@ -90,7 +90,9 @@ test("return-to-timeline integration reuses existing voice queue and never mutat
   assert.ok(cue.includes('isNearFormalVoiceReminder('));
   assert.ok(cue.includes('selectReturnCueTask(filteredNodes, now)'));
   assert.ok(cue.includes('simplifyTaskPhrase(selected.task)'));
-  assert.ok(cue.includes('speak(selected.kind === "current"'));
+  assert.ok(cue.includes('const taskSpeech = selected.kind === "current"'));
+  assert.ok(cue.includes('buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)'));
+  assert.ok(cue.includes(': taskSpeech, "return")'));
   assert.ok(cue.includes('目前任務，'));
   assert.ok(cue.includes('下一個任務，'));
   assert.ok(!cue.includes('announcedNodesRef.current.add'));
