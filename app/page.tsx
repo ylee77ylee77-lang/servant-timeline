@@ -3116,6 +3116,7 @@ export default function App() {
     if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled
       || (!isAdmin && checkinStatus === "not_checked_in") || !isServiceType(currentService)
       || (!isAdmin && isCurrentServiceVoiceClosed()) || !showLiveTimeline) {
+      firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
