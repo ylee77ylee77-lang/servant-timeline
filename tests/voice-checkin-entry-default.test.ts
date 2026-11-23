@@ -57,7 +57,8 @@ test("reminder settings live switch matches assistant status without bypassing s
   assert.ok(update.includes("setIsVoiceEnabled(nextEnabled)"));
   assert.ok(update.includes("clearServiceVoiceQueue()"));
   assert.ok(update.includes("announceVoiceActivation()"));
-  assert.ok(preferences().includes('key: "voiceReminderEnabled", label: "語音助理"'));
+  assert.ok(preferences().includes('label="語音助理"'));
+  assert.ok(preferences().includes('onChange({ voiceReminderEnabled: !settings.voiceReminderEnabled })'));
 });
 
 test("successful formal or admin test check-in arms a one-off first timeline announcement", () => {
