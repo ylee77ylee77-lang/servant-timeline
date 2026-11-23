@@ -83,6 +83,17 @@ export function isNearFormalVoiceReminder(
 }
 
 /**
+ * Use one serialized TTS clip for the first post-check-in entry. The separate
+ * startup test is a WebAudio source, so playing it and then calling speak()
+ * can cancel the introduction before it finishes. A single clip preserves
+ * both phrases, their order, formal-reminder preemption and iOS retry.
+ */
+export function buildFirstCheckinTimelineSpeech(taskSpeech: string, startupSpeech: string): string {
+  const task = taskSpeech.trim();
+  return task ? `${startupSpeech.trim()} ${task}`.trim() : "";
+}
+
+/**
  * Mobile browsers may require another user gesture after a background audio
  * interruption. Only those playback rejections get one deferred retry.
  * An HTTP/TTS failure must not become a repeated automatic announcement.
