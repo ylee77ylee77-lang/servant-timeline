@@ -2912,8 +2912,10 @@ export default function App() {
       return;
     }
     let disposed = false;
+    let recoveryAttempt = 0;
     const resumeOnForeground = () => {
       if (document.visibilityState !== "visible") return;
+      const attempt = ++recoveryAttempt;
       const context = voiceAudioContextRef.current;
       const audio = voiceHtmlAudioRef.current;
       const pausedReminder = Boolean(
@@ -2933,12 +2935,22 @@ export default function App() {
         setVoiceAudioRecoveryNeeded(false);
         return;
       }
-      void Promise.allSettled(pending).then(() => {
-        if (disposed || document.visibilityState !== "visible") return;
-        setVoiceAudioRecoveryNeeded(Boolean(
-          (context && context.state !== "running") || (pausedReminder && audio?.paused)
-        ));
-      });
+      const isStillSuspended = () => Boolean(
+        (context && context.state !== "running") || (pausedReminder && audio?.paused)
+      );
+      // WebKit may leave resume() pending while an audio interruption lasts.
+      // A bounded warning avoids silently waiting forever for that promise.
+      const warningTimer = window.setTimeout(() => {
+        if (!disposed && attempt === recoveryAttempt && document.visibilityState === "visible") {
+          setVoiceAudioRecoveryNeeded(isStillSuspended());
+        }
+      }, 1500);
+      void Promise.allSettled(pending)
+        .then(() => {
+          if (disposed || attempt !== recoveryAttempt || document.visibilityState !== "visible") return;
+          setVoiceAudioRecoveryNeeded(isStillSuspended());
+        })
+        .finally(() => window.clearTimeout(warningTimer));
     };
     const onVisible = () => resumeOnForeground();
     const onInteraction = () => resumeOnForeground();
@@ -6413,7 +6425,7 @@ export default function App() {
       </div>
       {isVoiceEnabled && voiceAudioRecoveryNeeded && (
         <p role="status" className="mt-2 text-[11px] font-semibold text-[#F25D6B]">
-          裝置暫停了語音，請輕觸畫面恢復；若仍無聲，請重新開啟語音助理並檢查音量。
+          裝置可能已暫停語音，請輕觸畫面嘗試恢復；若仍無聲，請重新開啟語音助理並檢查音量。
         </p>
       )}
 
