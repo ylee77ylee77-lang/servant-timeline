@@ -42,7 +42,11 @@ test("existing screen wake lock and voice button remain, recovery notice appears
   assert.ok(source.includes('if (document.visibilityState === "visible") {\n        void requestVoiceWakeLock();'));
   assert.ok(source.includes("isVoiceEnabled && voiceAudioRecoveryNeeded && ("));
   assert.ok(source.includes('role="status"'));
-  assert.ok(source.includes("請輕觸畫面恢復"));
+  assert.ok(source.includes("請輕觸畫面嘗試恢復"));
+  assert.ok(source.includes("const warningTimer = window.setTimeout(() => {"));
+  assert.ok(source.includes("}, 1500);"));
+  assert.ok(source.includes("attempt === recoveryAttempt"));
+  assert.ok(source.includes("window.clearTimeout(warningTimer)"));
   assert.ok(source.includes("onClick={handleToggleVoiceReminder}"));
   assert.ok(source.includes("setIsVoiceEnabled(nextEnabled);"));
   assert.ok(!source.includes('navigator.locks.request("keep_alive_lock"'));
