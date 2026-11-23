@@ -54,7 +54,8 @@ test("return cue stays opt-in, only external returns queue it, formal reminders 
   assert.ok(detect.includes('"return");'));
   assert.ok(!detect.includes('announcedNodesRef.current.add'));
   assert.ok(source.includes('speak(buildReminderSpeechText(node, reminderType))'));
-  assert.ok(source.includes('void playVoiceStartupConfirmation();'));
+  assert.ok(source.includes("const announceVoiceActivation = () => {"));
+  assert.ok(source.includes("void playVoiceStartupConfirmation();"));
   assert.ok(source.includes('if (nextEnabled) {'));
 });
 
