@@ -4484,6 +4484,12 @@ export default function App() {
     );
   };
 
+  // Keep check-in side effects inside the user action, never during render.
+  const submitOnsiteCheckIn = () => {
+    if (isAdminTestCheckIn) void handleAdminTestCheckIn();
+    else void handleLocalCheckin();
+  };
+
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
@@ -4667,10 +4673,7 @@ export default function App() {
                     {showOnsiteCheckIn && wifiVerified && onsiteService && (
                       <button
                         type="button"
-                        onClick={() => {
-                          if (isAdminTestCheckIn) void handleAdminTestCheckIn();
-                          else void handleLocalCheckin();
-                        }}
+                        onClick={submitOnsiteCheckIn}
                         disabled={!canSubmitCheckIn}
                         className="min-h-11 rounded-[18px] bg-[#785AA5] px-5 text-sm font-black text-white shadow-lg shadow-[#785AA5]/20 hover:bg-[#6D5197] disabled:opacity-50"
                       >
