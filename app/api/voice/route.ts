@@ -817,15 +817,17 @@ export async function POST(request: NextRequest) {
         : current.activeServiceTypes.includes(serviceType);
       // Verified administrators may test regular speech outside worship hours.
       // Coordinators and volunteers still require an active service window.
-      if (!serviceOpen && !canUseRegularVoiceWithoutCheckIn(user.roles)) {
-        return NextResponse.json(
-          {
-            error: "本場目前不在開放時間內，語音助理已關閉。",
-            fallbackToBrowser: false,
-            reason: "service_closed"
-          },
-          { status: 403 }
-        );
+      if (!serviceOpen) {
+        if (!canUseRegularVoiceWithoutCheckIn(user.roles)) {
+          return NextResponse.json(
+            {
+              error: "本場目前不在開放時間內，語音助理已關閉。",
+              fallbackToBrowser: false,
+              reason: "service_closed"
+            },
+            { status: 403 }
+          );
+        }
       }
 
       // An authenticated, active admin may use scheduled speech without
