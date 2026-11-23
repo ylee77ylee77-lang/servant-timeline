@@ -38,6 +38,8 @@ test("formal schedule still queues the same task speech and current voice toggle
   const source = page();
   assert.ok(source.includes("speak(buildReminderSpeechText(node, reminderType))"));
   assert.ok(source.includes("void playVoiceStartupConfirmation();"));
+  assert.ok(source.includes("const announceVoiceActivation = () => {"));
+  assert.ok(source.includes('announceVoiceActivation();'));
   assert.ok(source.includes("onClick={handleToggleVoiceReminder}"));
   assert.ok(source.includes('setIsVoiceEnabled(nextEnabled);'));
 });
