@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getServiceActivationState } from "../lib/services/service-activation.ts";
+import { getServiceActivationState, isLeadServiceOpen } from "../lib/services/service-activation.ts";
 
 test("Saturday service is provisioned but only active during the service window", () => {
   const before = getServiceActivationState(new Date("2026-09-12T08:59:00.000Z"));
@@ -38,4 +38,16 @@ test("Weekdays do not auto-provision worship services", () => {
   assert.deepEqual(weekday.provisionServiceTypes, []);
   assert.deepEqual(weekday.activeServiceTypes, []);
   assert.equal(weekday.defaultServiceType, null);
+});
+
+test("Sunday lead coordinator windows open and close independently", () => {
+  const at = (time: string) => getServiceActivationState(new Date(`2026-09-13T${time}:00+08:00`));
+  assert.equal(isLeadServiceOpen("主二堂", at("07:59")), false);
+  assert.equal(isLeadServiceOpen("主二堂", at("08:00")), true);
+  assert.equal(isLeadServiceOpen("主一堂", at("10:44")), true);
+  assert.equal(isLeadServiceOpen("主一堂", at("10:45")), false);
+  assert.equal(isLeadServiceOpen("主二堂", at("10:45")), true);
+  assert.equal(isLeadServiceOpen("主二堂", at("12:45")), false);
+  assert.equal(isLeadServiceOpen("六晚崇", at("19:00")), false);
+  assert.deepEqual(at("08:00").activeServiceTypes, ["主一堂"]);
 });

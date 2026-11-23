@@ -5,6 +5,8 @@ import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admi
 import { getRequestClientIp } from "@/lib/network/church-wifi";
 import { canUseRegularVoiceWithoutCheckIn, canTestVoiceBeforeCheckIn, VOICE_STARTUP_CONFIRMATION } from "@/lib/voice/startup-confirmation";
 import { isServiceType, type ServiceType } from "@/lib/services/catalog";
+import { getLeadCheckInScope } from "@/lib/services/lead-check-in";
+import { isLeadServiceOpen } from "@/lib/services/service-activation";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
 
@@ -808,7 +810,12 @@ export async function POST(request: NextRequest) {
 
     if (!isPreview && !startupMaySkipCheckIn && isServiceType(serviceType)) {
       const current = await ensureCurrentServices();
-      if (!current.activeServiceTypes.includes(serviceType)) {
+      const leadScope = await getLeadCheckInScope(request, user, current.services
+        .filter(({ status }) => status === "published" || status === "completed").map(({ id }) => id));
+      const serviceOpen = leadScope.enabled
+        ? isLeadServiceOpen(serviceType, current)
+        : current.activeServiceTypes.includes(serviceType);
+      if (!serviceOpen) {
         return NextResponse.json(
           {
             error: "本場目前不在開放時間內，語音助理已關閉。",

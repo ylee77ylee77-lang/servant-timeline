@@ -14,6 +14,7 @@ type AutoAssignmentInput = {
   service: ServiceForAutoAssignment;
   userId: string;
   ministryGroup?: string | null;
+  preferredRole?: string;
 };
 
 type AssignmentRow = {
@@ -33,6 +34,7 @@ export async function ensureCheckInAssignment({
   service,
   userId,
   ministryGroup,
+  preferredRole,
 }: AutoAssignmentInput): Promise<AssignmentRow> {
   const supabase = getSupabaseAdminClient();
 
@@ -47,9 +49,8 @@ export async function ensureCheckInAssignment({
   const activeRows = (existingRows ?? []).filter((row) =>
     ["scheduled", "confirmed"].includes(String(row.status))
   );
-  const formalAssignment = activeRows.find(
-    (row) => row.role_label !== AUTO_ASSIGNMENT_ROLE
-  );
+  const formalAssignment = activeRows.find((row) => row.role_label === preferredRole)
+    ?? activeRows.find((row) => row.role_label !== AUTO_ASSIGNMENT_ROLE);
   if (formalAssignment) return formalAssignment as AssignmentRow;
 
   const autoAssignment = activeRows.find(
@@ -96,9 +97,9 @@ export async function ensureCheckInAssignment({
       .order("created_at", { ascending: true });
     if (racedError) throw racedError;
 
-    const racedAssignment = (racedRows ?? []).find(
-      (row) => row.role_label !== AUTO_ASSIGNMENT_ROLE
-    ) ?? racedRows?.[0];
+    const racedAssignment = racedRows?.find((row) => row.role_label === preferredRole)
+      ?? racedRows?.find((row) => row.role_label !== AUTO_ASSIGNMENT_ROLE)
+      ?? racedRows?.[0];
 
     if (racedAssignment) return racedAssignment as AssignmentRow;
   }

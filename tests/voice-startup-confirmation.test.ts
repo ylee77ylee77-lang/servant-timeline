@@ -87,7 +87,9 @@ test("closing voice or service cancels pending requests and active startup playb
   assert.ok(cancel.includes("source.disconnect()"));
   assert.ok(source.includes("useEffect(() => () => stopVoiceStartupConfirmation(), [stopVoiceStartupConfirmation])"));
   assert.ok(source.includes('if (runId !== voiceStartupRunRef.current || controller.signal.aborted) return;'));
-  assert.ok(source.includes("const stopVoiceAssistantForServiceEnd = () => {\n    stopVoiceStartupConfirmation();"));
+  assert.ok(source.includes("const stopVoiceAssistantForServiceEnd = () => {\n    clearServiceVoiceQueue();"));
+  const clearQueue = source.slice(source.indexOf("const clearServiceVoiceQueue"), source.indexOf("const stopVoiceAssistantForServiceEnd"));
+  assert.ok(clearQueue.includes("stopVoiceStartupConfirmation();"));
 });
 
 test("the current voice controls do not add another switch or confirmation dialog", () => {
@@ -150,7 +152,8 @@ test("admin has the coordinator startup confirmation and live speech without che
   assert.ok(api.includes("const isAuthorized = await authorizeRegularVoice(request, user.userId, serviceType);"));
   assert.ok(api.includes("const user = await requireActiveUser(request);"));
   assert.ok(api.includes("const current = await ensureCurrentServices();"));
-  assert.ok(api.includes("if (!current.activeServiceTypes.includes(serviceType))"));
+  assert.ok(api.includes("if (!serviceOpen)"));
+  assert.ok(api.includes(": current.activeServiceTypes.includes(serviceType)"));
 });
 
 test("admin live speech and return cues are not gated by check-in; coordinator still is", () => {

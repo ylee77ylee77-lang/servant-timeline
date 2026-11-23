@@ -96,7 +96,8 @@ test("test audio is server-authorized as preview; regular service restrictions r
   assert.ok(api.includes('if (isPreview && !user.roles.includes("admin"))'));
   assert.ok(api.includes("const user = await requireActiveUser(request)"));
   assert.ok(api.includes("const current = await ensureCurrentServices()"));
-  assert.ok(api.includes("if (!current.activeServiceTypes.includes(serviceType))"));
+  assert.ok(api.includes("if (!serviceOpen)"));
+  assert.ok(api.includes(": current.activeServiceTypes.includes(serviceType)"));
 });
 
 test("test cleanup cancels timer, voice network requests and active playback", () => {
