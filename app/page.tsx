@@ -3070,8 +3070,8 @@ export default function App() {
     // A resumed page can still be loading or have an interrupted AudioContext.
     // Wait for the existing recovery handler to resume it; retry on the
     // one-second clock rather than entering a stuck audio.play() queue.
-    if (isLoading || (voiceAudioContextRef.current
-      && voiceAudioContextRef.current.state !== "running")) return;
+    if (isLoading) return;
+    if (voiceAudioContextRef.current && voiceAudioContextRef.current.state !== "running") return;
     if (filteredNodes.length === 0) {
       setReturnCuePendingAt(null);
       return;
