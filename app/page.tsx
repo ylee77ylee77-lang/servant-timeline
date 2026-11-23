@@ -1506,6 +1506,10 @@ export default function App() {
     // 真正人聲由 /api/voice 產生 MP3，前端以版本化 Cache Storage 與 Web Audio 預載播放。
     // 介面不顯示播報文字，避免耳機提醒變成多餘視覺干擾。
     setVoiceAssistantMessage("");
+    // Live task announcements have priority over the separate startup clip.
+    // Aborting the startup request also prevents a late network response from
+    // beginning to play on top of this reminder.
+    stopVoiceStartupConfirmation();
     voiceQueueRef.current.push(cleanText);
     void processVoiceQueue();
   };
@@ -2808,6 +2812,8 @@ export default function App() {
   ]);
 
   const playVoiceStartupConfirmation = async () => {
+    // The fixed confirmation must never overlap an in-flight task reminder.
+    if (voiceProcessingRef.current || voiceQueueRef.current.length > 0) return;
     stopVoiceStartupConfirmation();
     const runId = voiceStartupRunRef.current;
     const controller = new AbortController();
@@ -2840,6 +2846,11 @@ export default function App() {
       if (context.state !== "running") await context.resume();
       if (runId !== voiceStartupRunRef.current || controller.signal.aborted) return;
       if (context.state !== "running") throw new Error("手機音訊播放器未能啟動。");
+      // A reminder may have become due while we awaited the cached MP3.
+      if (voiceProcessingRef.current || voiceQueueRef.current.length > 0) {
+        stopVoiceStartupConfirmation();
+        return;
+      }
 
       const source = context.createBufferSource();
       source.buffer = decoded;
