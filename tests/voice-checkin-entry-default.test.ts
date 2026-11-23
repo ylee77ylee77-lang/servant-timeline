@@ -137,3 +137,41 @@ test("first-entry greeting is armed once after check-in, cleared on voice off, a
   assert.ok(manualOff.includes("stopVoiceStartupConfirmation()"));
   assert.ok(page.includes("firstCheckinTimelineCueServiceRef.current = null"));
 });
+
+test("manual ON from either control says activation then eligible task without overlapping two players", () => {
+  const page = source();
+  const start = page.indexOf("  const announceVoiceActivation = () => {");
+  const end = page.indexOf("  const handleToggleVoiceReminder = () => {", start);
+  assert.ok(start > 0 && end > start);
+  const activation = page.slice(start, end);
+  const changeSettings = page.slice(
+    page.indexOf("  const updatePersonalSettings = (patch: Partial<typeof personalSettings>) => {"),
+    page.indexOf("  const normalizeText =", 0)
+  );
+  const toggle = page.slice(end, page.indexOf("  // The reminder setting is the default for a new session.", end));
+  assert.ok(changeSettings.includes("announceVoiceActivation()"));
+  assert.ok(toggle.includes("announceVoiceActivation()"));
+  assert.ok(activation.includes("selectReturnCueTask(filteredNodes, now)"));
+  assert.ok(activation.includes("buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)"));
+  assert.ok(activation.includes('speak(buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION), "return")'));
+  assert.ok(!activation.includes("void playVoiceStartupConfirmation();\n      speak("), "no overlapping independent players");
+  assert.ok(activation.includes("firstCheckinTimelineCueServiceRef.current = null"), "no duplicate greeting on first timeline visit");
+});
+
+test("manual ON respects normal check-in scope; no task retains the fixed startup audio", () => {
+  const page = source();
+  const begin = page.indexOf("  const announceVoiceActivation = () => {");
+  const end = page.indexOf("  const handleToggleVoiceReminder = () => {", begin);
+  const activation = page.slice(begin, end);
+  assert.ok(activation.includes("isServiceType(currentService)"));
+  assert.ok(activation.includes('checkinStatus !== "not_checked_in" && !isCurrentServiceVoiceClosed()'));
+  assert.ok(activation.includes("isAdmin ||"));
+  assert.ok(activation.includes("showLiveTimeline && !isLoading"));
+  assert.ok(activation.includes("isNearFormalVoiceReminder("));
+  assert.ok(activation.includes("void playVoiceStartupConfirmation()"), "fixed cached confirmation when no task");
+  assert.ok(activation.includes("speak(VOICE_STARTUP_CONFIRMATION, \"return\")"), "queue behind an existing announcement");
+  assert.ok(activation.includes("voiceProcessingRef.current || voiceQueueRef.current.length > 0"));
+  assert.ok(!activation.includes("setCheckinStatus("));
+  assert.ok(!activation.includes("setCheckedInService("));
+  assert.ok(page.includes('shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)'));
+});
