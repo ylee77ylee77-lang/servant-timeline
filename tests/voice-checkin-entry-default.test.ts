@@ -37,7 +37,8 @@ test("header manual voice toggle persists the user's choice and retains the star
   assert.ok(toggle.includes("setVoicePreferenceInitialized(true)"));
   assert.ok(toggle.includes("setPersonalSettings(prev => ({ ...prev, voiceReminderEnabled: nextEnabled }))"));
   assert.ok(toggle.includes("setIsVoiceEnabled(nextEnabled)"));
-  assert.ok(toggle.includes("void playVoiceStartupConfirmation()"));
+  assert.ok(toggle.includes("announceVoiceActivation()"));
+  assert.ok(page.includes("const announceVoiceActivation = () => {"));
   assert.ok(toggle.includes("stopVoiceStartupConfirmation()"));
   assert.ok(toggle.includes("setReturnCueRetryText(null)"));
   assert.ok(toggle.includes("void releaseVoiceWakeLock()"));
@@ -55,7 +56,7 @@ test("reminder settings live switch matches assistant status without bypassing s
   assert.ok(update.includes("!isServiceType(currentService) || isCurrentServiceVoiceClosed()"));
   assert.ok(update.includes("setIsVoiceEnabled(nextEnabled)"));
   assert.ok(update.includes("clearServiceVoiceQueue()"));
-  assert.ok(update.includes("void playVoiceStartupConfirmation()"));
+  assert.ok(update.includes("announceVoiceActivation()"));
   assert.ok(preferences().includes('key: "voiceReminderEnabled", label: "語音助理"'));
 });
 
