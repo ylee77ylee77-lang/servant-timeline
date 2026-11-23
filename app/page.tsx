@@ -2911,6 +2911,7 @@ export default function App() {
       setVoiceAudioRecoveryNeeded(false);
       return;
     }
+    let disposed = false;
     const resumeOnForeground = () => {
       if (document.visibilityState !== "visible") return;
       const context = voiceAudioContextRef.current;
@@ -2933,7 +2934,7 @@ export default function App() {
         return;
       }
       void Promise.allSettled(pending).then(() => {
-        if (document.visibilityState !== "visible") return;
+        if (disposed || document.visibilityState !== "visible") return;
         setVoiceAudioRecoveryNeeded(Boolean(
           (context && context.state !== "running") || (pausedReminder && audio?.paused)
         ));
@@ -2946,6 +2947,7 @@ export default function App() {
     window.addEventListener("focus", onVisible);
     document.addEventListener("pointerdown", onInteraction, { passive: true });
     return () => {
+      disposed = true;
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("pageshow", onVisible);
       window.removeEventListener("focus", onVisible);
