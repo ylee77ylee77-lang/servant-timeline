@@ -236,9 +236,7 @@ export default function App() {
   // 已驗證的 Supabase Auth 帳號即為報到身分，不再額外蒐集手機後四碼。
   const [wifiVerified, setWifiVerified] = useState(false);
   const [wifiChecking, setWifiChecking] = useState(false);
-  const [wifiCheckMessage, setWifiCheckMessage] = useState<string>(
-    CHECK_IN_NETWORK_MESSAGES.unavailable
-  );
+  const wifiCheckRequestRef = useRef<{ controller: AbortController; promise: Promise<void> } | null>(null);
   const [isCheckinSyncing, setIsCheckinSyncing] = useState(false);
   const [checkinStatus, setCheckinStatus] = useState<"not_checked_in" | "checked_in" | "station_confirmed">("not_checked_in");
   const [checkedInAt, setCheckedInAt] = useState("");
@@ -246,6 +244,10 @@ export default function App() {
   const [checkedInService, setCheckedInService] = useState("");
   const [selectedCheckInService, setSelectedCheckInService] = useState("");
   const [eligibleCheckInOptions, setEligibleCheckInOptions] = useState<EligibleCheckInOption[]>([]);
+  const [confirmedCheckInService, setConfirmedCheckInService] = useState("");
+  const showOnsiteCheckIn = checkinStatus === "not_checked_in"
+    && confirmedCheckInService === selectedCheckInService
+    && eligibleCheckInOptions.some(({ serviceType }) => serviceType === confirmedCheckInService);
   const [leadCheckIn, setLeadCheckIn] = useState({
     enabled: false, checkedInTypes: [] as string[], endedService: "",
     reportOpensAt: "", canCorrect: false,
@@ -3070,64 +3072,61 @@ export default function App() {
     }
   };
 
-  const checkWifiConnection = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    setWifiChecking(true);
+  const checkWifiConnection = useCallback(() => {
+    if (wifiCheckRequestRef.current) return wifiCheckRequestRef.current.promise;
 
-    if (!silent) {
-      setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.checking);
-    }
-
-    try {
-      const response = await fetch(`/api/check-wifi?t=${Date.now()}`, {
-        method: "GET",
-        cache: "no-store"
-      });
-
-      const result = await response.json();
-
-      if (response.ok && result.connected) {
-        setWifiVerified(true);
-        setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.connected);
-      } else {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    const promise = (async () => {
+      try {
+        const response = await fetch(`/api/check-wifi?t=${Date.now()}`, {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!controller.signal.aborted) setWifiVerified(response.ok && result.connected === true);
+      } catch {
         setWifiVerified(false);
-        setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.unavailable);
+      } finally {
+        window.clearTimeout(timeout);
+        wifiCheckRequestRef.current = null;
       }
-    } catch (err) {
-      console.error("檢查 Wi-Fi 連線失敗:", err);
-      setWifiVerified(false);
-      setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.unavailable);
+    })();
+    wifiCheckRequestRef.current = { controller, promise };
+    return promise;
+  }, []);
+
+  const handleWifiCheck = async () => {
+    setWifiChecking(true);
+    try {
+      await checkWifiConnection();
     } finally {
       setWifiChecking(false);
     }
-  }, []);
-
-  const handleWifiCheck = () => {
-    void checkWifiConnection({ silent: false });
   };
 
   useEffect(() => {
     if (activeTab !== "checkin") return;
     if (checkinStatus !== "not_checked_in" && !leadCheckIn.enabled) return;
 
-    void checkWifiConnection({ silent: true });
+    void checkWifiConnection();
 
     const autoCheckTimer = window.setInterval(() => {
-      void checkWifiConnection({ silent: true });
-    }, 10000);
+      if (document.visibilityState === "visible") void checkWifiConnection();
+    }, showOnsiteCheckIn ? 1000 : 10000);
 
     const handleOnline = () => {
-      void checkWifiConnection({ silent: true });
+      void checkWifiConnection();
     };
 
     const handleOffline = () => {
+      wifiCheckRequestRef.current?.controller.abort();
       setWifiVerified(false);
-      setWifiCheckMessage(CHECK_IN_NETWORK_MESSAGES.unavailable);
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void checkWifiConnection({ silent: true });
-      }
+      if (document.visibilityState === "visible") void checkWifiConnection();
     };
 
     window.addEventListener("online", handleOnline);
@@ -3140,7 +3139,7 @@ export default function App() {
       window.removeEventListener("offline", handleOffline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeTab, checkinStatus, checkWifiConnection, leadCheckIn.enabled]);
+  }, [activeTab, checkinStatus, checkWifiConnection, leadCheckIn.enabled, showOnsiteCheckIn]);
 
 
   const handleLocalCheckin = async (targetService = selectedCheckInService, correct = false) => {
@@ -3200,6 +3199,7 @@ export default function App() {
       lastRestoredCheckInIdRef.current = result.checkIn.id;
       setCheckedInService(lockedServiceType);
       setSelectedCheckInService("");
+      setConfirmedCheckInService("");
       const resolvedAssignmentId = String(
         result.assignmentId || result.checkIn?.assignment_id || ""
       );
@@ -4227,16 +4227,12 @@ export default function App() {
       selectedCheckInService
     );
     const canSubmitCheckIn =
-      wifiVerified && Boolean(selectedOption) && !isCheckedIn && !isCheckinSyncing;
+      wifiVerified && showOnsiteCheckIn && Boolean(selectedOption) && !isCheckinSyncing;
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         <div className="mb-6 px-1">
           <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">報到</h2>
-          <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
-            <Check className="w-4 h-4 text-[#6D55A3]" />
-            首頁｜確認堂次、現場報到、等待分派
-          </p>
         </div>
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
@@ -4283,7 +4279,7 @@ export default function App() {
               {!isCheckedIn && (
                 <fieldset className="mb-5">
                   <legend className="text-xs font-black text-[#7B7B74] mb-2">
-                    請確認本次服事堂次
+                    確認堂次{eligibleCheckInOptions.length === 0 ? "（尚未開放）" : ""}
                   </legend>
                   <div className="grid grid-cols-3 gap-2">
                     {SERVICE_TYPES.map((serviceType) => {
@@ -4295,8 +4291,11 @@ export default function App() {
                         <button
                           key={serviceType}
                           type="button"
-                          onClick={() => setSelectedCheckInService(serviceType)}
-                          disabled={!isEligible}
+                          onClick={() => {
+                            setSelectedCheckInService(serviceType);
+                            setConfirmedCheckInService(serviceType);
+                          }}
+                          disabled={!isEligible || isCheckinSyncing}
                           aria-pressed={isSelected}
                           className={`min-h-[48px] rounded-[16px] border px-2 text-sm font-black transition-colors ${
                             isSelected
@@ -4311,97 +4310,47 @@ export default function App() {
                       );
                     })}
                   </div>
-                  <p className="mt-2 text-xs font-bold leading-relaxed text-[#7B7B74]">
-                    {eligibleCheckInOptions.length
-                      ? selectedOption
-                        ? `已選擇「${selectedOption.serviceType}」，按下報到後即鎖定。`
-                        : "請點選本次服事堂次；有正式排班會直接沿用，沒有排班則以「待分派」完成現場報到。"
-                      : "目前沒有開放中的崇拜堂次。" }
-                  </p>
                 </fieldset>
               )}
-              <div className={`text-xs font-bold leading-relaxed mb-4 ${
-                wifiVerified ? "text-[#00B8B8]" : "text-[#F25D6B]"
-              }`}>
-                {wifiVerified ? (
-                  <>
-                    <p>{wifiCheckMessage}</p>
-                    <p className="flex flex-wrap items-center gap-2">
+              {(showOnsiteCheckIn || isCheckedIn) && (
+                <section aria-label="現場報到" className={showOnsiteCheckIn ? "border-t border-[#E6EAF0] pt-4" : ""}>
+                  {showOnsiteCheckIn && (
+                    <>
+                      <h4 className="mb-2 text-sm font-black text-[#1F2937]">現場報到</h4>
+                      <p className="mb-2 text-sm text-[#64645F]">請連線至教會 Wi-Fi「slllc」</p>
+                    </>
+                  )}
+                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#16744C]" : "text-[#B42337]"}`}>
+                    {wifiVerified ? "已連線" : "請先確認網路連線後再試。"}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void handleWifiCheck()}
+                      disabled={wifiChecking}
+                      aria-label="重新確認現場報到資格"
+                      className={`wifi-action-enter wifi-check-button inline-flex min-h-11 items-center gap-1.5 rounded-full border bg-white px-3 text-xs font-black ${
+                        wifiVerified
+                          ? "border-[#16744C]/30 text-[#16744C] hover:bg-[#16744C]/10"
+                          : "border-[#B42337]/30 text-[#B42337] hover:bg-[#FFF2F4]"
+                      } ${wifiChecking ? "wifi-check-button-checking cursor-wait" : ""}`}
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
+                      <span className="wifi-check-label">{wifiChecking ? "檢查中…" : "重新檢查"}</span>
+                    </button>
+                    {showOnsiteCheckIn && wifiVerified && selectedOption && (
                       <button
                         type="button"
-                        onClick={handleWifiCheck}
-                        disabled={wifiChecking}
-                        aria-label="重新確認現場報到資格"
-                        className={`wifi-action-enter wifi-check-button inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-black ${
-                          wifiChecking
-                            ? "wifi-check-button-checking bg-white text-[#00B8B8] border-[#00B8B8]/40 cursor-wait"
-                            : "bg-white text-[#00B8B8] border-[#00B8B8]/25 hover:bg-[#00B8B8]/10 hover:shadow-[0_0_14px_rgba(0,184,184,0.16)]"
-                        }`}
+                        onClick={() => void handleLocalCheckin()}
+                        disabled={!canSubmitCheckIn}
+                        className="min-h-11 rounded-[18px] bg-[#F25D6B] px-5 text-sm font-black text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E] disabled:opacity-50"
                       >
-                        <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
-                        <span key={wifiChecking ? "wifi-checking" : "wifi-ready"} className="wifi-check-label">
-                          {wifiChecking ? "檢查中…" : "重新檢查"}
-                        </span>
+                        {isCheckinSyncing ? "同步中…" : `立即報到 ${selectedOption.serviceType}`}
                       </button>
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p>{wifiCheckMessage}</p>
-                    <p className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleWifiCheck}
-                        disabled={wifiChecking}
-                        aria-label="重新確認現場報到資格"
-                        className={`wifi-action-enter wifi-check-button inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-black ${
-                          wifiChecking
-                            ? "wifi-check-button-checking bg-white text-[#00B8B8] border-[#00B8B8]/40 cursor-wait"
-                            : "bg-white text-[#F25D6B] border-[#F25D6B]/25 hover:bg-[#FFF2F4] hover:shadow-[0_0_14px_rgba(242,93,107,0.14)]"
-                        }`}
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
-                        <span key={wifiChecking ? "wifi-checking" : "wifi-ready"} className="wifi-check-label">
-                          {wifiChecking ? "檢查中…" : "重新檢查"}
-                        </span>
-                      </button>
-                    </p>
-                  </>
-                )}
-              </div>
-
-              <div className="grid grid-cols-[1fr_auto] gap-3 items-stretch">
-                <div className={`min-h-[64px] p-3.5 rounded-[18px] border flex items-center justify-center ${
-                  wifiVerified
-                    ? "bg-[#00B8B8]/10 border-[#00B8B8]/20 text-[#00B8B8]"
-                    : "bg-white border-[#F25D6B]/25 text-[#F25D6B]"
-                  }`}>
-                  <div className="text-sm font-black">
-                    {wifiVerified ? "現場報到：可使用" : "現場報到：尚不可用"}
+                    )}
                   </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => void handleLocalCheckin()}
-                  disabled={!canSubmitCheckIn}
-                  className={`min-w-[108px] px-5 rounded-[18px] text-sm font-black transition-all ${
-                    isCheckedIn
-                      ? "bg-[#F3EEFF] text-[#6D55A3] border border-[#6D55A3]/20 cursor-default"
-                      : canSubmitCheckIn
-                        ? "bg-[#F25D6B] text-white shadow-lg shadow-[#F25D6B]/20 hover:bg-[#E44F5E]"
-                        : "bg-[#E6EAF0] text-[#9CA3AF] cursor-not-allowed"
-                  }`}
-                >
-                  {isCheckedIn
-                    ? "已完成報到"
-                    : isCheckinSyncing
-                      ? "同步中…"
-                      : selectedOption
-                        ? `確認${selectedOption.serviceType}並報到`
-                        : "立即報到"}
-                </button>
-              </div>
+                </section>
+              )}
             </div>
 
             {stationReady && !leadCheckedIn ? (
