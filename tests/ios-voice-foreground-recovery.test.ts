@@ -21,7 +21,7 @@ test("foreground recovery retries audio only when voice is on and page visible",
   assert.ok(recovery.includes('window.addEventListener("focus", onVisible)'));
   assert.ok(recovery.includes('document.addEventListener("pointerdown", onInteraction, { passive: true })'));
   assert.ok(recovery.includes("disposed = true"));
-  assert.ok(recovery.includes('if (disposed || document.visibilityState !== "visible") return;'));
+  assert.ok(recovery.includes('if (disposed || attempt !== recoveryAttempt || document.visibilityState !== "visible") return;'));
 });
 
 test("silent HTMLAudio unlock never interrupts a queued formal announcement", () => {
