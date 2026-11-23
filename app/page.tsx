@@ -665,8 +665,10 @@ export default function App() {
     return textContainsAny(taskSearchText(node), ["三樓", "3樓", "3f", "三層"]);
   };
 
+  const leadCheckedIn = leadCheckIn.enabled && checkinStatus !== "not_checked_in";
+
   const isNodeForCurrentPerson = (node: any) => {
-    const role = personalSettings.role || "總招";
+    const role = leadCheckedIn ? "總招" : personalSettings.role || "總招";
 
     if (role === "總招") return true;
 
@@ -3243,16 +3245,14 @@ export default function App() {
     }
   };
 
-  const confirmLeadCheckInChange = (serviceType: string, correct: boolean) => {
+  const confirmLeadCheckInChange = (serviceType: string) => {
     setCustomConfirm({
       isOpen: true,
-      message: correct
-        ? `將「${checkedInService}」更正為「${serviceType}」？原堂的有效報到將撤銷。`
-        : `報到「${serviceType}」，並保留「${checkedInService}」的報到紀錄？`,
-      confirmLabel: correct ? `確認改為${serviceType}` : `報到${serviceType}`,
+      message: `將「${checkedInService}」更正為「${serviceType}」？原堂的有效報到將撤銷。`,
+      confirmLabel: `確認改為${serviceType}`,
       onConfirm: () => {
         if (lastRestoredCheckInIdRef.current === checkInId) {
-          void handleLocalCheckin(serviceType, correct);
+          void handleLocalCheckin(serviceType, true);
         }
       },
     });
@@ -3655,6 +3655,7 @@ export default function App() {
   };
 
   const handleOpenStationScanner = () => {
+    if (leadCheckedIn) return;
     if (checkinStatus === "not_checked_in") {
       setCustomAlert({ isOpen: true, message: "請先完成報到，再掃描崗位名牌。" });
       return;
@@ -4216,7 +4217,7 @@ export default function App() {
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
-    const nextOptions = leadCheckIn.enabled && isCheckedIn
+    const correctionOptions = leadCheckIn.enabled && isCheckedIn && leadCheckIn.canCorrect && !stationReady
       ? eligibleCheckInOptions.filter(({ serviceType }) =>
           serviceType !== checkedInService && !leadCheckIn.checkedInTypes.includes(serviceType))
       : [];
@@ -4260,7 +4261,7 @@ export default function App() {
             </h3>
           </div>
           <p className="mt-4 text-sm font-bold leading-6 text-[#6D55A3]">
-            今日堂次：{todayService}{checkedInService ? "（已鎖定）" : ""}
+            今日堂次：{todayService}{checkedInService ? (leadCheckIn.enabled ? "｜已報到" : "（已鎖定）") : ""}
           </p>
           {leadCheckIn.endedService && !isCheckedIn && (
             <p className="mt-1 text-xs text-[#64645F]">{leadCheckIn.endedService}報到紀錄已保留。</p>
@@ -4272,29 +4273,13 @@ export default function App() {
               {leadCheckIn.reportOpensAt && (
                 <p className="mb-3 text-xs font-bold text-[#64645F]">主二堂總招報到於 {leadCheckIn.reportOpensAt} 開放。</p>
               )}
-              {nextOptions.map(({ serviceType }) => {
-                const canReportNext = checkedInService === "主一堂" && serviceType === "主二堂";
-                const canCorrect = leadCheckIn.canCorrect && !stationReady;
-                if (!canReportNext && !canCorrect) return null;
-                return (
-                  <div key={serviceType} className="mb-3 flex flex-wrap gap-2">
-                    {canReportNext && (
-                      <button type="button" disabled={isCheckinSyncing}
-                        className="min-h-11 rounded-xl bg-white px-3 font-bold text-[#6D55A3] border disabled:opacity-50"
-                        onClick={() => confirmLeadCheckInChange(serviceType, false)}>
-                        報到下一堂（{serviceType}）
-                      </button>
-                    )}
-                    {canCorrect && (
-                      <button type="button" disabled={isCheckinSyncing}
-                        className="min-h-11 rounded-xl bg-white px-3 font-bold text-[#6D55A3] border disabled:opacity-50"
-                        onClick={() => confirmLeadCheckInChange(serviceType, true)}>
-                        更正堂次（{serviceType}）
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+              {correctionOptions.map(({ serviceType }) => (
+                <button key={serviceType} type="button" disabled={isCheckinSyncing}
+                  className="mb-3 min-h-11 rounded-xl bg-white px-3 font-bold text-[#6D55A3] border disabled:opacity-50"
+                  onClick={() => confirmLeadCheckInChange(serviceType)}>
+                  更正堂次（{serviceType}）
+                </button>
+              ))}
               {!isCheckedIn && (
                 <fieldset className="mb-5">
                   <legend className="text-xs font-black text-[#7B7B74] mb-2">
@@ -4419,7 +4404,7 @@ export default function App() {
               </div>
             </div>
 
-            {stationReady ? (
+            {stationReady && !leadCheckedIn ? (
               <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#6D55A3]/5 mb-5">
                 <h3 className="text-[16px] font-black text-[#1F2937] mb-2">崗位確認完成</h3>
                 <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-2">
@@ -4451,12 +4436,12 @@ export default function App() {
                   您已於 <span className="text-[#F25D6B]">{checkedInAt || "--:--"}</span> 完成報到
                 </h3>
                 <p className="text-sm font-medium leading-relaxed text-[#7B7B74] mb-5">
-                  {assignedStation
+                  {leadCheckedIn ? "今日崗位：總招" : assignedStation
                     ? "目前狀態：已分派崗位，請確認名牌。"
                     : "目前狀態：已完成報到，尚未分派崗位；可直接進入共用流程。"}
                 </p>
 
-                {assignedStation ? (
+                {!leadCheckedIn && assignedStation ? (
                   <>
                     <div className="mb-5 p-4 rounded-[20px] bg-[#00B8B8]/10 border border-[#00B8B8]/20">
                       <div className="text-[11px] font-black text-[#00B8B8] tracking-widest mb-1">總招指定崗位</div>
@@ -4479,7 +4464,7 @@ export default function App() {
                     onClick={openCheckedInTimeline}
                     className="w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#F25D6B]/20 hover:opacity-90 transition-opacity"
                   >
-                    進入今日共用流程
+                    {leadCheckedIn ? "進入今日流程" : "進入今日共用流程"}
                   </button>
                 )}
               </div>
@@ -4500,7 +4485,7 @@ export default function App() {
           <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">崗位</h2>
           <p className="text-sm font-medium text-[#7B7B74] mt-1.5 flex items-center gap-1.5">
             <MapPin className="w-4 h-4 text-[#6D55A3]" />
-            掃描 / 確認 QR 崗位名牌
+            {leadCheckedIn ? checkedInService : "掃描 / 確認 QR 崗位名牌"}
           </p>
         </div>
 
@@ -4511,14 +4496,14 @@ export default function App() {
             <MapPin className={`w-7 h-7 ${stationReady ? "text-[#00B8B8]" : "text-[#6D55A3]"}`} />
           </div>
           <h3 className="text-[18px] font-black text-[#1F2937] mb-2">
-            {stationReady
+            {leadCheckedIn ? "今日崗位：總招" : stationReady
               ? "已確認今日崗位"
               : assignedStation
                 ? "等待掃描崗位名牌"
                 : "目前未分派崗位"}
           </h3>
           <p className="text-sm font-medium leading-relaxed text-[#7B7B74]">
-            {stationReady
+            {leadCheckedIn ? "已完成本堂報到。" : stationReady
               ? `今日崗位：${confirmedStation || personalSettings.role}。系統會依此切換個人流程。`
               : assignedStation
                 ? `總招已指定「${assignedStation}」，拿到名牌後可掃描 QR Code 確認。`
@@ -4532,7 +4517,7 @@ export default function App() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3">
+        {!leadCheckIn.enabled && <div className="grid grid-cols-1 gap-3">
           <button
             type="button"
             disabled={!isCheckedIn || !assignedStation}
@@ -4545,8 +4530,7 @@ export default function App() {
           >
             {assignedStation ? "掃描崗位名牌" : "目前不需確認崗位"}
           </button>
-
-        </div>
+        </div>}
       </div>
     );
   };
@@ -5269,13 +5253,13 @@ export default function App() {
         accent: isCheckedIn ? "text-[#00B8B8]" : "text-[#F25D6B]",
         bg: isCheckedIn ? "bg-[#00B8B8]/10 border-[#00B8B8]/20" : "bg-[#FFF2F4] border-[#F25D6B]/20"
       },
-      {
+      ...(leadCheckIn.enabled ? [] : [{
         title: "崗位確認",
         value: stationReady ? "已確認" : isCheckedIn ? "待確認" : "未報到",
         meta: stationReady ? currentStation : "掃描崗位名牌後確認",
         accent: stationReady ? "text-[#00B8B8]" : "text-[#F25D6B]",
         bg: stationReady ? "bg-[#00B8B8]/10 border-[#00B8B8]/20" : "bg-[#FFF2F4] border-[#F25D6B]/20"
-      },
+      }]),
       {
         title: "專招缺口",
         value: specialistGapItems.length === 0 ? "目前穩定" : specialistGapItems.length + " 項待注意",
@@ -6386,7 +6370,7 @@ export default function App() {
             isLoading={isLoading}
             service={myServiceContext.service}
             assignment={myServiceContext.assignment}
-            assignedStation={myServiceContext.assignedStation}
+            assignedStation={leadCheckedIn && myServiceContext.service?.service_type === checkedInService ? "總招" : myServiceContext.assignedStation}
             checkIn={myServiceContext.checkIn}
             onNavigate={setActiveTab}
           />
