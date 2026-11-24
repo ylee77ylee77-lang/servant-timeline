@@ -7,6 +7,7 @@ retouching and differential eyewear isolation, not new interchangeable hair
 geometry. Generated images are QA artifacts, not an approved runtime catalog.
 """
 from pathlib import Path
+import argparse
 import base64
 import hashlib
 import json
@@ -123,20 +124,45 @@ def isolate_glasses(name, plain, glasses):
         "outside_eye_mean_rgb_error": round(float(np.mean(np.abs(delta[outer])) * 255), 3),
         "outside_eye_pixels_over_12_rgb_pct": round(float(np.mean(difference[outer] > 12 / 255) * 100), 3),
         "silhouette_alpha_pixels_over_12_pct": round(float(np.mean(np.abs(plain[:, :, 3].astype(int) - glasses[:, :, 3].astype(int)) > 12) * 100), 3),
-        "reconstructed_eye_mean_rgb_error": round(float(residual[roi & overlap].mean()), 3),
+        "reconstructed_eye_mean_rgb_error": round(float(residual[roi & overlap].mean()), 3) if np.any(roi & overlap) else None,
         "extracted_eye_pixels": int(np.count_nonzero(au)),
     }
     metrics["alignment_threshold_passed"] = (
         metrics["outside_eye_mean_rgb_error"] <= 2.5
         and metrics["outside_eye_pixels_over_12_rgb_pct"] <= 2.0
         and metrics["silhouette_alpha_pixels_over_12_pct"] <= 2.0
+        and metrics["reconstructed_eye_mean_rgb_error"] is not None
         and metrics["reconstructed_eye_mean_rgb_error"] <= 2.0
+        and metrics["extracted_eye_pixels"] > 100
     )
     return overlay, reconstructed, metrics, difference
 
 
 def save_webp(array, path):
     Image.fromarray(array).save(path, "WEBP", lossless=True, method=6, exact=False)
+
+
+def save_transfer_variant(name, label, array, emit_transfer):
+    """High-quality pre-rendered color variant, preserving the exact alpha matte."""
+    directory = OUT / "candidate-portraits"
+    directory.mkdir(exist_ok=True)
+    path = directory / f"{name}-{label}.webp"
+    Image.fromarray(array).save(path, "WEBP", quality=94, method=6, alpha_quality=100)
+    data = path.read_bytes()
+    decoded = np.asarray(Image.open(path).convert("RGBA"))
+    assert decoded.shape == array.shape, path.name
+    assert np.array_equal(decoded[:, :, 3], array[:, :, 3]), f"{path.name}: alpha changed"
+    assert len(data) < 180 * 1024, f"{path.name}: exceeds mobile asset budget"
+    assert data[:4] == b"RIFF" and data[8:16] == b"WEBPVP8X", path.name
+    opaque = array[:, :, 3] == 255
+    error = np.abs(decoded[:, :, :3].astype(np.float32) - array[:, :, :3].astype(np.float32))
+    mean_error = float(error[opaque].mean())
+    assert mean_error < 3.0, f"{path.name}: unacceptable compression error"
+    print(f"AVATAR_VARIANT_META:{path.name}:{len(data)}:{hashlib.sha256(data).hexdigest()}:{mean_error:.3f}")
+    if emit_transfer:
+        encoded = base64.b64encode(data).decode("ascii")
+        for idx in range(0, len(encoded), 1800):
+            print(f"AVATAR_VARIANT:{path.name}:{idx // 1800}:" + encoded[idx:idx + 1800])
 
 
 def thumb(array, width, bg="#E9DFF4"):
@@ -155,6 +181,10 @@ def thumb(array, width, bg="#E9DFF4"):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--emit-transfer", action="store_true",
+                        help="Emit public developer-only candidate artwork for repository handoff")
+    args = parser.parse_args()
     OUT.mkdir(exist_ok=True)
     hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in SOURCE.glob("*.webp")}
     report = {"scope": "proof only; locked existing hair silhouette; no registered assets", "characters": {}}
@@ -179,6 +209,8 @@ def main():
         glass_weight[y1:y2, x1:x2] *= (1 - smoothstep(5 / 255, 20 / 255, difference[y1:y2, x1:x2]))
         dark_glasses, count_glasses = recolor(name, glasses, glass_weight)
         assert count > 8000, f"{name}: insufficient hair pixels"
+        save_transfer_variant(name, "dark", dark, args.emit_transfer)
+        save_transfer_variant(name, "dark-glasses", dark_glasses, args.emit_transfer)
         for label, value in (("dark", dark), ("dark-glasses", dark_glasses), ("eyewear-diagnostic", overlay), ("reconstructed", reconstructed)):
             save_webp(value, OUT / f"{name}-{label}.webp")
         Image.fromarray(np.rint(weights * 255).astype(np.uint8), mode="L").save(OUT / f"{name}-hair-mask.png")

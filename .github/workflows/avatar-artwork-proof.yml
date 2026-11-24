@@ -31,7 +31,7 @@ jobs:
       - name: Install image QA dependencies
         run: python -m pip install Pillow==11.3.0 numpy==2.2.6
       - name: Analyze locked original artwork
-        run: python scripts/prototype-avatar-artwork.py
+        run: python scripts/prototype-avatar-artwork.py --emit-transfer
       - name: Upload visual comparison and metrics
         uses: actions/upload-artifact@v4
         with:
