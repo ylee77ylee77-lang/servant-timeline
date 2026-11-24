@@ -29,8 +29,8 @@ type PersonalPreferencesCardsProps = {
 };
 
 const VOICE_OPTIONS = [
-  { value: "zephyr", label: "女聲 Zephyr", description: "自然、明亮、溫柔，適合一般提醒。" },
-  { value: "iapetus", label: "男聲 Iapetus", description: "自然、穩重、清楚，適合現場指令。" },
+  { value: "zephyr", label: "女聲" },
+  { value: "iapetus", label: "男聲" },
 ] as const;
 
 const DETAIL_OPTIONS = [
@@ -129,12 +129,10 @@ function PreferenceSwitch({ label, description, controls, checked, onToggle, nat
 export function PersonalPreferencesCards({
   settings,
   onChange,
-  isVoiceEnabled,
-  isWakeLockActive,
   expandedPanel,
   onToggle,
 }: PersonalPreferencesCardsProps) {
-  const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲 Iapetus" : "女聲 Zephyr";
+  const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲" : "女聲";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
   const lead = normalizeReminderLeadTime(settings.reminderLeadMinutes, settings.reminderLeadSeconds);
   const [contentExpanded, setContentExpanded] = useState(false);
@@ -156,16 +154,6 @@ export function PersonalPreferencesCards({
         expanded={expandedPanel === "voice"}
         onToggle={() => onToggle("voice")}
       >
-        <p className="mb-3 text-xs font-medium leading-5 text-[#7B7B74]">
-          每位同工可在本機選擇自己的語音；開啟語音助理時會盡量保持畫面亮起，服事結束後會自動關閉。
-        </p>
-        <p className={`mb-4 text-[11px] font-bold ${isVoiceEnabled && isWakeLockActive ? "text-[#008A7A]" : "text-[#7B7B74]"}`}>
-          {isVoiceEnabled
-            ? isWakeLockActive
-              ? "螢幕保持喚醒：已啟用"
-              : "螢幕保持喚醒：此裝置可能不支援"
-            : "語音助理關閉時不會保持螢幕喚醒"}
-        </p>
         <div data-voice-profile-selector="chirp3">
           <h3 className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">語音選擇</h3>
           <div className="grid grid-cols-2 gap-2">
@@ -184,14 +172,10 @@ export function PersonalPreferencesCards({
                 <span className="block text-sm font-black">
                   {settings.voiceProfile === option.value ? "✓ " : ""}{option.label}
                 </span>
-                <span className="mt-1 block text-[10px] font-bold leading-4 opacity-80">{option.description}</span>
               </button>
             ))}
           </div>
         </div>
-        <p className="mt-4 text-center text-[11px] font-bold text-[#008A7A]">
-          設定已自動儲存在這台裝置
-        </p>
       </SettingsAccordionCard>
 
       <SettingsAccordionCard
