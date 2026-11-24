@@ -140,10 +140,47 @@ export function AdminVoiceTestCard({
       };
       if (!speech.advance || !speech.ontime) throw new Error("無法建立測試語音。");
 
+      // Start both authorized TTS requests immediately after the test tap.
+      // Do not await them before scheduling: the spoken task time must match
+      // the same absolute plan, even on a slow first request or voice switch.
+      // Both scheduled cues await these SAME promises instead of making a
+      // cold cloud request only when the due time has already arrived.
+      const prefetchController = new AbortController();
+      abortRef.current = prefetchController;
+      const prefetchCue = async (cue: AdminVoiceTestCue): Promise<AudioBuffer> => {
+        const response = await fetch("/api/voice", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + accessToken,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ text: speech[cue], voiceProfile, preview: true }),
+          signal: prefetchController.signal,
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || "雲端語音服務未能產生音檔。");
+        }
+        if (!(response.headers.get("Content-Type") || "").includes("audio/")) {
+          throw new Error("雲端語音未傳回有效音檔。");
+        }
+        const bytes = await (await response.blob()).arrayBuffer();
+        if (run !== runRef.current || prefetchController.signal.aborted) {
+          throw new Error("語音測試已取消。");
+        }
+        return context.decodeAudioData(bytes);
+      };
+      const preparedAudio: Partial<Record<AdminVoiceTestCue, Promise<AudioBuffer>>> = {};
+      if (preSelected) preparedAudio.advance = prefetchCue("advance");
+      if (nowSelected) preparedAudio.ontime = prefetchCue("ontime");
+      // Handle rejected promises immediately, even if the test is canceled
+      // before the scheduled time. The playback loop still receives errors.
+      void Promise.allSettled(Object.values(preparedAudio));
+
       scheduledRef.current = { advance: !preSelected, ontime: !nowSelected };
       setPlan(testPlan);
       setStage("waiting");
-      setNotice("模擬任務已排程。請保持此頁面在前景，等待自動播報。");
+      setNotice("模擬任務已排程，正預先準備語音。請保持此頁面在前景，等待自動播報。");
       const queue = queuedRef;
 
       const playQueued = async () => {
@@ -153,34 +190,12 @@ export function AdminVoiceTestCard({
           while (queue.current.length > 0 && run === runRef.current) {
             const cue = queue.current.shift();
             if (!cue) continue;
-            setNotice(cue === "advance" ? "提前提醒已觸發，正在產生語音…" : "準點提醒已觸發，正在產生語音…");
+            setNotice(cue === "advance" ? "提前提醒已觸發，正在準備播放…" : "準點提醒已觸發，正在準備播放…");
 
-            const controller = new AbortController();
-            abortRef.current = controller;
-            const response = await fetch("/api/voice", {
-              method: "POST",
-              headers: {
-                Authorization: "Bearer " + accessToken,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                text: speech[cue],
-                voiceProfile,
-                preview: true,
-              }),
-              signal: controller.signal,
-            });
-            if (!response.ok) {
-              const payload = await response.json().catch(() => null);
-              throw new Error(payload?.error || "雲端語音服務未能產生音檔。");
-            }
-            if (!(response.headers.get("Content-Type") || "").includes("audio/")) {
-              throw new Error("雲端語音未傳回有效音檔。");
-            }
-            const bytes = await (await response.blob()).arrayBuffer();
-            if (run !== runRef.current || controller.signal.aborted) return;
-            const buffer = await context.decodeAudioData(bytes);
-            if (run !== runRef.current) return;
+            const prepared = preparedAudio[cue];
+            if (!prepared) throw new Error("此提醒沒有可用的預載音檔。");
+            const buffer = await prepared;
+            if (run !== runRef.current || prefetchController.signal.aborted) return;
             if (context.state !== "running") await context.resume();
             if (context.state !== "running") throw new Error("裝置阻擋了自動播放。");
 

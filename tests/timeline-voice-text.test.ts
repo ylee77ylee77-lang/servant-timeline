@@ -74,7 +74,9 @@ test("only authenticated admins can write a whitelisted voice field, with optimi
 
 test("live reminders use saved text and the preview can audition unsaved edits before saving", () => {
   const src = page();
-  assert.match(src, /const customText = getCustomReminderText\(node, reminderType, detailLevel\);\s*if \(customText\) return customText;/);
+  assert.match(src, /const customText = timelineKind \? null : getCustomReminderText\(node, reminderType, detailLevel\);\s*if \(customText\) return customText;/);
+  assert.ok(src.includes('const prefix = timelineKind === "current" ? "目前任務" : "下一個任務"'));
+  assert.ok(src.includes('getTaskCueDetailLevel(trigger, personalSettings.voiceDetailLevel)'), "external returns alone override the detail level");
   assert.ok(src.includes('speak(buildReminderSpeechText(node, reminderType));'));
   assert.ok(src.includes('const text = normalizeReminderText(timelinePreviewDraftText);'));
   assert.ok(src.includes('value={timelinePreviewDraftText}'));

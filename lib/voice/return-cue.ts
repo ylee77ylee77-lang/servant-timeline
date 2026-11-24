@@ -21,6 +21,17 @@ function parseTaskMinute(value: unknown): number | null {
   return hour * 60 + minute;
 }
 
+export type TaskCueTrigger = "foreground" | "checkin";
+export type TaskCueDetailLevel = "simple" | "standard" | "detailed";
+
+/** Only external-app returns force a minimalist task cue. */
+export function getTaskCueDetailLevel(
+  trigger: TaskCueTrigger | null,
+  configured: TaskCueDetailLevel
+): TaskCueDetailLevel {
+  return trigger === "foreground" ? "simple" : configured;
+}
+
 /** Only a real return from a hidden app can arm a task cue; elapsed time is irrelevant. */
 export function shouldQueueReturnCue(wasAppBackgrounded: boolean, visibilityState: string): boolean {
   return wasAppBackgrounded && visibilityState === "visible";
@@ -80,4 +91,30 @@ export function isNearFormalVoiceReminder(
     }
   }
   return false;
+}
+
+/**
+ * Use one serialized TTS clip for the first post-check-in entry. The separate
+ * startup test is a WebAudio source, so playing it and then calling speak()
+ * can cancel the introduction before it finishes. A single clip preserves
+ * both phrases, their order, formal-reminder preemption and iOS retry.
+ */
+export function buildFirstCheckinTimelineSpeech(taskSpeech: string, startupSpeech: string): string {
+  const task = taskSpeech.trim();
+  return task ? `${startupSpeech.trim()} ${task}`.trim() : "";
+}
+
+/**
+ * Mobile browsers may require another user gesture after a background audio
+ * interruption. Only those playback rejections get one deferred retry.
+ * An HTTP/TTS failure must not become a repeated automatic announcement.
+ */
+export function canRetryReturnCueAfterGesture(
+  errorName: string | undefined,
+  retryCount: number,
+  visibilityState: string
+): boolean {
+  return visibilityState === "visible"
+    && retryCount === 0
+    && (errorName === "NotAllowedError" || errorName === "AbortError");
 }

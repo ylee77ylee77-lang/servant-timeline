@@ -47,6 +47,9 @@ import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/
 import { getServiceActivationState, isLeadServiceOpen } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
 import {
+  buildFirstCheckinTimelineSpeech,
+  canRetryReturnCueAfterGesture,
+  getTaskCueDetailLevel,
   isNearFormalVoiceReminder,
   selectReturnCueTask,
   shouldQueueReturnCue,
@@ -363,7 +366,9 @@ export default function App() {
   }, [checklistSyncModeByNode, specialTaskBlocks, specialChecklistItems]);
 
   // --- 【語音與語音助理相關狀態】 ---
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // 預設關閉語音助理
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false); // 等待已儲存的提醒設定載入
+  const voicePreferenceAppliedRef = useRef(false);
+  const [voicePreferenceInitialized, setVoicePreferenceInitialized] = useState(false);
   const [isListening, setIsListening] = useState(false); // 麥克風聆聽狀態
   const [isThinking, setIsThinking] = useState(false); // AI 思考狀態
   const [voiceResultText, setVoiceResultText] = useState(""); // 語音指令解析文字回饋
@@ -417,6 +422,14 @@ export default function App() {
   const voiceStartupPreloadRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
   const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
+  const returnCueTriggerRef = useRef<"foreground" | "checkin" | null>(null);
+  const firstCheckinTimelineCueServiceRef = useRef<string | null>(null);
+  // Only the first visit after a *new successful check-in* receives the
+  // activation greeting. Background-return cues stay task-only.
+  const firstCheckinTimelineIntroServiceRef = useRef<string | null>(null);
+  const [returnCueRetryText, setReturnCueRetryText] = useState<string | null>(null);
+  const returnCueQueuedTextRef = useRef<string | null>(null);
+  const returnCueRetryCountRef = useRef(0);
 
   // 語音快取版本：只更新語音 Cache Storage，不會清除 localStorage 的個人提醒設定。
   const VOICE_AUDIO_CACHE_NAME = "shekinah_voice_audio_v12";
@@ -646,6 +659,27 @@ export default function App() {
 
   const updatePersonalSettings = (patch: Partial<typeof personalSettings>) => {
     setPersonalSettings(prev => ({ ...prev, ...patch }));
+    if (typeof patch.voiceReminderEnabled !== "boolean") return;
+    const nextEnabled = patch.voiceReminderEnabled;
+    if (nextEnabled && !isAdmin && (checkinStatus === "not_checked_in"
+      || !isServiceType(currentService) || isCurrentServiceVoiceClosed())) {
+      // Save the preferred ON state; activate after an eligible check-in.
+      voicePreferenceAppliedRef.current = false;
+      setVoicePreferenceInitialized(false);
+      return;
+    }
+    voicePreferenceAppliedRef.current = true;
+    setVoicePreferenceInitialized(true);
+    if (nextEnabled === isVoiceEnabled) return;
+    setIsVoiceEnabled(nextEnabled);
+    if (nextEnabled) {
+      void requestVoiceWakeLock();
+      announceVoiceActivation();
+    } else {
+      clearServiceVoiceQueue();
+      setVoiceAssistantMessage("");
+      void releaseVoiceWakeLock();
+    }
   };
 
   const normalizeText = (value: any) => String(value || "").toLowerCase();
@@ -1040,6 +1074,11 @@ export default function App() {
     ++voiceQueueGenerationRef.current;
     stopVoiceStartupConfirmation();
     setReturnCuePendingAt(null);
+    returnCueTriggerRef.current = null;
+    firstCheckinTimelineIntroServiceRef.current = null;
+    setReturnCueRetryText(null);
+    returnCueQueuedTextRef.current = null;
+    returnCueRetryCountRef.current = 0;
     voiceQueueRef.current = [];
     const audio = voiceHtmlAudioRef.current;
     if (audio && !audio.paused) {
@@ -1463,6 +1502,7 @@ export default function App() {
       while (isCurrent() && voiceQueueRef.current.length > 0) {
         const nextText = voiceQueueRef.current.shift();
         if (!nextText) continue;
+        const isReturnCue = returnCueQueuedTextRef.current === nextText;
 
         try {
           await playSoftDing();
@@ -1472,9 +1512,26 @@ export default function App() {
           if (!isCurrent()) break;
           if (!blob) throw new Error("語音音檔不存在。");
           await playVoiceBlob(blob);
+          if (isReturnCue && returnCueQueuedTextRef.current === nextText) {
+            returnCueQueuedTextRef.current = null;
+            setReturnCueRetryText(null);
+          }
           await wait(850);
         } catch (err: any) {
           if (!isCurrent()) break;
+          if (isReturnCue && returnCueQueuedTextRef.current === nextText) {
+            returnCueQueuedTextRef.current = null;
+            // iOS may refuse a resumed PWA's media play() until another
+            // gesture. Preserve only this cue for one deliberate retry;
+            // network/server errors must not cause unbounded announcements.
+            if (canRetryReturnCueAfterGesture(
+              err?.name, returnCueRetryCountRef.current, document.visibilityState
+            )) {
+              setReturnCueRetryText(nextText);
+            } else {
+              setReturnCueRetryText(null);
+            }
+          }
           // 已經播放過第一次提示音；若雲端 TTS 超過月用量或暫時不可用，退回瀏覽器語音，不再補第二聲。
           console.error("語音助理播放失敗:", err);
 
@@ -1500,10 +1557,23 @@ export default function App() {
   const processVoiceQueueRef = useRef(processVoiceQueue);
   useEffect(() => { processVoiceQueueRef.current = processVoiceQueue; });
 
-  const speak = (text: string) => {
+  const speak = (text: string, kind: "regular" | "return" | "return-retry" = "regular") => {
     const cleanText = String(text || "").trim();
     const billableCleanText = cleanTextForTtsBilling(cleanText);
     if (!billableCleanText) return;
+    if (kind !== "regular") {
+      if (kind === "return") returnCueRetryCountRef.current = 0;
+      returnCueQueuedTextRef.current = cleanText;
+      setReturnCueRetryText(null);
+    } else {
+      // Formal announcements supersede a queued or deferred return cue.
+      setReturnCueRetryText(null);
+      const previousReturnCue = returnCueQueuedTextRef.current;
+      if (previousReturnCue !== null) {
+        voiceQueueRef.current = voiceQueueRef.current.filter(item => item !== previousReturnCue);
+      }
+      returnCueQueuedTextRef.current = null;
+    }
 
     // 真正人聲由 /api/voice 產生 MP3，前端以版本化 Cache Storage 與 Web Audio 預載播放。
     // 介面不顯示播報文字，避免耳機提醒變成多餘視覺干擾。
@@ -2071,7 +2141,7 @@ export default function App() {
     // A fixed startup test is allowed before check-in; scheduled announcements
     // require a check-in for non-admins. Admin role is verified by AuthProvider.
     if (!isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
-      || isCurrentServiceVoiceClosed() || nodes.length === 0
+      || (!isAdmin && isCurrentServiceVoiceClosed()) || nodes.length === 0
       || !personalSettings.voiceReminderEnabled) return;
 
     const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
@@ -2416,30 +2486,9 @@ export default function App() {
 
   const simplifyTaskPhrase = (node: any) => {
     let phrase = String(node.title || node.details || "服事任務").trim();
-    const roleLabels = [
-      personalSettings.role,
-      node.assignee,
-      "總招",
-      "副總招",
-      "電梯專招",
-      "手扶梯專招",
-      "2樓外場專招",
-      "2樓大堂專招",
-      "3樓大堂專招",
-      "專招",
-      "牧招",
-      "聖餐助手"
-    ]
-      .filter(Boolean)
-      .map((item: string) => String(item).trim())
-      .sort((a, b) => b.length - a.length);
-
-    roleLabels.forEach((label) => {
-      if (!label) return;
-      phrase = phrase.replace(new RegExp(`^${label}[，,、\s]*`), "");
-      phrase = phrase.replace(new RegExp(`^請${label}[，,、\s]*`), "");
-    });
-
+    // Keep role words in the original task title. Stripping 「專招」 from
+    // 「專招就位」 left the ambiguous two-character phrase 「就位」, which can
+    // be misheard when synthesized. Scheduled and timeline cues share this.
     phrase = phrase
       .replace(/^請[您你]?/, "")
       .replace(/^負責/, "")
@@ -2485,12 +2534,25 @@ export default function App() {
     node: any,
     reminderType: "pre5" | "now",
     detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel,
-    leadSecondsOverride: number | null = null
+    leadSecondsOverride: number | null = null,
+    timelineKind: "current" | "next" | null = null
   ) => {
-    const customText = getCustomReminderText(node, reminderType, detailLevel);
+    // Timing-specific custom announcements still apply only when actually
+    // due; an early entry cannot claim a five-minute reminder has arrived.
+    const customText = timelineKind ? null : getCustomReminderText(node, reminderType, detailLevel);
     if (customText) return customText;
     const phrase = simplifyTaskPhrase(node);
     const detailHint = buildDetailedVoiceHint(node, detailLevel);
+
+    // First visit, manual activation and an external-app return share this
+    // formatter. Their caller selects the configured level or the always-simple
+    // return cue; neither invents a reminder interval before its due time.
+    if (timelineKind) {
+      const prefix = timelineKind === "current" ? "目前任務" : "下一個任務";
+      const nextTime = timelineKind === "next" && detailLevel !== "simple"
+        ? formatTaskTimeForVoice(node.time) : "";
+      return `${prefix}，${nextTime ? `${nextTime}，` : ""}${phrase}。${detailHint}`;
+    }
 
     if (reminderType === "pre5") {
       // Simple mode speaks only the action; the scheduler honors the selected advance interval.
@@ -2876,6 +2938,56 @@ export default function App() {
     }
   };
 
+  // Every explicit OFF -> ON action confirms activation and, when this user
+  // may hear live tasks, announces the current/next task in the SAME TTS clip.
+  // The fixed startup test remains available before check-in; it must never
+  // be used to bypass regular-task authorization for volunteers/coordinators.
+  const announceVoiceActivation = () => {
+    const mayAnnounceTasks = isServiceType(currentService)
+      && (isAdmin || (checkinStatus !== "not_checked_in" && !isCurrentServiceVoiceClosed()))
+      && showLiveTimeline && !isLoading;
+    const now = new Date();
+    const leadSeconds = getReminderLeadSeconds(
+      personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
+    );
+    const formalReminderImminent = mayAnnounceTasks
+      && (!isAdmin || !isCurrentServiceVoiceClosed())
+      && isNearFormalVoiceReminder(
+        filteredNodes, now, leadSeconds,
+        personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
+      );
+    const selected = mayAnnounceTasks && !formalReminderImminent
+      ? selectReturnCueTask(filteredNodes, now)
+      : null;
+
+    // A spoken activation already fulfills any first-entry greeting armed by
+    // this check-in. Do not replay it when the user later opens the timeline.
+    if (mayAnnounceTasks) {
+      firstCheckinTimelineCueServiceRef.current = null;
+      firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
+      setReturnCuePendingAt(null);
+    }
+
+    if (selected) {
+      const taskSpeech = buildReminderSpeechText(
+        selected.task, selected.kind === "current" ? "now" : "pre5",
+        personalSettings.voiceDetailLevel, null, selected.kind
+      );
+      speak(buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION), "return");
+      return;
+    }
+
+    // Keep the cached, fast startup clip if there is no eligible task.
+    // If a formal announcement is already in flight, queue confirmation
+    // behind it instead of overlapping or silently dropping the activation.
+    if (voiceProcessingRef.current || voiceQueueRef.current.length > 0) {
+      speak(VOICE_STARTUP_CONFIRMATION, "return");
+    } else {
+      void playVoiceStartupConfirmation();
+    }
+  };
+
   const handleToggleVoiceReminder = () => {
     const nextEnabled = !isVoiceEnabled;
 
@@ -2885,18 +2997,45 @@ export default function App() {
       return;
     }
 
+    // Persist each manual on/off choice as the next session default.
+    voicePreferenceAppliedRef.current = true;
+    setVoicePreferenceInitialized(true);
+    setPersonalSettings(prev => ({ ...prev, voiceReminderEnabled: nextEnabled }));
     setIsVoiceEnabled(nextEnabled);
     if (nextEnabled) {
       void requestVoiceWakeLock();
-      void playVoiceStartupConfirmation();
+      announceVoiceActivation();
     } else {
       stopVoiceStartupConfirmation();
       setReturnCuePendingAt(null);
+      returnCueTriggerRef.current = null;
+      firstCheckinTimelineIntroServiceRef.current = null;
+      setReturnCueRetryText(null);
+      returnCueQueuedTextRef.current = null;
+      returnCueRetryCountRef.current = 0;
       voiceQueueRef.current = [];
       setVoiceAssistantMessage("");
       void releaseVoiceWakeLock();
     }
   };
+
+  // The reminder setting is the default for a new session. Audio can only
+  // start automatically when the role/service gate allows it. Never play the
+  // startup confirmation without an explicit gesture (iOS restriction).
+  useEffect(() => {
+    if (!personalSettingsLoaded || voicePreferenceAppliedRef.current) return;
+    if (!personalSettings.voiceReminderEnabled) {
+      voicePreferenceAppliedRef.current = true;
+      setVoicePreferenceInitialized(true);
+      return;
+    }
+    if (!isAdmin && (checkinStatus === "not_checked_in"
+      || !isServiceType(currentService) || isCurrentServiceVoiceClosed())) return;
+    voicePreferenceAppliedRef.current = true;
+    setVoicePreferenceInitialized(true);
+    setIsVoiceEnabled(true);
+  }, [personalSettingsLoaded, personalSettings.voiceReminderEnabled,
+    isAdmin, checkinStatus, currentService, currentDate]);
 
   useEffect(() => {
     if (!isVoiceEnabled) return;
@@ -2995,6 +3134,7 @@ export default function App() {
         // iOS may have suspended the one-second clock in the background.
         // Re-evaluate any *currently due* formal reminder immediately.
         setCurrentDate(new Date());
+        returnCueTriggerRef.current = "foreground";
         setReturnCuePendingAt(Date.now());
       }
     };
@@ -3022,15 +3162,27 @@ export default function App() {
     const now = new Date();
     if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled
       || (!isAdmin && checkinStatus === "not_checked_in") || !isServiceType(currentService)
-      || isCurrentServiceVoiceClosed() || !showLiveTimeline) {
+      || (!isAdmin && isCurrentServiceVoiceClosed()) || !showLiveTimeline) {
+      firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
-    // A resumed page can still be loading or playing an existing announcement.
-    // Retry on the existing one-second clock rather than losing this return cue.
+    // A resumed page can still be loading or have an interrupted AudioContext.
+    // Wait for the existing recovery handler to resume it; retry on the
+    // one-second clock rather than entering a stuck audio.play() queue.
     if (isLoading) return;
+    if (voiceAudioContextRef.current && voiceAudioContextRef.current.state !== "running") return;
     if (filteredNodes.length === 0) {
+      const isFirstEntry = returnCueTriggerRef.current === "checkin"
+        && firstCheckinTimelineIntroServiceRef.current === currentService;
+      returnCueTriggerRef.current = null;
+      firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCuePendingAt(null);
+      if (isFirstEntry) {
+        // Confirm activation without pretending there is a scheduled task.
+        speak(VOICE_STARTUP_CONFIRMATION, "return");
+      }
       return;
     }
     if (voiceProcessingRef.current || voiceQueueRef.current.length > 0
@@ -3039,26 +3191,105 @@ export default function App() {
     const leadSeconds = getReminderLeadSeconds(
       personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
     );
-    if (isNearFormalVoiceReminder(
+    if ((!isAdmin || !isCurrentServiceVoiceClosed()) && isNearFormalVoiceReminder(
       filteredNodes, now, leadSeconds,
       personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
     )) {
-      // An imminent formal announcement already supplies the task reminder.
+      // An imminent formal announcement takes priority over the check-in cue.
+      firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
 
     const selected = selectReturnCueTask(filteredNodes, now);
+    const trigger = returnCueTriggerRef.current;
+    returnCueTriggerRef.current = null;
     setReturnCuePendingAt(null);
-    if (!selected) return;
-    const phrase = simplifyTaskPhrase(selected.task);
-    speak(selected.kind === "current"
-      ? `目前任務，${phrase}。`
-      : `下一個任務，${phrase}。`);
+    const isFirstCheckinEntry = trigger === "checkin"
+      && firstCheckinTimelineIntroServiceRef.current === currentService;
+    firstCheckinTimelineIntroServiceRef.current = null;
+    if (!selected) {
+      // An empty/currently-expired timeline has no real task to announce.
+      if (isFirstCheckinEntry) speak(VOICE_STARTUP_CONFIRMATION, "return");
+      return;
+    }
+    const taskSpeech = buildReminderSpeechText(
+      selected.task, selected.kind === "current" ? "now" : "pre5",
+      getTaskCueDetailLevel(trigger, personalSettings.voiceDetailLevel), null, selected.kind
+    );
+    speak(isFirstCheckinEntry
+      ? buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)
+      : taskSpeech, "return");
   }, [
     returnCuePendingAt, activeTab, isVoiceEnabled, isAdmin, isLoading, checkinStatus,
     currentDate, currentService, checkedInService, showLiveTimeline, filteredNodes.length,
     personalSettings.role, personalSettings.name,
+    personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
+    personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
+    personalSettings.reminderLeadSeconds, personalSettings.voiceDetailLevel
+  ]);
+
+  // One brief announcement on the first timeline visit after a verified
+  // check-in. An external-app return uses the same pending queue, so the
+  // two triggers cannot create duplicate current/next task announcements.
+  useEffect(() => {
+    const service = firstCheckinTimelineCueServiceRef.current;
+    if (!service || activeTab !== "timeline") return;
+    const verifiedCheckin = checkinStatus !== "not_checked_in" && checkedInService === service;
+    const verifiedAdminTest = isAdmin && completedTestCheckIn === service && currentService === service;
+    if (!verifiedCheckin && !verifiedAdminTest) return;
+    // Wait for the saved voice preference to initialize after a fast check-in.
+    if (!personalSettingsLoaded || !voicePreferenceInitialized) return;
+    firstCheckinTimelineCueServiceRef.current = null;
+    if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled) return;
+    if (returnCuePendingAt === null && !returnCueRetryText
+      && !returnCueQueuedTextRef.current && !voiceProcessingRef.current
+      && voiceQueueRef.current.length === 0) {
+      firstCheckinTimelineIntroServiceRef.current = service;
+      returnCueTriggerRef.current = "checkin";
+      setReturnCuePendingAt(Date.now());
+    }
+  }, [
+    activeTab, checkinStatus, checkedInService, completedTestCheckIn,
+    currentService, isAdmin, isVoiceEnabled, personalSettingsLoaded,
+    voicePreferenceInitialized, personalSettings.voiceReminderEnabled,
+    returnCuePendingAt, returnCueRetryText
+  ]);
+
+  // A rejected iOS media play is retried once after an actual gesture.
+  // Do not bypass the volunteer's service/check-in restrictions or formal reminders.
+  useEffect(() => {
+    if (!returnCueRetryText) return;
+    const retryAfterGesture = () => {
+      if (document.visibilityState !== "visible" || activeTab !== "timeline"
+        || voiceProcessingRef.current || voiceQueueRef.current.length > 0) return;
+      if (!isVoiceEnabled || !personalSettings.voiceReminderEnabled
+        || (!isAdmin && checkinStatus === "not_checked_in")
+        || !isServiceType(currentService)
+        || (!isAdmin && isCurrentServiceVoiceClosed()) || !showLiveTimeline) {
+        setReturnCueRetryText(null);
+        return;
+      }
+      const now = new Date();
+      const leadSeconds = getReminderLeadSeconds(
+        personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds
+      );
+      if ((!isAdmin || !isCurrentServiceVoiceClosed()) && isNearFormalVoiceReminder(
+        filteredNodes, now, leadSeconds,
+        personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled
+      )) {
+        setReturnCueRetryText(null);
+        return;
+      }
+      returnCueRetryCountRef.current += 1;
+      speak(returnCueRetryText, "return-retry");
+    };
+    document.addEventListener("pointerdown", retryAfterGesture, { passive: true });
+    return () => document.removeEventListener("pointerdown", retryAfterGesture);
+  }, [
+    returnCueRetryText, activeTab, isVoiceEnabled, isAdmin, checkinStatus,
+    currentService, checkedInService, showLiveTimeline, filteredNodes.length,
     personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
     personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
     personalSettings.reminderLeadSeconds
@@ -3230,7 +3461,7 @@ export default function App() {
 
 
   const handleAdminTestCheckIn = async () => {
-    if (!isAdminTestCheckIn || !isServiceType(testCheckInService) || !wifiVerified || testCheckInPending) return;
+    if (!isAdminTestCheckIn || !isServiceType(testCheckInService) || testCheckInPending) return;
     setTestCheckInPending(true);
     setTestCheckInError("");
     try {
@@ -3248,6 +3479,8 @@ export default function App() {
         return;
       }
       setCompletedTestCheckIn(testCheckInService);
+      firstCheckinTimelineIntroServiceRef.current = null;
+      firstCheckinTimelineCueServiceRef.current = testCheckInService;
     } catch {
       setTestCheckInError("測試報到失敗，請稍後再試。");
     } finally {
@@ -3310,6 +3543,8 @@ export default function App() {
       }
       setCheckInId(result.checkIn.id);
       lastRestoredCheckInIdRef.current = result.checkIn.id;
+      firstCheckinTimelineIntroServiceRef.current = null;
+      firstCheckinTimelineCueServiceRef.current = lockedServiceType;
       setCheckedInService(lockedServiceType);
       setSelectedCheckInService("");
       setConfirmedCheckInService("");
@@ -3372,6 +3607,11 @@ export default function App() {
   };
 
   const openCheckedInTimeline = () => {
+    // Resume the existing audio context during this real iPhone tap.
+    if (isVoiceEnabled) {
+      const context = getVoiceAudioContext();
+      if (context && context.state !== "running") void context.resume().catch(() => {});
+    }
     if (isCoordinatorTimelinePreview && isServiceType(checkedInService)) {
       setViewedTimelineService(checkedInService);
     }
@@ -4327,6 +4567,12 @@ export default function App() {
     );
   };
 
+  // Keep check-in side effects inside the user action, never during render.
+  const submitOnsiteCheckIn = () => {
+    if (isAdminTestCheckIn) void handleAdminTestCheckIn();
+    else void handleLocalCheckin();
+  };
+
   const renderCheckinView = () => {
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
@@ -4341,7 +4587,8 @@ export default function App() {
     );
     const onsiteService = isAdminTestCheckIn ? testCheckInService : selectedOption?.serviceType;
     const onsiteSubmitting = isAdminTestCheckIn ? testCheckInPending : isCheckinSyncing;
-    const canSubmitCheckIn = wifiVerified && showOnsiteCheckIn && Boolean(onsiteService) && !onsiteSubmitting;
+    const canSubmitCheckIn = (isAdminTestCheckIn || wifiVerified)
+      && showOnsiteCheckIn && Boolean(onsiteService) && !onsiteSubmitting;
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
@@ -4406,6 +4653,10 @@ export default function App() {
                       hasManuallySwitchedRef.current = true;
                       setCurrentService(completedTestCheckIn);
                       setNewNode((prev) => ({ ...prev, service_type: completedTestCheckIn }));
+                      if (isVoiceEnabled) {
+                        const context = getVoiceAudioContext();
+                        if (context && context.state !== "running") void context.resume().catch(() => {});
+                      }
                       setActiveTab("timeline");
                     }}
                     className="mb-2 w-full py-4 bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white font-black rounded-[18px] shadow-lg shadow-[#6D55A3]/20 hover:opacity-90 transition-opacity"
@@ -4415,6 +4666,8 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
+                      firstCheckinTimelineCueServiceRef.current = null;
+                      firstCheckinTimelineIntroServiceRef.current = null;
                       setCompletedTestCheckIn("");
                       setTestCheckInService("");
                       setTestCheckInError("");
@@ -4481,13 +4734,14 @@ export default function App() {
                   {showOnsiteCheckIn && (
                     <>
                       <h4 className="mb-2 text-sm font-black text-[#1F2937]">現場報到</h4>
-                      <p className="mb-2 text-sm text-[#64645F]">請連線至教會 Wi-Fi「slllc」</p>
+                      {!isAdminTestCheckIn && <p className="mb-2 text-sm text-[#64645F]">請連線至教會 Wi-Fi「slllc」</p>}
                     </>
                   )}
-                  <p role="status" className={`mb-2 text-xs font-bold ${wifiVerified ? "text-[#00B8B8]" : "rounded-xl border border-[#F25D6B]/20 bg-[#FFF2F4] px-3 py-2 text-[#F25D6B]"}`}>
-                    {wifiVerified ? "已連線" : "請先確認網路連線後再試。"}
+                  <p role="status" className={`mb-2 text-xs font-bold ${isAdminTestCheckIn || wifiVerified ? "text-[#00B8B8]" : "rounded-xl border border-[#F25D6B]/20 bg-[#FFF2F4] px-3 py-2 text-[#F25D6B]"}`}>
+                    {isAdminTestCheckIn ? "管理員測試報到：無須連接教會 Wi-Fi" : wifiVerified ? "已連線" : "請先確認網路連線後再試。"}
                   </p>
                   <div className="flex flex-wrap items-center gap-3">
+                    {!isAdminTestCheckIn && (
                     <button
                       type="button"
                       onClick={() => void checkWifiConnection()}
@@ -4502,13 +4756,11 @@ export default function App() {
                       <RefreshCw className={`w-3.5 h-3.5 ${wifiChecking ? "wifi-refresh-icon-active" : ""}`} strokeWidth={2.7} />
                       <span className="wifi-check-label">{wifiChecking ? "檢查中…" : "重新檢查"}</span>
                     </button>
-                    {showOnsiteCheckIn && wifiVerified && onsiteService && (
+                    )}
+                    {showOnsiteCheckIn && (isAdminTestCheckIn || wifiVerified) && onsiteService && (
                       <button
                         type="button"
-                        onClick={() => {
-                          if (isAdminTestCheckIn) void handleAdminTestCheckIn();
-                          else void handleLocalCheckin();
-                        }}
+                        onClick={submitOnsiteCheckIn}
                         disabled={!canSubmitCheckIn}
                         className="min-h-11 rounded-[18px] bg-[#785AA5] px-5 text-sm font-black text-white shadow-lg shadow-[#785AA5]/20 hover:bg-[#6D5197] disabled:opacity-50"
                       >
@@ -6442,6 +6694,11 @@ export default function App() {
       {isVoiceEnabled && voiceAudioRecoveryNeeded && (
         <p role="status" className="mt-2 text-[11px] font-semibold text-[#F25D6B]">
           裝置可能已暫停語音，請輕觸畫面嘗試恢復；若仍無聲，請重新開啟語音助理並檢查音量。
+        </p>
+      )}
+      {isVoiceEnabled && returnCueRetryText && (
+        <p role="status" className="mt-2 text-[11px] font-semibold text-[#F25D6B]">
+          極簡任務提醒尚未播出，請輕觸畫面重試。
         </p>
       )}
 

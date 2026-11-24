@@ -6,7 +6,7 @@ const page = () => fs.readFileSync("app/page.tsx", "utf8");
 
 test("formal reminder preempts both pending and currently playing startup audio", () => {
   const source = page();
-  const start = source.indexOf("  const speak = (text: string) => {");
+  const start = source.indexOf('  const speak = (text: string, kind: "regular" | "return" | "return-retry" = "regular") => {');
   const end = source.indexOf("  const testPreviewDeviceTone = async", start);
   assert.ok(start >= 0 && end > start);
   const speak = source.slice(start, end);
@@ -38,6 +38,8 @@ test("formal schedule still queues the same task speech and current voice toggle
   const source = page();
   assert.ok(source.includes("speak(buildReminderSpeechText(node, reminderType))"));
   assert.ok(source.includes("void playVoiceStartupConfirmation();"));
+  assert.ok(source.includes("const announceVoiceActivation = () => {"));
+  assert.ok(source.includes('announceVoiceActivation();'));
   assert.ok(source.includes("onClick={handleToggleVoiceReminder}"));
   assert.ok(source.includes('setIsVoiceEnabled(nextEnabled);'));
 });

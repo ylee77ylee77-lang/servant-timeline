@@ -4,6 +4,7 @@ import fs from "node:fs";
 import {
   RETURN_CUE_LAST_TASK_GRACE_MINUTES,
   RETURN_CUE_REMINDER_GUARD_SECONDS,
+  getTaskCueDetailLevel,
   shouldQueueReturnCue,
   selectReturnCueTask,
   isNearFormalVoiceReminder,
@@ -62,6 +63,14 @@ test("scheduled reminder guard works across midnight and 15-second lead interval
   assert.equal(isNearFormalVoiceReminder([{ time: "12:05" }], at(12, 4, 45), 15, true, false), true);
 });
 
+test("foreground returns always use simple; check-in and manual activation keep chosen detail", () => {
+  for (const chosen of ["simple", "standard", "detailed"] as const) {
+    assert.equal(getTaskCueDetailLevel("foreground", chosen), "simple");
+    assert.equal(getTaskCueDetailLevel("checkin", chosen), chosen);
+    assert.equal(getTaskCueDetailLevel(null, chosen), chosen);
+  }
+});
+
 test("return-to-timeline integration reuses existing voice queue and never mutates reminders", () => {
   const source = fs.readFileSync("app/page.tsx", "utf8");
   assert.ok(source.includes('const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null)'));
@@ -89,10 +98,15 @@ test("return-to-timeline integration reuses existing voice queue and never mutat
   assert.ok(cue.includes('voiceProcessingRef.current || voiceQueueRef.current.length > 0'));
   assert.ok(cue.includes('isNearFormalVoiceReminder('));
   assert.ok(cue.includes('selectReturnCueTask(filteredNodes, now)'));
-  assert.ok(cue.includes('simplifyTaskPhrase(selected.task)'));
-  assert.ok(cue.includes('speak(selected.kind === "current"'));
-  assert.ok(cue.includes('目前任務，'));
-  assert.ok(cue.includes('下一個任務，'));
+  assert.ok(cue.includes('const taskSpeech = buildReminderSpeechText('));
+  assert.ok(cue.includes('getTaskCueDetailLevel(trigger, personalSettings.voiceDetailLevel), null, selected.kind'));
+  assert.ok(cue.includes('const isFirstCheckinEntry = trigger === "checkin"'));
+  assert.ok(source.includes('returnCueTriggerRef.current = "foreground"'));
+  assert.ok(source.includes('returnCueTriggerRef.current = "checkin"'));
+  assert.ok(cue.includes('buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)'));
+  assert.ok(cue.includes(': taskSpeech, "return")'));
+  assert.ok(source.includes('timelineKind === "current" ? "目前任務" : "下一個任務"'));
+  assert.ok(source.includes('timelineKind === "next" && detailLevel !== "simple"'));
   assert.ok(!cue.includes('announcedNodesRef.current.add'));
   assert.ok(!cue.includes('setPersonalSettings('));
   assert.ok(!cue.includes('setCheckedInService('));

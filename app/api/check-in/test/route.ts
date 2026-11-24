@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require-admin";
-import { isChurchNetworkRequest } from "@/lib/network/church-wifi";
 import { isServiceType } from "@/lib/services/catalog";
 
 export async function POST(request: NextRequest) {
@@ -12,10 +11,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error instanceof Error ? error.message : "無法驗證管理員權限。" }, { status });
     }
     return NextResponse.json({ error: "暫時無法驗證管理員權限，請稍後再試。" }, { status: 500 });
-  }
-
-  if (!isChurchNetworkRequest(request)) {
-    return NextResponse.json({ error: "請先確認網路連線後再試。" }, { status: 403 });
   }
 
   const body: unknown = await request.json().catch(() => null);
