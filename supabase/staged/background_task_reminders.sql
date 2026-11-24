@@ -63,15 +63,14 @@ revoke all on public.background_reminder_devices, public.background_task_reminde
 grant select, insert, update, delete on public.background_reminder_devices, public.background_task_reminder_deliveries
   to service_role;
 
--- This is a vibration/task-block planner, independent of the voice assistant.
--- It reads authoritative database rows; no browser role, task or time is trusted.
--- Exactly one transition per device/service/minute. The first block is the
--- already-selected initial block in the existing UI, so does not vibrate again.
-create function public.background_reminder_candidates(p_at timestamptz)
+-- Registration and delivery both derive authorization from the same check-in.
+create function public.background_reminder_open_bindings(
+  p_at timestamptz, p_user_id uuid default null, p_service_id uuid default null
+)
 returns table (
-  device_id uuid, user_id uuid, check_in_id uuid, assignment_id uuid,
-  service_id uuid, timeline_node_id text, scheduled_at timestamptz,
-  service_date date, service_type text, task_time text
+  user_id uuid, check_in_id uuid, assignment_id uuid, service_id uuid,
+  checked_in_at timestamptz, service_date date, service_type text,
+  role_label text, lead_scope boolean, deputy_scope boolean, closes_at timestamptz
 )
 language sql stable security invoker
 set search_path = pg_catalog
@@ -80,43 +79,41 @@ as $$
     select p_at at time zone 'Asia/Taipei' as local_now
   ),
   scoped as (
-    select d.id as device_id, d.user_id, d.check_in_id, d.assignment_id,
-      d.service_id, d.opted_in_at, ci.checked_in_at,
+    select ci.user_id, ci.id as check_in_id, ci.assignment_id,
+      ci.service_id, ci.checked_in_at,
       ws.service_date, ws.service_type, a.role_label, lc.local_now,
       (roles.coordinator and not roles.admin
         and a.role_label <> '副總招'
         and (scope.has_lead or not scope.has_deputy)) as lead_scope,
       (a.role_label = '副總招'
         or (roles.coordinator and not roles.admin and scope.has_deputy and not scope.has_lead)) as deputy_scope
-    from public.background_reminder_devices d
-    join public.profiles p on p.id = d.user_id and p.is_active
-    join public.service_check_ins ci on ci.id = d.check_in_id
-      and ci.user_id = d.user_id and ci.service_id = d.service_id
-      and ci.assignment_id = d.assignment_id
-      and ci.status in ('checked_in', 'station_confirmed')
-    join public.service_assignments a on a.id = d.assignment_id
-      and a.user_id = d.user_id and a.service_id = d.service_id
+    from public.service_check_ins ci
+    join public.profiles p on p.id = ci.user_id and p.is_active
+    join public.service_assignments a on a.id = ci.assignment_id
+      and a.user_id = ci.user_id and a.service_id = ci.service_id
       and a.status in ('scheduled', 'confirmed')
-    join public.worship_services ws on ws.id = d.service_id and ws.status = 'published'
+    join public.worship_services ws on ws.id = ci.service_id and ws.status = 'published'
     cross join local_clock lc
     cross join lateral (
       select coalesce(bool_or(ur.role = 'coordinator'), false) as coordinator,
              coalesce(bool_or(ur.role = 'admin'), false) as admin
-      from public.user_roles ur where ur.user_id = d.user_id
+      from public.user_roles ur where ur.user_id = ci.user_id
     ) roles
     cross join lateral (
       select coalesce(bool_or(sa.role_label = '總招'), false) as has_lead,
              coalesce(bool_or(sa.role_label = '副總招'), false) as has_deputy
       from public.service_assignments sa
       join public.worship_services s on s.id = sa.service_id
-      where sa.user_id = d.user_id
+      where sa.user_id = ci.user_id
         and sa.status in ('scheduled', 'confirmed', 'completed')
         and s.service_date = ws.service_date
         and s.status in ('published', 'completed')
         and s.service_type in ('六晚崇', '主一堂', '主二堂')
     ) scope
-    where d.enabled and d.opted_in_at <= p_at and d.expires_at > p_at
+    where ci.status in ('checked_in', 'station_confirmed')
       and ci.checked_in_at <= p_at
+      and (p_user_id is null or ci.user_id = p_user_id)
+      and (p_service_id is null or ci.service_id = p_service_id)
       and ws.service_date = lc.local_now::date
   ),
   open_services as (
@@ -130,6 +127,118 @@ as $$
        or (extract(dow from e.local_now) = 0 and e.service_type = '主二堂'
         and e.local_now::time >= case when e.lead_scope then time '08:00' else time '10:00' end
         and e.local_now::time < time '12:45')
+  )
+  select e.user_id, e.check_in_id, e.assignment_id, e.service_id, e.checked_in_at,
+    e.service_date, e.service_type, e.role_label, e.lead_scope, e.deputy_scope,
+    (e.service_date + case
+      when e.service_type = '六晚崇' then time '21:45'
+      when e.service_type = '主一堂' and e.lead_scope then time '10:45'
+      else time '12:45' end) at time zone 'Asia/Taipei'
+  from open_services e;
+$$;
+
+-- Server-only: caller supplies a verified user and selected service type.
+-- The actual check-in, assignment, expiry and scope are always server-derived.
+-- An existing endpoint cannot change owner or keys, even on re-registration.
+create function public.register_background_reminder_device(
+  p_user_id uuid, p_service_type text, p_endpoint text,
+  p_p256dh text, p_auth_secret text, p_at timestamptz default clock_timestamp()
+)
+returns table (device_id uuid, expires_at timestamptz)
+language plpgsql volatile security invoker
+set search_path = pg_catalog
+as $$
+declare
+  binding record;
+  target_service uuid;
+begin
+  if p_user_id is null or p_service_type is null or p_service_type not in ('六晚崇','主一堂','主二堂')
+    or p_endpoint is null or length(p_endpoint) > 2048
+    or p_endpoint !~ '^https://web[.]push[.]apple[.]com/[A-Za-z0-9_-]+$'
+    or p_p256dh is null or p_p256dh !~ '^[A-Za-z0-9_-]{87}$'
+    or p_auth_secret is null or p_auth_secret !~ '^[A-Za-z0-9_-]{22}$'
+    or p_at is null then return; end if;
+  select ws.id into target_service from public.worship_services ws
+    where ws.service_date = (p_at at time zone 'Asia/Taipei')::date
+      and ws.service_type = p_service_type and ws.status = 'published';
+  if target_service is null then return; end if;
+  select b.* into binding
+    from public.background_reminder_open_bindings(p_at, p_user_id, target_service) b;
+  if not found then return; end if;
+  return query
+    insert into public.background_reminder_devices as d (
+      user_id, check_in_id, service_id, assignment_id, endpoint, p256dh,
+      auth_secret, enabled, opted_in_at, expires_at, updated_at
+    )
+    values (p_user_id, binding.check_in_id, binding.service_id, binding.assignment_id,
+      p_endpoint, p_p256dh, p_auth_secret, true, p_at,
+      least(binding.closes_at, p_at + interval '12 hours'), p_at)
+    on conflict (endpoint) do update set
+      check_in_id = excluded.check_in_id, service_id = excluded.service_id,
+      assignment_id = excluded.assignment_id, enabled = true,
+      opted_in_at = case when d.enabled and d.expires_at > p_at
+        and d.check_in_id = excluded.check_in_id and d.service_id = excluded.service_id
+        and d.assignment_id = excluded.assignment_id then d.opted_in_at else p_at end,
+      expires_at = case when d.enabled and d.expires_at > p_at
+        and d.check_in_id = excluded.check_in_id and d.service_id = excluded.service_id
+        and d.assignment_id = excluded.assignment_id then least(d.expires_at, excluded.expires_at)
+        else excluded.expires_at end,
+      updated_at = p_at
+    where d.user_id = p_user_id and d.p256dh = p_p256dh
+      and d.auth_secret = p_auth_secret and d.updated_at <= p_at
+    returning d.id, d.expires_at;
+end;
+$$;
+
+-- Retain the delivery ledger when disabled so re-enabling never duplicates it.
+create function public.disable_background_reminder_device(
+  p_user_id uuid, p_endpoint text, p_at timestamptz default clock_timestamp()
+)
+returns boolean
+language sql volatile security invoker
+set search_path = pg_catalog
+as $$
+  with disabled as (
+    update public.background_reminder_devices d
+      set enabled = false, updated_at = p_at
+    where d.user_id = p_user_id and d.endpoint = p_endpoint
+      and d.updated_at <= p_at
+    returning d.id
+  )
+  select exists(select 1 from disabled);
+$$;
+
+revoke all on function public.background_reminder_open_bindings(timestamptz, uuid, uuid),
+  public.register_background_reminder_device(uuid, text, text, text, text, timestamptz),
+  public.disable_background_reminder_device(uuid, text, timestamptz)
+  from public, anon, authenticated;
+grant execute on function public.background_reminder_open_bindings(timestamptz, uuid, uuid),
+  public.register_background_reminder_device(uuid, text, text, text, text, timestamptz),
+  public.disable_background_reminder_device(uuid, text, timestamptz)
+  to service_role;
+
+-- This is a vibration/task-block planner, independent of the voice assistant.
+-- It reads authoritative database rows; no browser role, task or time is trusted.
+-- Exactly one transition per device/service/minute. The first block is the
+-- already-selected initial block in the existing UI, so does not vibrate again.
+create function public.background_reminder_candidates(p_at timestamptz)
+returns table (
+  device_id uuid, user_id uuid, check_in_id uuid, assignment_id uuid,
+  service_id uuid, timeline_node_id text, scheduled_at timestamptz,
+  service_date date, service_type text, task_time text
+)
+language sql stable security invoker
+set search_path = pg_catalog
+as $$
+  with open_services as (
+    select d.id as device_id, b.user_id, b.check_in_id, b.assignment_id,
+      b.service_id, d.opted_in_at, b.checked_in_at, b.service_date, b.service_type,
+      b.role_label, b.lead_scope, b.deputy_scope
+    from public.background_reminder_devices d
+    join public.background_reminder_open_bindings(p_at) b
+      on b.user_id = d.user_id and b.check_in_id = d.check_in_id
+      and b.service_id = d.service_id and b.assignment_id = d.assignment_id
+    where d.enabled and d.opted_in_at <= p_at and d.expires_at > p_at
   ),
   timed_nodes as (
     select e.*, n.id as timeline_node_id, n.sort_order,
@@ -291,7 +400,15 @@ as $$
         or (p_state = 'rejected' and p_provider_status between 100 and 599
           and p_provider_status not between 200 and 299)
         or (p_state = 'uncertain' and p_provider_status is null))
-    returning l.id
+    returning l.id, l.device_id, l.check_in_id, l.assignment_id, l.service_id,
+      l.started_at, l.provider_status
+  ), expired_subscription as (
+    update public.background_reminder_devices d set enabled = false, updated_at = p_at
+    from finished f
+    where f.provider_status in (404, 410) and d.id = f.device_id
+      and d.check_in_id = f.check_in_id and d.assignment_id = f.assignment_id
+      and d.service_id = f.service_id and d.updated_at <= f.started_at
+    returning d.id
   )
   select exists(select 1 from finished);
 $$;

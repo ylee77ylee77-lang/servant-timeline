@@ -32,6 +32,10 @@ declare
   cancel_event uuid;
   deputy_event uuid;
   n integer;
+  registered_device uuid;
+  registration_expiry timestamptz;
+  registration_endpoint text := 'https://web.push.apple.com/registration-test-' || gen_random_uuid()::text;
+  rejected_event uuid;
 begin
   if extract(dow from day) <> 0 then raise exception 'Fixture date must be Sunday'; end if;
   if has_table_privilege('authenticated', 'public.background_reminder_devices', 'select')
@@ -44,6 +48,11 @@ begin
      or has_function_privilege('authenticated', 'public.finish_background_task_reminder(uuid, text, integer, timestamptz)', 'execute')
      or not has_function_privilege('service_role', 'public.claim_background_task_reminders(timestamptz, integer)', 'execute')
      or not has_function_privilege('service_role', 'public.take_background_task_reminder(uuid, timestamptz)', 'execute')
+     or has_function_privilege('authenticated', 'public.register_background_reminder_device(uuid,text,text,text,text,timestamptz)', 'execute')
+     or has_function_privilege('anon', 'public.disable_background_reminder_device(uuid,text,timestamptz)', 'execute')
+     or has_function_privilege('authenticated', 'public.background_reminder_open_bindings(timestamptz,uuid,uuid)', 'execute')
+     or not has_function_privilege('service_role', 'public.register_background_reminder_device(uuid,text,text,text,text,timestamptz)', 'execute')
+     or not has_function_privilege('service_role', 'public.disable_background_reminder_device(uuid,text,timestamptz)', 'execute')
   then raise exception 'Reminder tables and dispatch functions must be server-only'; end if;
 
   if exists (
@@ -101,6 +110,48 @@ begin
   ]) as fixture(node_id);
   insert into public.service_task_assignments (service_id, assignment_id, timeline_node_id)
   select svc, volunteer_assignment, fixture.node_id from unnest(array['__bg_first__','__bg_own__']) as fixture(node_id);
+
+  -- Real check-ins, fictional subscription keys. No network operation.
+  select x.device_id, x.expires_at into registered_device, registration_expiry
+    from public.register_background_reminder_device(lead_user,'主一堂',
+      registration_endpoint,repeat('A',87),repeat('B',22),opted) x;
+  if registered_device is null or registration_expiry is distinct from '2030-01-06 10:45:00+08'::timestamptz
+    then raise exception 'Registration must bind the actual service cutoff'; end if;
+  if not exists(select 1 from public.background_reminder_devices d
+      where d.id = registered_device and d.user_id = lead_user and d.check_in_id = lead_check
+      and d.assignment_id = lead_assignment and d.service_id = svc)
+    then raise exception 'Registration binding must be server-derived'; end if;
+  if not exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+      registration_endpoint,repeat('A',87),repeat('B',22),opted + interval '1 minute') r
+      where r.device_id = registered_device and r.expires_at = registration_expiry)
+    then raise exception 'An unchanged active subscription must be idempotent'; end if;
+  if exists(select 1 from public.register_background_reminder_device(deputy_user,'主一堂',
+      registration_endpoint,repeat('A',87),repeat('B',22),opted + interval '1 minute'))
+    then raise exception 'Another user must not take over a registered subscription'; end if;
+  if exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+      registration_endpoint,repeat('C',87),repeat('B',22),opted + interval '1 minute'))
+    then raise exception 'An existing endpoint must not change keys'; end if;
+  if exists(select 1 from public.register_background_reminder_device(lead_user,'主二堂',
+      'https://web.push.apple.com/wrong-service',repeat('A',87),repeat('B',22),opted))
+    then raise exception 'An unchecked-in service must not register a subscription'; end if;
+  if exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+      'https://web.push.apple.com/closed-service',repeat('A',87),repeat('B',22),'2030-01-06 10:45:00+08'))
+    then raise exception 'Closed service must not register a subscription'; end if;
+  if public.disable_background_reminder_device(deputy_user,registration_endpoint,opted + interval '2 minutes')
+    then raise exception 'Another user must not disable a subscription'; end if;
+  if not public.disable_background_reminder_device(lead_user,registration_endpoint,opted + interval '2 minutes')
+    then raise exception 'Owner must be able to disable their subscription'; end if;
+  if exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+      registration_endpoint,repeat('A',87),repeat('B',22),opted + interval '1 minute'))
+    then raise exception 'An older registration must not overwrite a later disable'; end if;
+  if not exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+      registration_endpoint,repeat('A',87),repeat('B',22),opted + interval '3 minutes') r
+      where r.device_id = registered_device)
+    then raise exception 'Owner must be able to re-enable their own subscription'; end if;
+  if not exists(select 1 from public.background_reminder_devices d
+    where d.id = registered_device and d.opted_in_at = opted + interval '3 minutes')
+    then raise exception 'Re-enable must start a fresh opt-in window'; end if;
+  perform public.disable_background_reminder_device(lead_user,registration_endpoint,opted + interval '4 minutes');
 
   -- Fictional endpoints and non-cryptographic placeholder keys: never sent.
   insert into public.background_reminder_devices (
@@ -174,6 +225,13 @@ begin
   if exists(select 1 from public.background_reminder_candidates(due) c where c.device_id = volunteer_device)
     then raise exception 'Cancelled assignment must not receive a reminder'; end if;
   update public.service_assignments set status = 'scheduled' where id = volunteer_assignment;
+  select id into rejected_event from public.background_task_reminder_deliveries where device_id = volunteer_device;
+  select count(*) into n from public.take_background_task_reminder(rejected_event,due);
+  if n <> 1 then raise exception 'Expected valid volunteer delivery'; end if;
+  if not public.finish_background_task_reminder(rejected_event,'rejected',410,due)
+    then raise exception 'Gone subscription rejection must finalize'; end if;
+  if exists(select 1 from public.background_reminder_devices d where d.id = volunteer_device and d.enabled)
+    then raise exception '410 must disable the expired subscription'; end if;
   update public.profiles set is_active = false where id = volunteer_user;
   if exists(select 1 from public.background_reminder_candidates(due) c where c.device_id = volunteer_device)
     then raise exception 'Inactive account must not receive a reminder'; end if;
