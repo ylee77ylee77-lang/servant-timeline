@@ -3,11 +3,12 @@ self.addEventListener("install", () => { self.skipWaiting(); });
 self.addEventListener("activate", (event) => { event.waitUntil(self.clients.claim()); });
 
 self.addEventListener("push", (event) => {
-  // The preview server sends a one-shot empty push; always display a visible notice.
+  // Each empty preview push represents one distinct simulated task. Use a unique
+  // notification tag so the three task notifications are not overwritten by iOS.
   event.waitUntil(self.registration.showNotification("夏凱納招待｜鎖屏推播測試", {
-    body: "這是伺服器發出的背景測試通知，並非正式服事任務。",
+    body: "模擬任務到點：" + new Date().toLocaleTimeString("zh-TW", { timeZone: "Asia/Taipei", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + "（非正式服事任務）",
     icon: "/logo.png",
-    tag: "shekinah-notification-test",
+    tag: "shekinah-notification-test-" + self.crypto.randomUUID(),
     data: { destination: "/notification-test" },
   }));
 });

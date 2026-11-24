@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PREVIEW_TASK_OFFSETS_SECONDS, type PreviewTaskCue } from "@/lib/notifications/preview-task-push-plan";
 
 type Prepared = { registration: ServiceWorkerRegistration; key: Uint8Array<ArrayBuffer> };
 type Status = { text: string; error?: boolean };
@@ -24,10 +25,17 @@ export function ServerPushTest({ accessToken }: { accessToken: string }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [vibrationEnabled, setVibrationEnabled] = useState(false);
+  const [plan, setPlan] = useState<PreviewTaskCue[]>([]);
+  const [nextAllowedAt, setNextAllowedAt] = useState(0);
   const route = "/api/notification-test/server-push";
 
   const prepare = async () => {
     if (busy) return;
+    if (Date.now() < nextAllowedAt) {
+      setStatus({ text: "本輪測試仍在執行，請待三個任務結束後再重新準備。", error: true });
+      return;
+    }
     const safari = navigator as Navigator & { standalone?: boolean };
     if (!window.matchMedia("(display-mode: standalone)").matches && safari.standalone !== true) {
       setStatus({ text: "請先將這個版本加入 iPhone 主畫面，並從圖示開啟。", error: true });
@@ -63,7 +71,9 @@ export function ServerPushTest({ accessToken }: { accessToken: string }) {
       }
       setPrepared({ registration, key });
       setSubmitted(false);
-      setStatus({ text: "準備完成。點擊下一個按鈕後，等待畫面顯示請求已接受，再立即鎖屏。" });
+      setPlan([]);
+      setVibrationEnabled(false);
+      setStatus({ text: "準備完成。開啟本次震動提醒，再開始三個模擬任務；看到接受提示後立即鎖屏。" });
     } catch {
       setStatus({ text: "準備失敗，請確認管理員登入及網路連線。", error: true });
     } finally {
@@ -72,7 +82,7 @@ export function ServerPushTest({ accessToken }: { accessToken: string }) {
   };
 
   const send = async () => {
-    if (!prepared || busy || submitted) return;
+    if (!prepared || busy || submitted || !vibrationEnabled || Date.now() < nextAllowedAt) return;
     setBusy(true);
     setStatus(null);
     try {
@@ -84,7 +94,7 @@ export function ServerPushTest({ accessToken }: { accessToken: string }) {
       const response = await fetch(route, {
         method: "POST",
         headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint: subscription.endpoint }),
+        body: JSON.stringify({ endpoint: subscription.endpoint, mode: "sequence", vibrationEnabled: true }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body.accepted !== true) {
@@ -92,7 +102,9 @@ export function ServerPushTest({ accessToken }: { accessToken: string }) {
         return;
       }
       setSubmitted(true);
-      setStatus({ text: "伺服器已接受請求，請立即鎖屏。預計約 15 秒後發送測試推播；是否收到及震動仍須實機確認。" });
+      setNextAllowedAt(Date.now() + 60_000);
+      setPlan(Array.isArray(body.plan) ? body.plan.filter((cue: PreviewTaskCue) => Number.isSafeInteger(cue?.task) && Number.isSafeInteger(cue?.dueAt)) : []);
+      setStatus({ text: "伺服器已接受三個模擬任務，請立即鎖屏。約 15、30、45 秒各發送一則通知；實際收件與震動仍須實機確認。" });
     } catch {
       setStatus({ text: "訂閱或發送請求失敗，請確認通知權限與網路。", error: true });
     } finally {
@@ -102,20 +114,32 @@ export function ServerPushTest({ accessToken }: { accessToken: string }) {
 
   return (
     <section className="rounded-[24px] border border-[#E6EAF0] bg-white p-5">
-      <h2 className="text-base font-black text-[#1F2937]">第二階段｜鎖屏推播測試</h2>
+      <h2 className="text-base font-black text-[#1F2937]">第二階段｜多任務鎖屏震動測試</h2>
       <p className="mt-2 text-sm leading-6 text-[#7B7B74]">
-        僅供管理員測試。這次由伺服器延遲發送，不是手機網頁的倒數計時。無需在測試期間維持畫面亮起。
+        僅供管理員測試。伺服器會依序模擬三個不同任務到點，各發送一則系統通知。鎖屏後不依賴網頁計時。
       </p>
       <button type="button" disabled={busy} onClick={() => void prepare()}
         className="mt-4 min-h-12 w-full rounded-2xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-4 py-3 text-sm font-black text-[#6D55A3] disabled:opacity-50">
         1. 準備背景推播
       </button>
-      <button type="button" disabled={!prepared || busy || submitted} onClick={() => void send()}
+      <label className="mt-4 flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-[#E6EAF0] bg-[#FFF9F3] px-4 py-3 text-sm font-bold text-[#1F2937]">
+        本次測試震動提醒
+        <input type="checkbox" checked={vibrationEnabled} disabled={!prepared || busy || submitted} onChange={(event) => setVibrationEnabled(event.target.checked)} className="h-5 w-5 accent-[#008A7A] disabled:opacity-40" />
+      </label>
+      <div className="mt-3 space-y-2 text-sm text-[#374151]">
+        {PREVIEW_TASK_OFFSETS_SECONDS.map((seconds, index) => (
+          <div key={seconds} className="flex items-center justify-between rounded-xl bg-[#F9F7FF] px-3 py-2">
+            <span className="font-bold">模擬任務 {index + 1}</span>
+            <span className="tabular-nums">{plan[index] ? new Date(plan[index].dueAt).toLocaleTimeString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }) : `+${seconds} 秒`}</span>
+          </div>
+        ))}
+      </div>
+      <button type="button" disabled={!prepared || !vibrationEnabled || busy || submitted} onClick={() => void send()}
         className="mt-2 min-h-12 w-full rounded-2xl bg-[#008A7A] px-4 py-3 text-sm font-black text-white disabled:opacity-40">
-        2. 發送鎖屏測試通知
+        2. 開始三個任務測試
       </button>
       {status && <p role="status" aria-live="polite" className={"mt-3 text-sm font-bold leading-6 " + (status.error ? "text-[#A34843]" : "text-[#146B60]")}>{status.text}</p>}
-      <p className="mt-3 text-xs leading-5 text-[#7B7B74]">僅傳固定測試通知，不會保存訂閱、加入正式任務或向其他同工發送。</p>
+      <p className="mt-3 text-xs leading-5 text-[#7B7B74]">這個開關只控制本次測試，不修改正式個人設定。開始後本輪三個任務無法即時撤銷；測試結束可重新準備。僅傳固定測試通知，不保存訂閱、不加入正式任務、不向其他同工發送。</p>
     </section>
   );
 }

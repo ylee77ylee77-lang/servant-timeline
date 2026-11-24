@@ -88,7 +88,8 @@ test("successful formal or admin test check-in arms a one-off first timeline ann
 test("regular task reminders and background-return cues still use the existing shared queue", () => {
   const page = source();
   assert.ok(page.includes("speak(buildReminderSpeechText(node, reminderType))"));
-  assert.ok(page.includes('const taskSpeech = selected.kind === "current"'));
+  assert.ok(page.includes('const taskSpeech = buildReminderSpeechText('));
+  assert.ok(page.includes('getTaskCueDetailLevel(trigger, personalSettings.voiceDetailLevel), null, selected.kind'));
   assert.ok(page.includes('buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)'));
   assert.ok(page.includes('shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)'));
   assert.ok(page.includes('isNearFormalVoiceReminder('));
@@ -110,7 +111,8 @@ test("each verified first entry says activation before the brief current or next
   const end = page.indexOf("  // One brief announcement on the first timeline visit after a verified", start);
   assert.ok(start > 0 && end > start);
   const cue = page.slice(start, end);
-  assert.ok(cue.includes("const isFirstCheckinEntry = firstCheckinTimelineIntroServiceRef.current === currentService"));
+  assert.ok(cue.includes('const isFirstCheckinEntry = trigger === "checkin"'));
+  assert.ok(cue.includes('getTaskCueDetailLevel(trigger, personalSettings.voiceDetailLevel), null, selected.kind'));
   assert.ok(cue.includes("firstCheckinTimelineIntroServiceRef.current = null"));
   assert.ok(cue.includes("buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)"));
   assert.ok(cue.includes(": taskSpeech, \"return\")"));
@@ -121,6 +123,8 @@ test("each verified first entry says activation before the brief current or next
 test("first-entry greeting is armed once after check-in, cleared on voice off, and not repeated on background return", () => {
   const page = source();
   assert.ok(page.includes("firstCheckinTimelineIntroServiceRef.current = service"));
+  assert.ok(page.includes('returnCueTriggerRef.current = "checkin"'));
+  assert.ok(page.includes('returnCueTriggerRef.current = "foreground"'));
   assert.ok(page.includes("firstCheckinTimelineIntroServiceRef.current = null"));
   assert.ok(page.includes("firstCheckinTimelineCueServiceRef.current = lockedServiceType"));
   assert.ok(page.includes("firstCheckinTimelineCueServiceRef.current = testCheckInService"));
@@ -153,6 +157,8 @@ test("manual ON from either control says activation then eligible task without o
   assert.ok(changeSettings.includes("announceVoiceActivation()"));
   assert.ok(toggle.includes("announceVoiceActivation()"));
   assert.ok(activation.includes("selectReturnCueTask(filteredNodes, now)"));
+  assert.ok(activation.includes("personalSettings.voiceDetailLevel, null, selected.kind"));
+  assert.ok(!activation.includes('getTaskCueDetailLevel("foreground"'), "activation must not be forced simple");
   assert.ok(activation.includes("buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)"));
   assert.ok(activation.includes('speak(buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION), "return")'));
   assert.ok(!activation.includes("void playVoiceStartupConfirmation();\n      speak("), "no overlapping independent players");

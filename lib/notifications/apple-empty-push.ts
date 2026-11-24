@@ -83,14 +83,16 @@ export async function sendEmptyApplePush(
   endpoint: string,
   keys: VapidKeys,
   fetcher: typeof fetch = fetch,
+  ttlSeconds = 120,
 ): Promise<{ ok: boolean; status: number }> {
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 0 || ttlSeconds > 120) throw new Error("Invalid test push TTL");
   const authorization = buildVapidAuthorization(endpoint, keys);
   const response = await fetcher(endpoint, {
     method: "POST",
     redirect: "error",
     headers: {
       Authorization: authorization,
-      TTL: "120",
+      TTL: String(ttlSeconds),
       Urgency: "high",
     },
     signal: AbortSignal.timeout(10000),

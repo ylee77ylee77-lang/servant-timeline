@@ -46,9 +46,11 @@ import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 import { getServiceActivationState, isLeadServiceOpen } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
+import { beginVoicePlayback, beginVoiceCapture, refreshVoicePlaybackMode } from '@/lib/voice/ios-audio-session';
 import {
   buildFirstCheckinTimelineSpeech,
   canRetryReturnCueAfterGesture,
+  getTaskCueDetailLevel,
   isNearFormalVoiceReminder,
   selectReturnCueTask,
   shouldQueueReturnCue,
@@ -398,10 +400,12 @@ export default function App() {
   const [timelinePreviewSaveError, setTimelinePreviewSaveError] = useState("");
   const timelinePreviewRequestRef = useRef<AbortController | null>(null);
   const timelinePreviewSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const timelinePreviewSessionReleaseRef = useRef<(() => void) | null>(null);
   const timelinePreviewRunRef = useRef(0);
   const [recognition, setRecognition] = useState<any>(null); // SpeechRecognition 實例
   const voiceCommandBufferRef = useRef("");
   const recognitionShouldSubmitRef = useRef(false);
+  const recognitionCaptureReleaseRef = useRef<(() => void) | null>(null);
   const announcedNodesRef = useRef<Set<string>>(new Set()); // 紀錄已報時的任務，避免重複提醒
   const lastReminderDayRef = useRef("");
   const voiceAudioContextRef = useRef<any>(null);
@@ -416,11 +420,13 @@ export default function App() {
   // Dedicated startup audio: cancel async fetch and playback on every off/on.
   const voiceStartupRequestRef = useRef<AbortController | null>(null);
   const voiceStartupSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const voiceStartupSessionReleaseRef = useRef<(() => void) | null>(null);
   const voiceStartupRunRef = useRef(0);
   const voiceStartupCachedClipRef = useRef<{ key: string; blob: Blob } | null>(null);
   const voiceStartupPreloadRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
   const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
+  const returnCueTriggerRef = useRef<"foreground" | "checkin" | null>(null);
   const firstCheckinTimelineCueServiceRef = useRef<string | null>(null);
   // Only the first visit after a *new successful check-in* receives the
   // activation greeting. Background-return cues stay task-only.
@@ -1072,6 +1078,7 @@ export default function App() {
     ++voiceQueueGenerationRef.current;
     stopVoiceStartupConfirmation();
     setReturnCuePendingAt(null);
+    returnCueTriggerRef.current = null;
     firstCheckinTimelineIntroServiceRef.current = null;
     setReturnCueRetryText(null);
     returnCueQueuedTextRef.current = null;
@@ -1494,6 +1501,7 @@ export default function App() {
     voiceProcessingRef.current = true;
     const generation = voiceQueueGenerationRef.current;
     const isCurrent = () => generation === voiceQueueGenerationRef.current;
+    const releasePlayback = beginVoicePlayback();
 
     try {
       while (isCurrent() && voiceQueueRef.current.length > 0) {
@@ -1544,6 +1552,7 @@ export default function App() {
         }
       }
     } finally {
+      releasePlayback();
       voiceProcessingRef.current = false;
       if (!isCurrent() && voiceQueueRef.current.length) {
         // Use the current render's service when processing a newly queued reminder.
@@ -1584,15 +1593,18 @@ export default function App() {
   };
 
   const testPreviewDeviceTone = async () => {
-    const ctx = getVoiceAudioContext();
-    if (!ctx) {
-      setDeviceToneDiagnostic("此裝置沒有可用的 WebAudio 音效功能。");
-      return;
-    }
+    const releasePlayback = beginVoicePlayback();
     try {
+      const ctx = getVoiceAudioContext();
+      if (!ctx) {
+        setDeviceToneDiagnostic("此裝置沒有可用的 WebAudio 音效功能。");
+        releasePlayback();
+        return;
+      }
       if (ctx.state !== "running") await ctx.resume();
       if (ctx.state !== "running") {
         setDeviceToneDiagnostic("音訊系統沒有啟動；請檢查 Safari 播放權限。");
+        releasePlayback();
         return;
       }
       const oscillator = ctx.createOscillator();
@@ -1607,6 +1619,7 @@ export default function App() {
       oscillator.connect(gain);
       gain.connect(ctx.destination);
       oscillator.onended = () => {
+        releasePlayback();
         oscillator.disconnect();
         gain.disconnect();
       };
@@ -1614,6 +1627,7 @@ export default function App() {
       oscillator.stop(at + 0.6);
       setDeviceToneDiagnostic("測試音已送往裝置音訊系統；若沒有聽到，請檢查媒體音量、靜音模式及藍牙／AirPlay 輸出。");
     } catch (err) {
+      releasePlayback();
       setDeviceToneDiagnostic(err instanceof Error ? `測試音啟動失敗：${err.message}` : "測試音無法啟動。");
     }
   };
@@ -1621,7 +1635,7 @@ export default function App() {
   const previewVoiceDraft = async () => {
     if (isVoicePreviewing) return;
 
-    const ctx = getVoiceAudioContext();
+    const releasePlayback = beginVoicePlayback();
     const isMale = voiceSettingsDraft.voice_gender === "male";
     const voiceLabel = isMale ? "男聲 Iapetus" : "女聲 Zephyr";
     const sampleText = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds) === 0
@@ -1629,6 +1643,7 @@ export default function App() {
       : `提醒您，${formatReminderLeadSpeech(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds)}後，18點，要集合專招。`;
 
     try {
+      const ctx = getVoiceAudioContext();
       setIsVoicePreviewing(true);
       setVoicePreviewClip(null);
       setVoicePreviewDiagnostic(`正在向 Google 語音服務產生${voiceLabel}音檔…`);
@@ -1699,6 +1714,7 @@ export default function App() {
       setVoicePreviewDiagnostic(err?.message || "試聽語音失敗，請稍後再試。");
       setCustomAlert({ isOpen: true, message: err?.message || "試聽語音失敗，請稍後再試。" });
     } finally {
+      releasePlayback();
       setIsVoicePreviewing(false);
     }
   };
@@ -2016,6 +2032,8 @@ export default function App() {
         };
 
         rec.onend = () => {
+          recognitionCaptureReleaseRef.current?.();
+          recognitionCaptureReleaseRef.current = null;
           setIsListening(false);
 
           if (!recognitionShouldSubmitRef.current) return;
@@ -2039,6 +2057,8 @@ export default function App() {
         };
 
         rec.onerror = (event: any) => {
+          recognitionCaptureReleaseRef.current?.();
+          recognitionCaptureReleaseRef.current = null;
           console.error("語音辨識出錯", event.error);
           recognitionShouldSubmitRef.current = false;
           setIsListening(false);
@@ -2070,6 +2090,13 @@ export default function App() {
         };
 
         setRecognition(rec);
+        return () => {
+          rec.onend = null;
+          rec.onerror = null;
+          try { rec.abort(); } catch { /* Already ended. */ }
+          recognitionCaptureReleaseRef.current?.();
+          recognitionCaptureReleaseRef.current = null;
+        };
       }
     }
   }, []);
@@ -2100,7 +2127,18 @@ export default function App() {
     try {
       voiceCommandBufferRef.current = "";
       recognitionShouldSubmitRef.current = false;
-      recognition.start();
+      // The browser must remain in automatic recording mode during recognition.
+      if (!recognitionCaptureReleaseRef.current) {
+        const releaseCapture = beginVoiceCapture();
+        try {
+          recognitionCaptureReleaseRef.current = releaseCapture;
+          recognition.start();
+        } catch (error) {
+          releaseCapture();
+          recognitionCaptureReleaseRef.current = null;
+          throw error;
+        }
+      }
     } catch (err) {
       console.error(err);
     }
@@ -2138,7 +2176,7 @@ export default function App() {
     // A fixed startup test is allowed before check-in; scheduled announcements
     // require a check-in for non-admins. Admin role is verified by AuthProvider.
     if (!isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
-      || isCurrentServiceVoiceClosed() || nodes.length === 0
+      || (!isAdmin && isCurrentServiceVoiceClosed()) || nodes.length === 0
       || !personalSettings.voiceReminderEnabled) return;
 
     const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
@@ -2483,30 +2521,9 @@ export default function App() {
 
   const simplifyTaskPhrase = (node: any) => {
     let phrase = String(node.title || node.details || "服事任務").trim();
-    const roleLabels = [
-      personalSettings.role,
-      node.assignee,
-      "總招",
-      "副總招",
-      "電梯專招",
-      "手扶梯專招",
-      "2樓外場專招",
-      "2樓大堂專招",
-      "3樓大堂專招",
-      "專招",
-      "牧招",
-      "聖餐助手"
-    ]
-      .filter(Boolean)
-      .map((item: string) => String(item).trim())
-      .sort((a, b) => b.length - a.length);
-
-    roleLabels.forEach((label) => {
-      if (!label) return;
-      phrase = phrase.replace(new RegExp(`^${label}[，,、\s]*`), "");
-      phrase = phrase.replace(new RegExp(`^請${label}[，,、\s]*`), "");
-    });
-
+    // Keep role words in the original task title. Stripping 「專招」 from
+    // 「專招就位」 left the ambiguous two-character phrase 「就位」, which can
+    // be misheard when synthesized. Scheduled and timeline cues share this.
     phrase = phrase
       .replace(/^請[您你]?/, "")
       .replace(/^負責/, "")
@@ -2552,12 +2569,25 @@ export default function App() {
     node: any,
     reminderType: "pre5" | "now",
     detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel,
-    leadSecondsOverride: number | null = null
+    leadSecondsOverride: number | null = null,
+    timelineKind: "current" | "next" | null = null
   ) => {
-    const customText = getCustomReminderText(node, reminderType, detailLevel);
+    // Timing-specific custom announcements still apply only when actually
+    // due; an early entry cannot claim a five-minute reminder has arrived.
+    const customText = timelineKind ? null : getCustomReminderText(node, reminderType, detailLevel);
     if (customText) return customText;
     const phrase = simplifyTaskPhrase(node);
     const detailHint = buildDetailedVoiceHint(node, detailLevel);
+
+    // First visit, manual activation and an external-app return share this
+    // formatter. Their caller selects the configured level or the always-simple
+    // return cue; neither invents a reminder interval before its due time.
+    if (timelineKind) {
+      const prefix = timelineKind === "current" ? "目前任務" : "下一個任務";
+      const nextTime = timelineKind === "next" && detailLevel !== "simple"
+        ? formatTaskTimeForVoice(node.time) : "";
+      return `${prefix}，${nextTime ? `${nextTime}，` : ""}${phrase}。${detailHint}`;
+    }
 
     if (reminderType === "pre5") {
       // Simple mode speaks only the action; the scheduler honors the selected advance interval.
@@ -2596,6 +2626,8 @@ export default function App() {
     timelinePreviewRequestRef.current?.abort();
     timelinePreviewRequestRef.current = null;
     const source = timelinePreviewSourceRef.current;
+    timelinePreviewSessionReleaseRef.current?.();
+    timelinePreviewSessionReleaseRef.current = null;
     if (source) {
       source.onended = null;
       try { source.stop(); } catch { /* Already ended. */ }
@@ -2693,6 +2725,9 @@ export default function App() {
     const runId = timelinePreviewRunRef.current;
     const controller = new AbortController();
     timelinePreviewRequestRef.current = controller;
+    const releasePlayback = beginVoicePlayback();
+    timelinePreviewSessionReleaseRef.current = releasePlayback;
+    let started = false;
 
     try {
       // Resume while still handling the user's tap, before any network work.
@@ -2733,18 +2768,25 @@ export default function App() {
       source.connect(context.destination);
       timelinePreviewSourceRef.current = source;
       source.onended = () => {
+        releasePlayback();
+        if (timelinePreviewSessionReleaseRef.current === releasePlayback) timelinePreviewSessionReleaseRef.current = null;
         source.disconnect();
         if (timelinePreviewRunRef.current !== runId) return;
         timelinePreviewSourceRef.current = null;
         setTimelinePreviewStatus("idle");
       };
       source.start();
+      started = true;
       setTimelinePreviewStatus("playing");
     } catch (error) {
       if (controller.signal.aborted || timelinePreviewRunRef.current !== runId) return;
       setTimelinePreviewError(error instanceof Error ? error.message : "語音試聽失敗。");
       setTimelinePreviewStatus("idle");
     } finally {
+      if (!started) {
+        releasePlayback();
+        if (timelinePreviewSessionReleaseRef.current === releasePlayback) timelinePreviewSessionReleaseRef.current = null;
+      }
       if (timelinePreviewRunRef.current === runId) {
         timelinePreviewRequestRef.current = null;
       }
@@ -2763,6 +2805,8 @@ export default function App() {
     timelinePreviewRunRef.current += 1;
     timelinePreviewRequestRef.current?.abort();
     const source = timelinePreviewSourceRef.current;
+    timelinePreviewSessionReleaseRef.current?.();
+    timelinePreviewSessionReleaseRef.current = null;
     if (source) {
       source.onended = null;
       try { source.stop(); } catch { /* Already ended. */ }
@@ -2780,6 +2824,8 @@ export default function App() {
     voiceStartupRequestRef.current = null;
     const source = voiceStartupSourceRef.current;
     voiceStartupSourceRef.current = null;
+    voiceStartupSessionReleaseRef.current?.();
+    voiceStartupSessionReleaseRef.current = null;
     if (source) {
       source.onended = null;
       try { source.stop(); } catch { /* Already finished. */ }
@@ -2887,6 +2933,9 @@ export default function App() {
     const runId = voiceStartupRunRef.current;
     const controller = new AbortController();
     voiceStartupRequestRef.current = controller;
+    const releasePlayback = beginVoicePlayback();
+    voiceStartupSessionReleaseRef.current = releasePlayback;
+    let started = false;
 
     try {
       const context = getVoiceAudioContext();
@@ -2926,19 +2975,26 @@ export default function App() {
       source.connect(context.destination);
       voiceStartupSourceRef.current = source;
       source.onended = () => {
+        releasePlayback();
+        if (voiceStartupSessionReleaseRef.current === releasePlayback) voiceStartupSessionReleaseRef.current = null;
         if (voiceStartupSourceRef.current === source) voiceStartupSourceRef.current = null;
         source.disconnect();
       };
       source.start(context.currentTime);
+      started = true;
     } catch (err: unknown) {
       if (controller.signal.aborted || runId !== voiceStartupRunRef.current) return;
       console.error("語音助理啟動確認播放失敗:", err);
       const reason = err instanceof Error ? err.message : "無法播放啟動確認語音。";
       setCustomAlert({
         isOpen: true,
-        message: `啟動語音未能播放：${reason}。請解除手機靜音模式、提高媒體音量，並檢查藍牙耳機或 AirPlay 音訊輸出。`
+        message: `啟動語音未能播放：${reason}。請確認媒體音量及藍牙耳機或 AirPlay 音訊輸出；若仍無聲，可暫時解除靜音模式。`
       });
     } finally {
+      if (!started) {
+        releasePlayback();
+        if (voiceStartupSessionReleaseRef.current === releasePlayback) voiceStartupSessionReleaseRef.current = null;
+      }
       if (voiceStartupRequestRef.current === controller) voiceStartupRequestRef.current = null;
     }
   };
@@ -2970,14 +3026,15 @@ export default function App() {
     if (mayAnnounceTasks) {
       firstCheckinTimelineCueServiceRef.current = null;
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
     }
 
     if (selected) {
-      const phrase = simplifyTaskPhrase(selected.task);
-      const taskSpeech = selected.kind === "current"
-        ? `目前任務，${phrase}。`
-        : `下一個任務，${phrase}。`;
+      const taskSpeech = buildReminderSpeechText(
+        selected.task, selected.kind === "current" ? "now" : "pre5",
+        personalSettings.voiceDetailLevel, null, selected.kind
+      );
       speak(buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION), "return");
       return;
     }
@@ -3012,6 +3069,7 @@ export default function App() {
     } else {
       stopVoiceStartupConfirmation();
       setReturnCuePendingAt(null);
+      returnCueTriggerRef.current = null;
       firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCueRetryText(null);
       returnCueQueuedTextRef.current = null;
@@ -3068,6 +3126,7 @@ export default function App() {
     let recoveryAttempt = 0;
     const resumeOnForeground = () => {
       if (document.visibilityState !== "visible") return;
+      refreshVoicePlaybackMode();
       const attempt = ++recoveryAttempt;
       const context = voiceAudioContextRef.current;
       const audio = voiceHtmlAudioRef.current;
@@ -3137,6 +3196,7 @@ export default function App() {
         // iOS may have suspended the one-second clock in the background.
         // Re-evaluate any *currently due* formal reminder immediately.
         setCurrentDate(new Date());
+        returnCueTriggerRef.current = "foreground";
         setReturnCuePendingAt(Date.now());
       }
     };
@@ -3166,6 +3226,7 @@ export default function App() {
       || (!isAdmin && checkinStatus === "not_checked_in") || !isServiceType(currentService)
       || (!isAdmin && isCurrentServiceVoiceClosed()) || !showLiveTimeline) {
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
@@ -3175,9 +3236,12 @@ export default function App() {
     if (isLoading) return;
     if (voiceAudioContextRef.current && voiceAudioContextRef.current.state !== "running") return;
     if (filteredNodes.length === 0) {
+      const isFirstEntry = returnCueTriggerRef.current === "checkin"
+        && firstCheckinTimelineIntroServiceRef.current === currentService;
+      returnCueTriggerRef.current = null;
+      firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCuePendingAt(null);
-      if (firstCheckinTimelineIntroServiceRef.current === currentService) {
-        firstCheckinTimelineIntroServiceRef.current = null;
+      if (isFirstEntry) {
         // Confirm activation without pretending there is a scheduled task.
         speak(VOICE_STARTUP_CONFIRMATION, "return");
       }
@@ -3195,23 +3259,27 @@ export default function App() {
     )) {
       // An imminent formal announcement takes priority over the check-in cue.
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
 
     const selected = selectReturnCueTask(filteredNodes, now);
+    const trigger = returnCueTriggerRef.current;
+    returnCueTriggerRef.current = null;
     setReturnCuePendingAt(null);
-    const isFirstCheckinEntry = firstCheckinTimelineIntroServiceRef.current === currentService;
+    const isFirstCheckinEntry = trigger === "checkin"
+      && firstCheckinTimelineIntroServiceRef.current === currentService;
     firstCheckinTimelineIntroServiceRef.current = null;
     if (!selected) {
       // An empty/currently-expired timeline has no real task to announce.
       if (isFirstCheckinEntry) speak(VOICE_STARTUP_CONFIRMATION, "return");
       return;
     }
-    const phrase = simplifyTaskPhrase(selected.task);
-    const taskSpeech = selected.kind === "current"
-      ? `目前任務，${phrase}。`
-      : `下一個任務，${phrase}。`;
+    const taskSpeech = buildReminderSpeechText(
+      selected.task, selected.kind === "current" ? "now" : "pre5",
+      getTaskCueDetailLevel(trigger, personalSettings.voiceDetailLevel), null, selected.kind
+    );
     speak(isFirstCheckinEntry
       ? buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)
       : taskSpeech, "return");
@@ -3221,7 +3289,7 @@ export default function App() {
     personalSettings.role, personalSettings.name,
     personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
     personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
-    personalSettings.reminderLeadSeconds
+    personalSettings.reminderLeadSeconds, personalSettings.voiceDetailLevel
   ]);
 
   // One brief announcement on the first timeline visit after a verified
@@ -3241,6 +3309,7 @@ export default function App() {
       && !returnCueQueuedTextRef.current && !voiceProcessingRef.current
       && voiceQueueRef.current.length === 0) {
       firstCheckinTimelineIntroServiceRef.current = service;
+      returnCueTriggerRef.current = "checkin";
       setReturnCuePendingAt(Date.now());
     }
   }, [
@@ -5975,7 +6044,7 @@ export default function App() {
                   </button>
                 </div>
                 <p className="mt-2 text-[11px] font-medium leading-5 text-[#7B7B74]">
-                  試聽前請確認手機未開啟靜音模式，並調整媒體音量。
+                  試聽前請確認媒體音量；支援的 iPhone 可嘗試在靜音模式下播報。若仍無聲，請檢查音訊輸出或暫時解除靜音。
                 </p>
 
                 <div className="mt-3 rounded-xl border border-[#E6EAF0] bg-white p-3">

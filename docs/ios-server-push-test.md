@@ -2,6 +2,9 @@
 
 此分支僅用於 Preview，正式站的 API 禁用。只有管理員可以發起固定內容測試，僅允許 Apple Web Push HTTPS 端點，不保存端點或訂閱，不接入正式堂次、不修改資料庫。伺服器接受後透過 Next.js after 延遲約 15 秒發送空 payload；Service Worker 立即顯示固定測試通知。此非持久化排程，也不是正式推播服務。
 
+## 多任務實測（本次更新）
+隔離預覽頁新增本次測試專用震動開關。明確開啟後，伺服器以同一次請求接受時間為基準，在 +15、+30、+45 秒發送三個模擬任務的空 Web Push；每個時點最多嘗試一次，延誤超過五秒略過，不追發或重試不明結果。多任務 TTL 15 秒，避免長時間離線後收到舊測試。每則通知顯示收件時間並使用獨立 tag，方便在通知中心確認三個事件。僅測伺服器連續推播與 iPhone 系統震動，不是可取消、跨程序持久化或與正式分派整合的排程。開關關閉時不能啟動；接受後本輪不支援即時撤銷。測試後移除測試圖示即可。
+
 ## 預覽設定
 在自己的電腦使用 Node.js 產生獨立 P-256 VAPID 金鑰，例如 node -e "const e=require('node:crypto').createECDH('prime256v1');e.generateKeys();console.log('PUBLIC:',e.getPublicKey().toString('base64url'));console.log('PRIVATE:',e.getPrivateKey().toString('base64url'))"。不要將私鑰放入 Git、聊天或公開日誌。透過 Vercel 專案環境變數 UI 設定下列值，只選 Preview 並限制分支 feature/ios-server-push-test：
 

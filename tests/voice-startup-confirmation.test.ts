@@ -104,7 +104,7 @@ test("the current voice controls do not add another switch or confirmation dialo
   // A voice toggle now persists just its own reminder setting; it never mutates check-in or other settings.
   assert.ok(workflow.includes('setPersonalSettings(prev => ({ ...prev, voiceReminderEnabled: nextEnabled }))'));
   assert.ok(!workflow.includes('setVoiceSettingsDraft('));
-  assert.ok(workflow.includes('請解除手機靜音模式、提高媒體音量'));
+  assert.ok(workflow.includes('請確認媒體音量及藍牙耳機或 AirPlay 音訊輸出'));
 });
 
 test("startup audio prefetches after auth, respects role/check-in, and reuses local cache", () => {

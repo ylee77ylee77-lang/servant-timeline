@@ -1,12 +1,13 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { requireAdmin, getAuthErrorResponse } from "@/lib/auth/require-admin";
 import { isApplePushEndpoint, sendEmptyApplePush, type VapidKeys } from "@/lib/notifications/apple-empty-push";
+import { createPreviewTaskPushPlan, runPreviewTaskPushPlan, PREVIEW_TASK_TTL_SECONDS } from "@/lib/notifications/preview-task-push-plan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 40;
+export const maxDuration = 60;
 
-// This one-shot test never saves PushSubscription records or changes worship schedules.
+// Bounded, preview-only tests never save PushSubscription records or change worship schedules.
 const lastTestByUser = new Map<string, number>();
 
 function testCredentials(): VapidKeys | null {
@@ -52,10 +53,18 @@ export async function POST(request: NextRequest) {
     }
     const raw = await request.text();
     if (raw.length > 4096) return NextResponse.json({ error: "請求內容過長。" }, { status: 413 });
-    let body: { endpoint?: unknown } | null = null;
+    let body: { endpoint?: unknown; mode?: unknown; vibrationEnabled?: unknown } | null = null;
     try { body = JSON.parse(raw); } catch { /* invalid JSON */ }
     if (!body || !isApplePushEndpoint(body.endpoint)) {
       return NextResponse.json({ error: "無效的 iPhone 推播訂閱。" }, { status: 400 });
+    }
+
+    const mode = body.mode ?? "single";
+    if (mode !== "single" && mode !== "sequence") {
+      return NextResponse.json({ error: "無效的測試模式。" }, { status: 400 });
+    }
+    if (mode === "sequence" && body.vibrationEnabled !== true) {
+      return NextResponse.json({ error: "請先開啟本次測試的震動提醒。" }, { status: 400 });
     }
 
     // One fixed test per user per minute. This is preview-only defense in depth,
@@ -69,6 +78,19 @@ export async function POST(request: NextRequest) {
     lastTestByUser.set(actor.userId, now);
 
     const endpoint = body.endpoint;
+    if (mode === "sequence") {
+      const plan = createPreviewTaskPushPlan(now);
+      after(async () => {
+        const results = await runPreviewTaskPushPlan(plan, () => sendEmptyApplePush(endpoint, keys, fetch, PREVIEW_TASK_TTL_SECONDS));
+        // Only the fixed cue numbers and provider response states are logged.
+        console.info("Preview Apple task sequence completed", { results });
+      });
+      return NextResponse.json({
+        accepted: true,
+        plan,
+        message: "三個模擬任務已交給伺服器，請立即鎖屏。",
+      }, { status: 202, headers: { "Cache-Control": "no-store" } });
+    }
     after(async () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 15_000));
       try {
