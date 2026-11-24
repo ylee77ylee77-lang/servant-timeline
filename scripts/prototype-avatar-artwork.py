@@ -7,8 +7,6 @@ retouching and differential eyewear isolation, not new interchangeable hair
 geometry. Generated images are QA artifacts, not an approved runtime catalog.
 """
 from pathlib import Path
-import argparse
-import base64
 import hashlib
 import json
 import numpy as np
@@ -142,7 +140,7 @@ def save_webp(array, path):
     Image.fromarray(array).save(path, "WEBP", lossless=True, method=6, exact=False)
 
 
-def save_transfer_variant(name, label, array, emit_transfer):
+def save_candidate_variant(name, label, array):
     """High-quality pre-rendered color variant, preserving the exact alpha matte."""
     directory = OUT / "candidate-portraits"
     directory.mkdir(exist_ok=True)
@@ -159,10 +157,6 @@ def save_transfer_variant(name, label, array, emit_transfer):
     mean_error = float(error[opaque].mean())
     assert mean_error < 3.0, f"{path.name}: unacceptable compression error"
     print(f"AVATAR_VARIANT_META:{path.name}:{len(data)}:{hashlib.sha256(data).hexdigest()}:{mean_error:.3f}")
-    if emit_transfer:
-        encoded = base64.b64encode(data).decode("ascii")
-        for idx in range(0, len(encoded), 1800):
-            print(f"AVATAR_VARIANT:{path.name}:{idx // 1800}:" + encoded[idx:idx + 1800])
 
 
 def thumb(array, width, bg="#E9DFF4"):
@@ -181,10 +175,6 @@ def thumb(array, width, bg="#E9DFF4"):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--emit-transfer", action="store_true",
-                        help="Emit public developer-only candidate artwork for repository handoff")
-    args = parser.parse_args()
     OUT.mkdir(exist_ok=True)
     hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in SOURCE.glob("*.webp")}
     report = {"scope": "proof only; locked existing hair silhouette; no registered assets", "characters": {}}
@@ -209,8 +199,8 @@ def main():
         glass_weight[y1:y2, x1:x2] *= (1 - smoothstep(5 / 255, 20 / 255, difference[y1:y2, x1:x2]))
         dark_glasses, count_glasses = recolor(name, glasses, glass_weight)
         assert count > 8000, f"{name}: insufficient hair pixels"
-        save_transfer_variant(name, "dark", dark, args.emit_transfer)
-        save_transfer_variant(name, "dark-glasses", dark_glasses, args.emit_transfer)
+        save_candidate_variant(name, "dark", dark)
+        save_candidate_variant(name, "dark-glasses", dark_glasses)
         for label, value in (("dark", dark), ("dark-glasses", dark_glasses), ("eyewear-diagnostic", overlay), ("reconstructed", reconstructed)):
             save_webp(value, OUT / f"{name}-{label}.webp")
         Image.fromarray(np.rint(weights * 255).astype(np.uint8), mode="L").save(OUT / f"{name}-hair-mask.png")
@@ -234,11 +224,6 @@ def main():
     (OUT / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     qa.save(OUT / "contact-sheet.jpg", quality=92)
     print(json.dumps(report, indent=2))
-    # Log a bounded preview of public art only for review through the connector.
-    # No credentials or account data are read; full images are CI artifacts.
-    encoded = base64.b64encode((OUT / "contact-sheet.jpg").read_bytes()).decode("ascii")
-    for index in range(0, len(encoded), 1800):
-        print("AVATAR_QA_SHEET:" + encoded[index:index + 1800])
 
 
 if __name__ == "__main__":

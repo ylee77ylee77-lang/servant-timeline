@@ -6,6 +6,10 @@ import { normalizeAvatarConfig } from "../lib/profile/avatar.ts";
 import {
   AVATAR_LAYERED_PORTRAITS,
   AVATAR_PORTRAITS,
+  AVATAR_CLASSIC_DARK_PORTRAITS,
+  AVATAR_CLASSIC_HAIR_TONES,
+  getClassicHairTone,
+  selectClassicHairTone,
   getAvatarPortraitOptions,
   getAvatarPortraitPlan,
   selectAvatarPortraitVersion,
@@ -116,6 +120,58 @@ test("all registered P2 layers are real transparent 512px WebP assets within the
       assert.equal(bytes.readUIntLE(24, 3) + 1, 512, src);
       assert.equal(bytes.readUIntLE(27, 3) + 1, 512, src);
       assert.ok(bytes.length < 180 * 1024, `${src}: artwork exceeds mobile budget`);
+    }
+  }
+});
+
+
+test("the original character color remains unchanged unless the user explicitly selects black", () => {
+  assert.deepEqual(AVATAR_CLASSIC_HAIR_TONES.map((tone) => tone.value), ["brown", "dark"]);
+  for (const style of ["masculine", "feminine"] as const) {
+    for (const glasses of [false, true]) {
+      const old = normalizeAvatarConfig({ style, glasses, hairColor: "dark", pet: "sheep", background: "mint", iconType: "church" });
+      const original = AVATAR_PORTRAITS[style][glasses ? "glasses" : "plain"];
+      const darkSrc = AVATAR_CLASSIC_DARK_PORTRAITS[style][glasses ? "glasses" : "plain"];
+      assert.equal(getClassicHairTone(old), "brown");
+      assert.equal(getAvatarScene(old).portrait, original);
+      const black = normalizeAvatarConfig(JSON.parse(JSON.stringify(selectClassicHairTone(old, "dark"))));
+      assert.equal(getClassicHairTone(black), "dark");
+      assert.equal(black.portraitVersion, "v2-tone");
+      assert.equal(black.pet, old.pet);
+      assert.equal(black.background, old.background);
+      assert.equal(black.iconType, old.iconType);
+      assert.equal(black.glasses, glasses);
+      assert.deepEqual(getAvatarScene(black).portraitLayers, [{ kind: "tone-variant", src: darkSrc }]);
+      assert.deepEqual(getAvatarScene(black).companion, getAvatarScene(old).companion);
+      assert.deepEqual(getAvatarScene(black).gradient, getAvatarScene(old).gradient);
+      const toggled = { ...black, glasses: !glasses };
+      assert.equal(getAvatarScene(toggled).portrait, AVATAR_CLASSIC_DARK_PORTRAITS[style][glasses ? "plain" : "glasses"]);
+      assert.equal(getAvatarScene(selectClassicHairTone(black, "brown")).portrait, original);
+      assert.equal(normalizeAvatarConfig({ ...black, hairColor: "gray" }).portraitVersion, undefined);
+      for (const displayMode of ["default", "name"] as const) {
+        const hidden = normalizeAvatarConfig({ ...black, displayMode });
+        assert.equal(getAvatarScene(hidden).portrait, null);
+        assert.equal(getAvatarScene({ ...hidden, displayMode: "custom" }).portrait, darkSrc);
+      }
+    }
+  }
+  const neutral = normalizeAvatarConfig({ style: "neutral", portraitVersion: "v2-tone", hairColor: "dark" });
+  assert.equal(neutral.portraitVersion, undefined);
+  assert.deepEqual(selectClassicHairTone(neutral, "dark"), neutral);
+});
+
+test("all four black-hair variants use verified transparent WebP artboards within the mobile budget", () => {
+  for (const style of ["masculine", "feminine"] as const) {
+    for (const key of ["plain", "glasses"] as const) {
+      const src = AVATAR_CLASSIC_DARK_PORTRAITS[style][key];
+      const bytes = fs.readFileSync(path.join(process.cwd(), "public", src.slice(1)));
+      assert.equal(bytes.toString("ascii", 0, 4), "RIFF", src);
+      assert.equal(bytes.toString("ascii", 8, 16), "WEBPVP8X", src);
+      assert.ok((bytes[20] & 0x10) !== 0, src);
+      assert.equal(bytes.readUIntLE(24, 3) + 1, 512, src);
+      assert.equal(bytes.readUIntLE(27, 3) + 1, 512, src);
+      assert.ok(bytes.length < 180 * 1024, src);
+      assert.notDeepEqual(bytes, fs.readFileSync(path.join(process.cwd(), "public", AVATAR_PORTRAITS[style][key].slice(1))));
     }
   }
 });

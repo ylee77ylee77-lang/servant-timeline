@@ -13,7 +13,15 @@ report, masks, sample lossless WebPs and a candidate eyewear difference image.
 The only external installation is development-time image QA packages in the
 existing CI runner; there is no application package, paid API, account or service.
 
-The visual acceptance gate remains in place. Do not add any proof image to the
-runtime catalog, use it as a hairstyle-independent face/body base, or alter old
+The visual acceptance gate remains in place. Do not add unreviewed proof images to the
+runtime catalog, use them as a hairstyle-independent face/body base, or alter old
 accounts. A true layered portrait family still needs clean matching 3D source
 artwork and explicit visual/mobile acceptance.
+
+## First checked candidate handoff
+
+The four compressed black-hair candidates passed transparent-canvas, protected-face and
+mobile-size checks and were visually inspected in the PR development workflow. They are now
+registered separately as fixed-silhouette color variants under `v2-tones`, not as v3 layers.
+The original eyewear separation failed the alignment gate and is deliberately not registered.
+Final mobile visual approval remains required before merging PR #61.

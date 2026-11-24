@@ -28,7 +28,7 @@ export type AvatarConfig = {
   eyeStyle: AvatarEyeStyle;
   glasses: boolean;
   /** Optional, explicit opt-in; absent means the original v2 portrait. */
-  portraitVersion?: "v3";
+  portraitVersion?: "v2-tone" | "v3";
   /** Separate from the existing on/off flag for backwards compatibility. */
   glassesStyle?: AvatarGlassesStyle;
   accessory: AvatarAccessory;
@@ -136,7 +136,11 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
       ? (input.eyeStyle as AvatarEyeStyle)
       : base.eyeStyle,
     glasses: input.glasses === true,
-    ...(style !== "neutral" && input.portraitVersion === "v3" ? { portraitVersion: "v3" as const } : {}),
+    ...(style !== "neutral" && input.portraitVersion === "v3"
+      ? { portraitVersion: "v3" as const }
+      : style !== "neutral" && input.portraitVersion === "v2-tone" && input.hairColor === "dark"
+        ? { portraitVersion: "v2-tone" as const }
+        : {}),
     ...(glassesStyles.has(input.glassesStyle as AvatarGlassesStyle)
       ? { glassesStyle: input.glassesStyle as AvatarGlassesStyle } : {}),
     accessory: accessories.has(input.accessory as AvatarAccessory)

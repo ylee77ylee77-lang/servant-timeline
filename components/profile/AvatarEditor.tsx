@@ -2,7 +2,14 @@
 
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import { AvatarLivePreview } from "@/components/profile/AvatarControls";
-import { AVATAR_GLASSES_LABELS, getAvatarPortraitOptions, selectAvatarPortraitVersion } from "@/lib/profile/avatar-portrait";
+import {
+  AVATAR_CLASSIC_HAIR_TONES,
+  AVATAR_GLASSES_LABELS,
+  getAvatarPortraitOptions,
+  getClassicHairTone,
+  selectAvatarPortraitVersion,
+  selectClassicHairTone,
+} from "@/lib/profile/avatar-portrait";
 import {
   AVATAR_DEFAULTS,
   normalizeAvatarConfig,
@@ -44,16 +51,17 @@ export function AvatarEditor({
   const portraitOptions = getAvatarPortraitOptions(avatar);
 
   const setStyle = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
-    const preset = AVATAR_DEFAULTS[style];
-    onChange({
-      ...preset,
+    if (avatar.style === style) return;
+    const next: AvatarConfig = {
+      ...AVATAR_DEFAULTS[style],
       background: avatar.background,
       pet: avatar.pet,
       glasses: avatar.glasses,
       displayMode: avatar.displayMode,
       iconType: avatar.iconType,
       iconTone: avatar.iconTone,
-    });
+    };
+    onChange(getClassicHairTone(avatar) === "dark" ? selectClassicHairTone(next, "dark") : next);
   };
 
   return (
@@ -150,6 +158,30 @@ export function AvatarEditor({
         </>
       )}
 
+      {avatar.style !== "neutral" && !portraitOptions?.active && (
+        <section>
+          <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮色</div>
+          <div className="grid grid-cols-2 gap-2">
+            {AVATAR_CLASSIC_HAIR_TONES.map((tone) => {
+              const selected = getClassicHairTone(avatar) === tone.value;
+              const next = selectClassicHairTone(avatar, tone.value);
+              return (
+                <button
+                  key={tone.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onChange(next)}
+                  className={`flex min-h-11 items-center justify-center gap-2 rounded-2xl border px-2 py-2 text-sm font-black ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
+                >
+                  <AvatarRenderer config={{ ...next, displayMode: "custom", pet: "none" }} size={44} />
+                  <span>{selected ? "✓ " : ""}{tone.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section>
         <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">眼鏡</div>
         {portraitOptions?.active ? (
@@ -230,14 +262,6 @@ export function AvatarEditor({
         </div>
       </section>
 
-      {!portraitOptions && (
-      <section className="rounded-2xl border border-[#E8D9A2] bg-[#FFF9E8] p-4">
-        <div className="text-xs font-black text-[#7A5A11]">更多 3D 特徵素材正在建立</div>
-        <p className="mt-1 text-xs font-medium leading-5 text-[#7B6A45]">
-          髮型、髮色、眼睛、配件與服裝會等同品質的 3D 素材準備完成後再開放，不使用不相容的扁平圖層。
-        </p>
-      </section>
-      )}
       </div>
     </div>
   );

@@ -58,3 +58,16 @@ All avatars continue through the one shared renderer, including communication an
    and communication avatars on actual mobile browsers. Confirm no new network requests on picker taps.
 6. Keep the existing production appearance unless explicit opt-in; verify lint, unit tests, build, and
    database CI before human visual approval and PR merge.
+
+## First available color variants (P2 preview)
+
+The artwork proof produced four visually inspected black-hair portraits with the original
+male/female silhouettes, each with and without the existing glasses. The four 512px transparent
+WebPs are stored in `public/avatar/scenes/v2-tones/` (56,834–74,388 bytes per image).
+They use the existing complete portrait renderer and are not claimed to be independently
+interchangeable hair or glasses layers. A new optional `portraitVersion: "v2-tone"` with
+`hairColor: "dark"` selects them explicitly. Legacy profiles keep the exact v2 artwork,
+including old `hairColor: "dark"` values. The shared editor exposes two real color options;
+selecting the original brown clears the opt-in. Existing glasses, backgrounds, companions,
+icon display and name mode remain independent. No new hair geometry or eyewear styles are exposed.
+The empty v3 layered catalog remains gated until real compatible artwork is ready.

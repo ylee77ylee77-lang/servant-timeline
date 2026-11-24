@@ -19,6 +19,43 @@ export const AVATAR_PORTRAITS = {
 } as const;
 
 type CharacterStyle = Exclude<AvatarStyle, "neutral">;
+
+/** Locked original hair silhouette with individually checked pre-rendered black-hair variants.
+ * Do not use these complete portraits as interchangeable v3 hair layers.
+ */
+export const AVATAR_CLASSIC_DARK_PORTRAITS = {
+  masculine: {
+    plain: "/avatar/scenes/v2-tones/male-dark.webp",
+    glasses: "/avatar/scenes/v2-tones/male-dark-glasses.webp",
+  },
+  feminine: {
+    plain: "/avatar/scenes/v2-tones/female-dark.webp",
+    glasses: "/avatar/scenes/v2-tones/female-dark-glasses.webp",
+  },
+} as const satisfies Record<CharacterStyle, { plain: string; glasses: string }>;
+
+export type ClassicHairTone = "brown" | "dark";
+export const AVATAR_CLASSIC_HAIR_TONES = [
+  { value: "brown", label: "深棕色" },
+  { value: "dark", label: "黑色" },
+] as const satisfies readonly { value: ClassicHairTone; label: string }[];
+
+/** Old hairColor values were never rendered by v2. Require an explicit opt-in. */
+export function getClassicHairTone(avatar: AvatarConfig): ClassicHairTone {
+  return avatar.style !== "neutral" && avatar.portraitVersion === "v2-tone" && avatar.hairColor === "dark"
+    ? "dark"
+    : "brown";
+}
+
+export function selectClassicHairTone(avatar: AvatarConfig, tone: ClassicHairTone): AvatarConfig {
+  if (avatar.style === "neutral") return avatar;
+  return {
+    ...avatar,
+    portraitVersion: tone === "dark" ? "v2-tone" : undefined,
+    hairColor: tone,
+  };
+}
+
 type LayerAsset = `/avatar/scenes/v3/${string}.webp`;
 type NonEmpty<T> = readonly [T, ...T[]];
 
@@ -62,7 +99,7 @@ export const AVATAR_GLASSES_LABELS: Record<AvatarGlassesStyle, string> = {
 };
 
 export type AvatarPortraitLayer = {
-  kind: "legacy" | "hair-back" | "face-body" | "eyewear" | "hair-front";
+  kind: "legacy" | "tone-variant" | "hair-back" | "face-body" | "eyewear" | "hair-front";
   src: string;
 };
 
@@ -95,7 +132,7 @@ export function selectAvatarPortraitVersion(
   layered: boolean,
   catalog: readonly AvatarPortraitFamily[] = AVATAR_LAYERED_PORTRAITS,
 ): AvatarConfig {
-  if (!layered) return { ...avatar, portraitVersion: undefined };
+  if (!layered) return avatar.portraitVersion === "v3" ? { ...avatar, portraitVersion: undefined } : avatar;
   const options = getAvatarPortraitOptions(avatar, catalog);
   if (!options) return avatar;
   return {
@@ -116,9 +153,10 @@ export function getAvatarPortraitPlan(
   }
   const options = getAvatarPortraitOptions(avatar, catalog);
   if (!options?.active) {
-    const assets = AVATAR_PORTRAITS[avatar.style];
+    const dark = getClassicHairTone(avatar) === "dark";
+    const assets = dark ? AVATAR_CLASSIC_DARK_PORTRAITS[avatar.style] : AVATAR_PORTRAITS[avatar.style];
     const portrait = avatar.glasses ? assets.glasses : assets.plain;
-    return { portrait, layers: [{ kind: "legacy", src: portrait }] };
+    return { portrait, layers: [{ kind: dark ? "tone-variant" : "legacy", src: portrait }] };
   }
   const { family, color, glassesStyle } = options;
   const layers: AvatarPortraitLayer[] = [];
