@@ -1,117 +1,134 @@
-# Avatar P2 — independent hair, skin and eyewear colors
+# Avatar P2 — continuous color selection
 
-## Approved product direction
+![Source portrait color examples](avatar-color-preview.png)
 
-Keep the existing five backgrounds and four companion animals unchanged.
-Prioritize recognizable character faces, compatible hairstyles, and three
-independent material colors. Target four character families (two male, two
-female), three hairstyles per family, and classic/round/square/no glasses.
-Only ship art that passes review.
+## Implemented behavior on the feature branch
 
-- Hair: 360-degree continuous HSV color wheel and independent brightness slider.
-- Skin: a continuous warm-color disc and brightness slider limited to a reviewed
-  natural skin-tone gamut, including deeper tones. The initial numerical range
-  is provisional and requires review against real source materials.
-- Frame: 360-degree continuous HSV color wheel and independent brightness slider.
-  Do not recolor lens transparency, reflection, eye whites, iris or adjacent skin.
-- Keep original color as a reset option, and never change a saved legacy
-  avatar automatically. Selecting a color must update a local draft, not
-  initiate a network request.
+Registration and profile settings share `AvatarEditor`, which now mounts the
+same three collapsed color controls next to the existing person/glasses choices:
 
-## Source material and output contract
+- Hair and frame: a continuous 360-degree HSV disc and brightness slider.
+- Skin: a bounded continuous warm-tone disc and brightness slider, including
+  deeper tones. This is an artistic palette, not a skin classification system.
+- Only one color disc opens at a time. Pointer dragging, arrow keys, and native
+  sliders under「精細調整」are available. The frame control appears with glasses.
+- Selection updates the existing local avatar draft. Existing registration or
+  explicit profile save submits it; dragging never calls a color/AI service.
+- Each channel can return to its original source color independently. Opening
+  a picker does not change a saved color. Local HSV coordinates retain hue when
+  brightness reaches zero; saved values remain exact RGB.
+- Switching base character preserves the chosen colors. Hiding glasses retains
+  the chosen frame color. Icon/name modes retain preferences without rendering
+  the portrait.「重新建立」continues to create a fresh default avatar.
 
-For each approved family use the same camera, face mesh, pose, lighting and
-portrait artboard. Assign skin (face, ears, neck), hair (front and rear), and
-frame materials explicitly; keep clothing, eyes, eyebrows, lips and lens
-reflection outside those color channels. Preserve real shading and highlights,
-occlusion and anti-aliased edges. No entire-portrait CSS hue shift, flat colored
-overlay, per-device offsets, or generated full portrait per color selection.
+The original five backgrounds and four optional animals are unchanged. Color
+selection does not create a multicolor gradient on the hair: the gradient disc
+selects one material color, while the original light and shade remain visible.
 
-The eventual browser implementation should use validated material-specific
-coverage masks and neutral diffuse/shading plus preserved highlight information
-or an equivalently verified pre-baked material representation. Composite
-according to the existing shared portrait layer order. Test its result against
-the locked source renderer rather than assuming a flat multiply or hue shift
-is accurate. The offline proof below does not yet implement that browser
-material representation or free-color UI.
+## Rendering and source ownership
 
-All registered runtime artwork must retain the existing 512 x 512 transparent
-artboard and mobile budget. Review thumbnails and full-size views, and test
-black/bright hair, light/deep skin, neutral/bright frame colors, and combinations.
-The selected RGB must not affect other material regions. No material UI can
-appear for a family/hairstyle/frame that lacks an approved material pass.
+`AvatarRenderer` remains the common renderer used by the editor, profile and
+communication avatars. It applies `AvatarMaterialFilter` only when explicit
+color overrides exist and the exact portrait source is registered. Old avatars
+without those fields render their original images without a new filter.
 
-Future storage: use optional, strictly validated six-digit RGB values in
-the existing versioned avatar_config JSONB; omit absent values and preserve
-legacy v2 and v2-tone behavior. The exact storage fields and server normalization
-are intentionally deferred until material and browser integration are verified.
-Keep saved color preferences independent from display mode and other parts.
-No schema migration, paid provider, AI call on selection, or new runtime
-dependency is part of this proof.
+The four original v2 portraits and their aligned black-hair derivatives are the
+only supported sources. A saved black-hair portrait keeps its exact source while
+custom colors are applied, avoiding a brown/black codec or hairline transition.
+Reset removes the override; it never substitutes a newly generated portrait.
+The future v3 hairstyle catalog remains empty and unmodified.
 
-## Reproducible developer-only proof
+This implementation recolors the existing 2D raster artwork. It does not recover
+3D meshes, diffuse/specular passes or physically accurate relighting. The future
+four face families and interchangeable hairstyles still require approved artwork.
 
-The original procedural P2 rig was parameterized for skin and frame colors
-(hair was already parameterized). Default inputs retain the old geometry
-and material values. The material-proof script uses actual depth-buffer
-ownership for hair, skin, frame and protected non-colorable parts, not manually
-painted skin masks. It compares each selected material to the original source
-render at the same camera/pose and rejects any depth, alpha or non-target
-color change. It separately checks that splitting the original face/body
-into skin and protected parts matches the source within the existing 0.1%
-geometry tolerance.
+The coverage contract uses the same 512px source artboard and the renderer's
+existing portrait bounds. Red, green and blue encode hair, skin and frame
+ownership in four small PNG maps. Static SVG contours are maintained in
+`avatar-materials.ts`, `avatar-frame-paths.ts` and `avatar-feature-paths.ts`.
+The generator refines only narrow brow/lash envelopes and the traced hairline
+using the pinned original pixels. It does not globally classify the portrait.
+Eyes, teeth, lips, clothing and lens interiors stay outside the relevant tint.
 
-Two provisional source characters, eight cases each, include baseline,
-independent hair/skin/frame changes and a combined case. The PNG masks,
-RGBA WebPs, report.json and contact sheet are proof outputs only and must
-never be registered as production art. These masks are sample-specific
-visible ownership diagnostics, not yet reusable runtime material passes.
-The prototype has frames but no lens material; lens isolation remains untested.
+Hair and frames use the source luminance to retain strand and frame shading;
+skin scales its original RGB channels to retain warm color and blush variation.
+A source-luminance guard protects light reflections near the frame. The selected
+RGB is a color reference, so shaded rendered pixels are not a flat copy of it.
 
-Run locally with Python, VTK 9.6.2, NumPy 2.3.5, Pillow 12.3.0:
+The filter computes the sum of selected coverage, removes that coverage from
+`SourceGraphic` once, and adds the separately tinted contributions. It does not
+stack a second portrait over the original; that would increase partial edge
+opacity. RGB ownership never exceeds one pixel. All primitives use sRGB.
+The composition follows [SVG filter arithmetic](https://www.w3.org/TR/filter-effects-1/#feCompositeElement).
+The byte-level renderer check allows at most 1/255 alpha rounding difference.
 
-```sh
-python scripts/prototype-avatar-materials.py
+Coverage PNGs are immutable source-specific app assets under
+`public/avatar/materials/v1/`. Each is below 24 KiB. They load as normal static
+assets when needed; choosing another color changes filter values locally.
+No new application dependency, paid provider, runtime AI call, API endpoint,
+credential or database migration is introduced.
+
+## Persistence and backwards compatibility
+
+`AvatarConfig.materialColors` is optional:
+
+```json
+{"materialColors":{"hair":"#654539","skin":"#BC855E","frame":"#B88E55"}}
 ```
 
-The dedicated read-only GitHub Actions material proof job performs the same
-checks and uploads its artifacts. A successful job is evidence of isolated
-source-material color control only, not approved visual quality, saved
-profile behavior, or iPhone/Safari performance. No application files or
-public assets are changed in this step.
+The shared `normalizeAvatarConfig` accepts only own properties named `hair`,
+`skin` and `frame`, with exactly six hexadecimal digits. It uppercases valid
+values and omits invalid/empty fields. The skin gamut is bounded in the UI;
+normalization validates the RGB representation without reprojecting a saved
+skin color through the disc and accidentally changing its bytes.
 
-## Release gates still open
+Existing authenticated registration/profile writes and communication reads
+already use this normalizer and carry the complete JSONB config. Authorization
+and write timing are unchanged. Unit tests verify JSON roundtrip, legacy
+identity, prototype/invalid input rejection, independent reset, hidden frame
+preferences and exact black-source preservation. These tests do not replace an
+actual signed-in save/reopen test.
 
-1. Approve the source art quality against the original v2 portraits.
-2. Produce reusable material masks, light/shading information and compatible
-   hair/eyewear geometry for each released family.
-3. Verify continuous browser-side color controls, neutral reset, exact
-   protected-region preservation and performance at 48/80/104/256px.
-4. Validate versioned input and save/reopen in registration and settings,
-   including hidden display modes; confirm old avatar appearance.
-5. Review on iPhone PWA and all avatar surfaces, pass application/security CI,
-   then obtain explicit approval before merging the Draft PR.
+## Reproducible checks
 
-## Shared color-wheel interaction foundation
+```sh
+npm test
+npm run type-check
+node --experimental-strip-types scripts/build-avatar-material-masks.mjs --check
+node --experimental-strip-types scripts/verify-avatar-material-rendering.mjs
+npm run build
+```
 
-`lib/profile/avatar-color-wheel.ts` defines one deterministic coordinate-to-color
-mapping for rendered pixels, pointer interaction, and keyboard movement. Hair
-and frame use full HSV hue/saturation; skin uses a warm Cartesian disc without
-an abrupt hue-wrap seam. Brightness remains separate, retaining the chosen
-position even at black. The skin disc's range is an unapproved first design,
-not a dermatological or final art palette.
+Run the mask generator without `--check` after an intentional contour change.
+It pins all eight portrait SHA-256 values and checks regenerated pixels against
+the committed PNG maps. Replacing source artwork requires renewed coverage review.
 
-`components/profile/AvatarColorControls.tsx` is a controlled, reusable picker:
-collapsed color dots, one open section, pointer capture for touch dragging,
-keyboard arrow support, native brightness slider and reset to the source color.
-The canvas only redraws for brightness/channel changes; changing the selection
-moves the marker and calls the parent's local-draft callback. A null draft
-means original source color. Merely opening or closing the picker never changes
-any color. No fixed-color grid is required. No new dependency, API call, or
-profile data change is involved. The component is deliberately not mounted in
-registration or profile settings until compatible material rendering is ready.
+The rendering script compiles the actual React filter with the installed
+TypeScript compiler and rasterizes it with Sharp/librsvg. Eight source portraits
+are checked against eight independent/combined color cases. Checks cover alpha,
+unchanged pixels outside selected coverage, eyes/teeth/clothing patches, lens
+holes, and adjacent skin that must actually change. Reports and comparison
+images are developer review output outside `public/`; CI uploads them for review.
 
-`tests/avatar-color-wheel.test.ts` covers hue primaries, RGB roundtrip, black
-and restore, bounded skin gamut, invalid coordinates, and exact agreement
-between wheel pixels and selection math. Physical touch, browser integration,
-production art, persisted RGB roundtrip and rendering performance remain gates.
+The actual shared `AvatarRenderer` is also rendered at 48/80/104/256px, using
+its real portrait bounds, round frame and companion image. These checks catch
+filter-placement errors that an isolated 512px material test would miss.
+
+![Shared renderer at four sizes](avatar-color-sizes.png)
+
+The earlier procedural 3D proof (`prototype-avatar-materials.py`) remains a
+separate authoring experiment. Its geometry and masks are not registered in the
+application, and its success is not used as evidence for the v2 color renderer.
+
+## Release review
+
+Source and raster verification can establish consistent geometry and isolated
+color changes. They do not establish Safari behavior, touch performance or
+account persistence in a live session. Review light/deep skin, black/white and
+bright hair, and bright frames at full size and thumbnail size. The fine warm
+hairline transition is baked into the source and still needs visual approval.
+
+Before merging the Draft PR: review the rendered artwork; test registration,
+profile editing, cancel/reset, explicit save and reopen in an authorized session;
+and inspect iPhone PWA touch behavior and communication avatars. Keep production
+on main until those checks and the production release review are complete.

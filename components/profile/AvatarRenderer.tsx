@@ -4,6 +4,8 @@ import { useId } from "react";
 import { getAvatarNameMark, type AvatarConfig } from "@/lib/profile/avatar";
 import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "@/lib/profile/avatar-icon";
 import { SystemIconArtwork } from "@/components/profile/SystemIconArtwork";
+import { AvatarMaterialFilter } from "@/components/profile/AvatarMaterialFilter";
+import { getAvatarMaterialPlan } from "@/lib/profile/avatar-materials";
 import {
   AVATAR_CANVAS_SIZE,
   AVATAR_FRAME,
@@ -37,6 +39,7 @@ export function AvatarRenderer({
   const id = useId().replace(/:/g, "");
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
+  const materials = portraitLayers.map((layer) => getAvatarMaterialPlan(layer.src, avatar.materialColors));
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
   const iconLabel = AVATAR_ICON_OPTIONS.find((option) => option.value === avatar.iconType)?.label || "十字架";
   const label = avatar.displayMode === "default"
@@ -65,6 +68,10 @@ export function AvatarRenderer({
         <clipPath id={clipId}>
           <circle cx={cx} cy={cy} r={radius} />
         </clipPath>
+        {materials.map((plan, index) => plan && (
+          <AvatarMaterialFilter key={portraitLayers[index].kind} id={`avatar-material-${id}-${index}`}
+            plan={plan} {...AVATAR_PORTRAIT_BOUNDS} />
+        ))}
       </defs>
 
       {/* 1. Changeable background, entirely separate from transparent artwork. */}
@@ -75,7 +82,7 @@ export function AvatarRenderer({
         {avatar.displayMode === "default" ? (
           <SystemIconArtwork icon={avatar.iconType} tone={avatar.iconTone} x={82} y={82} size={348} />
         ) : portrait ? (
-          portraitLayers.map((layer) => (
+          portraitLayers.map((layer, index) => (
             <image
               key={layer.kind}
               href={layer.src}
@@ -83,6 +90,7 @@ export function AvatarRenderer({
               y={AVATAR_PORTRAIT_BOUNDS.y}
               width={AVATAR_PORTRAIT_BOUNDS.size}
               height={AVATAR_PORTRAIT_BOUNDS.size}
+              filter={materials[index] ? `url(#avatar-material-${id}-${index})` : undefined}
             />
           ))
         ) : nameMark ? (

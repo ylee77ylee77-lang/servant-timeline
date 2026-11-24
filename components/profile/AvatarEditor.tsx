@@ -2,6 +2,8 @@
 
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import { AvatarLivePreview } from "@/components/profile/AvatarControls";
+import { AvatarColorControls } from "@/components/profile/AvatarColorControls";
+import { getAvatarMaterialChannels, setAvatarMaterialColor } from "@/lib/profile/avatar-materials";
 import {
   AVATAR_CLASSIC_HAIR_TONES,
   AVATAR_GLASSES_LABELS,
@@ -49,6 +51,7 @@ export function AvatarEditor({
 }) {
   const avatar = normalizeAvatarConfig(value);
   const portraitOptions = getAvatarPortraitOptions(avatar);
+  const materialChannels = getAvatarMaterialChannels(avatar);
 
   const setStyle = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
     if (avatar.style === style) return;
@@ -60,6 +63,7 @@ export function AvatarEditor({
       displayMode: avatar.displayMode,
       iconType: avatar.iconType,
       iconTone: avatar.iconTone,
+      ...(avatar.materialColors ? { materialColors: avatar.materialColors } : {}),
     };
     onChange(getClassicHairTone(avatar) === "dark" ? selectClassicHairTone(next, "dark") : next);
   };
@@ -158,7 +162,7 @@ export function AvatarEditor({
         </>
       )}
 
-      {avatar.style !== "neutral" && !portraitOptions?.active && (
+      {avatar.style !== "neutral" && !portraitOptions?.active && !materialChannels.length && (
         <section>
           <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮色</div>
           <div className="grid grid-cols-2 gap-2">
@@ -217,6 +221,14 @@ export function AvatarEditor({
         </div>
         )}
       </section>
+
+      {materialChannels.length > 0 && (
+        <section>
+          <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">人物色彩</div>
+          <AvatarColorControls channels={materialChannels} values={avatar.materialColors ?? {}}
+            onChange={(part, color) => onChange(setAvatarMaterialColor(avatar, part, color))} />
+        </section>
+      )}
 
       <section>
         <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">背景</div>

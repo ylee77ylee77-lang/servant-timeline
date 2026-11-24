@@ -1,3 +1,5 @@
+import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
+
 export type AvatarStyle = "masculine" | "feminine" | "neutral";
 export type AvatarSkinTone = "light" | "warm" | "medium" | "deep";
 export type AvatarHair = "short" | "side" | "wave" | "bob" | "long" | "bun";
@@ -11,6 +13,7 @@ export type AvatarPet = "none" | "sheep" | "doe" | "lion" | "eagle";
 export type AvatarDisplayMode = "custom" | "default" | "name";
 export type AvatarIconType = "cross" | "bible" | "prayer" | "angel" | "palm" | "church";
 export type AvatarIconTone = "warm" | "cool" | "charcoal" | "beige" | "blue" | "lavender";
+export type AvatarMaterialColors = Partial<Record<AvatarColorPart, AvatarColorHex>>;
 
 export const AVATAR_DISPLAY_LABELS: Record<AvatarDisplayMode, string> = {
   custom: "大頭貼",
@@ -31,6 +34,8 @@ export type AvatarConfig = {
   portraitVersion?: "v2-tone" | "v3";
   /** Separate from the existing on/off flag for backwards compatibility. */
   glassesStyle?: AvatarGlassesStyle;
+  /** Only explicit color choices override source artwork; absent keeps the original. */
+  materialColors?: AvatarMaterialColors;
   accessory: AvatarAccessory;
   pet: AvatarPet;
   displayMode: AvatarDisplayMode;
@@ -104,6 +109,22 @@ export function getDefaultAvatarConfig(style: AvatarStyle = "neutral"): AvatarCo
   return { ...AVATAR_DEFAULTS[style] };
 }
 
+function normalizeMaterialColors(value: unknown): AvatarMaterialColors | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const colors: AvatarMaterialColors = {};
+  for (const part of ["hair", "skin", "frame"] as const) {
+    if (!Object.hasOwn(input, part)) continue;
+    const color = input[part];
+    if (typeof color === "string" && color.length === 7 && /^#[0-9a-f]{6}$/i.test(color)) {
+      colors[part] = color.toUpperCase() as AvatarColorHex;
+    }
+  }
+  // The picker limits skin choices to its natural-tone gamut. Persistence keeps
+  // exact RGB values: projecting through the picker again can introduce drift.
+  return Object.keys(colors).length ? colors : undefined;
+}
+
 export function normalizeAvatarConfig(value: unknown): AvatarConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return getDefaultAvatarConfig();
@@ -114,6 +135,9 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
     ? (input.style as AvatarStyle)
     : "neutral";
   const base = getDefaultAvatarConfig(style);
+  const materialColors = Object.hasOwn(input, "materialColors")
+    ? normalizeMaterialColors(input.materialColors)
+    : undefined;
 
   return {
     style,
@@ -143,6 +167,7 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
         : {}),
     ...(glassesStyles.has(input.glassesStyle as AvatarGlassesStyle)
       ? { glassesStyle: input.glassesStyle as AvatarGlassesStyle } : {}),
+    ...(materialColors ? { materialColors } : {}),
     accessory: accessories.has(input.accessory as AvatarAccessory)
       ? (input.accessory as AvatarAccessory)
       : base.accessory,
