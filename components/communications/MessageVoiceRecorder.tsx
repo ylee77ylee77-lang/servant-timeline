@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Mic, Play, Square, Trash2, X } from "lucide-react";
+import { acquireVoiceCaptureStream, stopVoiceCaptureStream } from "@/lib/voice/ios-audio-session";
 import {
   MAX_VOICE_NOTE_BYTES,
   MAX_VOICE_NOTE_SECONDS,
@@ -42,7 +43,7 @@ export function MessageVoiceRecorder({ onClose, onSend }: Props) {
       if (intervalRef.current !== null) window.clearInterval(intervalRef.current);
       const recorder = recorderRef.current;
       if (recorder?.state === "recording") recorder.stop();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopVoiceCaptureStream(streamRef.current);
     };
   }, []);
 
@@ -76,16 +77,16 @@ export function MessageVoiceRecorder({ onClose, onSend }: Props) {
 
     try {
       // Request permission as a result of the explicit recording action.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const stream = await acquireVoiceCaptureStream(() => navigator.mediaDevices.getUserMedia({ audio: true, video: false }));
       if (!mountedRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
+        stopVoiceCaptureStream(stream);
         return;
       }
       const mime = typeof MediaRecorder.isTypeSupported === "function"
         ? supportedRecordingMime(MediaRecorder.isTypeSupported.bind(MediaRecorder))
         : "";
       if (!mime) {
-        stream.getTracks().forEach((track) => track.stop());
+        stopVoiceCaptureStream(stream);
         setError("此裝置無法錄製相容的語音格式，請改用文字留言。");
         return;
       }
@@ -109,7 +110,7 @@ export function MessageVoiceRecorder({ onClose, onSend }: Props) {
       recorder.onstop = () => {
         if (intervalRef.current !== null) window.clearInterval(intervalRef.current);
         intervalRef.current = null;
-        stream.getTracks().forEach((track) => track.stop());
+        stopVoiceCaptureStream(stream);
         streamRef.current = null;
         recorderRef.current = null;
         if (!mountedRef.current || discardRef.current) return;
@@ -142,7 +143,7 @@ export function MessageVoiceRecorder({ onClose, onSend }: Props) {
         if (seconds >= MAX_VOICE_NOTE_SECONDS) stopRecording();
       }, 250);
     } catch (cause) {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopVoiceCaptureStream(streamRef.current);
       streamRef.current = null;
       setPhase("idle");
       setError(cause instanceof DOMException && cause.name === "NotAllowedError"
