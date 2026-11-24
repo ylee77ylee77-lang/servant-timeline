@@ -79,3 +79,11 @@ in [the art direction review](avatar-art-direction/README.md). They improve the
 visual reference for future authoring but do not satisfy the fixed-face layered
 contract above. They remain under docs, outside public runtime artwork, with
 no additional options exposed in the editor.
+
+## Independent material colors
+
+The approved v1 direction retains the existing five backgrounds and four
+companions. Hair and eyewear frame will support common swatches and custom
+color; skin will support natural-range adjustment. See the [material color
+contract and proof](avatar-materials.md). This is a developer-only milestone;
+no additional palette, UI controls or runtime artwork is registered yet.

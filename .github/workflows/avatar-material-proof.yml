@@ -1,0 +1,49 @@
+name: Avatar P2 material channel proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/prototype-avatar-rig.py'
+      - 'scripts/prototype-avatar-materials.py'
+      - '.github/workflows/avatar-material-proof.yml'
+      - 'docs/avatar-materials.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avatar-material-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  material-proof:
+    name: Verify isolated avatar material channels
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline proof dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1-mesa-dri
+          python -m pip install vtk==9.6.2 numpy==2.3.5 Pillow==12.3.0
+      - name: Verify independent hair, skin and frame materials
+        run: python scripts/prototype-avatar-materials.py
+      - name: Upload material comparison and metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatar-p2-material-proof
+          path: .avatar-material-proof/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

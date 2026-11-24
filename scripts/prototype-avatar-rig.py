@@ -79,7 +79,10 @@ def face_y(x,z):
     return y
 
 
-def head():
+def head(skin=SKIN):
+    # Keep geometry and lighting locked; only the skin material can change.
+    skin_rgb=np.asarray(skin,dtype=float)
+    blush_rgb=np.asarray([.94,.40,.36])*(skin_rgb/np.asarray(SKIN))
     rows=[]; colors=[]
     for t in np.linspace(.002,math.pi-.002,92):
         z=1.76+.94*math.cos(t); zn=math.cos(t); jaw=1-.24*max(0,-zn)**1.25
@@ -89,9 +92,9 @@ def head():
             if y<0: y=face_y(x,z)
             row.append((x,y,z))
             blush=math.exp(-(((abs(x)-.43)/.21)**2+((z-1.55)/.13)**2))*max(0,-math.sin(ang))*.19
-            rgb.append(np.clip((np.array(SKIN)*(1-blush)+np.array([.94,.40,.36])*blush)*255,0,255))
+            rgb.append(np.clip((skin_rgb*(1-blush)+blush_rgb*blush)*255,0,255))
         rows.append(row); colors.append(rgb)
-    return surface(rows,SKIN,True,colors)
+    return surface(rows,skin,True,colors)
 
 
 def eye_white(cx, z):
@@ -107,12 +110,19 @@ def eye_white(cx, z):
     return surface(rows,(.98,.96,.93),True),cy
 
 
-def face_body(gender):
+def face_body(gender, skin=SKIN, *, skin_actors=None):
+    """Optional material ownership output; eyes, brows, lips and clothes stay separate."""
     a=[]; female=gender=='female'; cloth=(.80,.72,.61) if female else (.30,.30,.32)
-    a.extend([ell((0,.06,.11),(1.08,.54,.70),cloth,rough=.8),ell((0,.04,.49),(.30,.30,.45),SKIN),head()])
+    def add_skin(part):
+        a.append(part)
+        if skin_actors is not None: skin_actors.append(part)
+    ear_color=tuple(np.clip(np.asarray([.78,.48,.38])*(np.asarray(skin)/np.asarray(SKIN)),0,1))
+    a.append(ell((0,.06,.11),(1.08,.54,.70),cloth,rough=.8))
+    add_skin(ell((0,.04,.49),(.30,.30,.45),skin))
+    add_skin(head(skin))
     for s in (-1,1):
-        a.append(ell((s*.765,-.015,1.64),(.14,.13,.205),SKIN,rot=s*-10))
-        a.append(ell((s*.800,-.12,1.64),(.075,.038,.125),(.78,.48,.38),rot=s*-10))
+        add_skin(ell((s*.765,-.015,1.64),(.14,.13,.205),skin,rot=s*-10))
+        add_skin(ell((s*.800,-.12,1.64),(.075,.038,.125),ear_color,rot=s*-10))
         cx=s*.290; z=1.81
         white,_=eye_white(cx,z); a.append(white)
         ey=face_y(cx,z)-.094
@@ -212,9 +222,9 @@ def hairstyles(style,color):
     return back,front
 
 
-def glasses(style):
+def glasses(style, color=(.15,.12,.105)):
     if style=='none': return []
-    a=[]; col=(.15,.12,.105)
+    a=[]; col=color
     for s in (-1,1):
         cx=s*.290; pts=[]
         for t in np.linspace(0,2*math.pi,44):
