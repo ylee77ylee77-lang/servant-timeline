@@ -92,15 +92,15 @@ begin
     ('__bg_other__',other_svc,'主二堂','09:30','其他堂次',0,true),
     ('__bg_invalid_time__',svc,'主一堂','invalid','三樓錯誤時間',0,true);
   insert into public.service_task_assignments (service_id, assignment_id, timeline_node_id)
-  select svc, lead_assignment, n from unnest(array[
+  select svc, lead_assignment, fixture.node_id from unnest(array[
     '__bg_first__','__bg_two_floor__','__bg_three_floor__','__bg_inactive__','__bg_late__','__bg_invalid_time__'
-  ]) n;
+  ]) as fixture(node_id);
   insert into public.service_task_assignments (service_id, assignment_id, timeline_node_id)
-  select svc, deputy_assignment, n from unnest(array[
+  select svc, deputy_assignment, fixture.node_id from unnest(array[
     '__bg_first__','__bg_two_floor__','__bg_three_floor__','__bg_late__'
-  ]) n;
+  ]) as fixture(node_id);
   insert into public.service_task_assignments (service_id, assignment_id, timeline_node_id)
-  select svc, volunteer_assignment, n from unnest(array['__bg_first__','__bg_own__']) n;
+  select svc, volunteer_assignment, fixture.node_id from unnest(array['__bg_first__','__bg_own__']) as fixture(node_id);
 
   -- Fictional endpoints and non-cryptographic placeholder keys: never sent.
   insert into public.background_reminder_devices (
