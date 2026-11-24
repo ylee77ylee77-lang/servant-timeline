@@ -61,7 +61,7 @@ test("voice preview reminds iPhone users to check silent mode and media volume",
   const source = readPage();
   assert.ok(source.includes("試聽前請確認媒體音量；支援的 iPhone 可嘗試在靜音模式下播報。"));
   const previewButton = source.indexOf('{isVoicePreviewing ? "試聽中" : "試聽 Zephyr / Iapetus"}');
-  const hint = source.indexOf("試聽前請確認手機未開啟靜音模式");
+  const hint = source.indexOf("試聽前請確認媒體音量；支援的 iPhone 可嘗試在靜音模式下播報。");
   const deviceTest = source.indexOf("測試手機音效（不使用雲端）");
   assert.ok(previewButton >= 0 && hint > previewButton && deviceTest > hint);
 });
