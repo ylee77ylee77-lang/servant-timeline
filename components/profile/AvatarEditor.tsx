@@ -2,6 +2,16 @@
 
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import { AvatarLivePreview } from "@/components/profile/AvatarControls";
+import { AvatarColorControls } from "@/components/profile/AvatarColorControls";
+import { getAvatarMaterialChannels, setAvatarMaterialColor } from "@/lib/profile/avatar-materials";
+import {
+  AVATAR_CLASSIC_HAIR_TONES,
+  AVATAR_GLASSES_LABELS,
+  getAvatarPortraitOptions,
+  getClassicHairTone,
+  selectAvatarPortraitVersion,
+  selectClassicHairTone,
+} from "@/lib/profile/avatar-portrait";
 import {
   AVATAR_DEFAULTS,
   normalizeAvatarConfig,
@@ -40,16 +50,22 @@ export function AvatarEditor({
   showPreview?: boolean;
 }) {
   const avatar = normalizeAvatarConfig(value);
+  const portraitOptions = getAvatarPortraitOptions(avatar);
+  const materialChannels = getAvatarMaterialChannels(avatar);
 
   const setStyle = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
-    const preset = AVATAR_DEFAULTS[style];
-    onChange({
-      ...preset,
+    if (avatar.style === style) return;
+    const next: AvatarConfig = {
+      ...AVATAR_DEFAULTS[style],
       background: avatar.background,
       pet: avatar.pet,
       glasses: avatar.glasses,
       displayMode: avatar.displayMode,
-    });
+      iconType: avatar.iconType,
+      iconTone: avatar.iconTone,
+      ...(avatar.materialColors ? { materialColors: avatar.materialColors } : {}),
+    };
+    onChange(getClassicHairTone(avatar) === "dark" ? selectClassicHairTone(next, "dark") : next);
   };
 
   return (
@@ -80,8 +96,116 @@ export function AvatarEditor({
         </div>
       </section>
 
+      {portraitOptions && (
+        <>
+          <section>
+            <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">人物造型</div>
+            <div className="grid grid-cols-2 gap-2">
+              {[false, true].map((layered) => (
+                <button
+                  key={String(layered)}
+                  type="button"
+                  aria-pressed={portraitOptions.active === layered}
+                  onClick={() => onChange(selectAvatarPortraitVersion(avatar, layered))}
+                  className={`min-h-11 rounded-2xl border px-3 py-2 text-sm font-black ${portraitOptions.active === layered ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
+                >
+                  {layered ? "多款造型" : "經典"}
+                </button>
+              ))}
+            </div>
+          </section>
+          {portraitOptions.active && (
+            <>
+              <section>
+                <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮型</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {portraitOptions.family.hairStyles.map((hair) => {
+                    const selected = portraitOptions.hair.value === hair.value;
+                    const color = hair.colors.find((item) => item.value === portraitOptions.color.value) ?? hair.colors[0];
+                    const next = { ...avatar, hair: hair.value, hairColor: color.value };
+                    return (
+                      <button
+                        key={hair.value}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => onChange(next)}
+                        className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-xs font-bold ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
+                      >
+                        <AvatarRenderer config={{ ...next, displayMode: "custom", pet: "none" }} size={56} />
+                        {hair.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+              <section>
+                <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮色</div>
+                <div className="flex flex-wrap gap-2">
+                  {portraitOptions.hair.colors.map((color) => {
+                    const selected = portraitOptions.color.value === color.value;
+                    return (
+                      <button
+                        key={color.value}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => onChange({ ...avatar, hair: portraitOptions.hair.value, hairColor: color.value })}
+                        className={`min-h-11 rounded-xl border px-3 py-2 text-sm font-bold ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
+                      >
+                        {color.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            </>
+          )}
+        </>
+      )}
+
+      {avatar.style !== "neutral" && !portraitOptions?.active && !materialChannels.length && (
+        <section>
+          <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮色</div>
+          <div className="grid grid-cols-2 gap-2">
+            {AVATAR_CLASSIC_HAIR_TONES.map((tone) => {
+              const selected = getClassicHairTone(avatar) === tone.value;
+              const next = selectClassicHairTone(avatar, tone.value);
+              return (
+                <button
+                  key={tone.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onChange(next)}
+                  className={`flex min-h-11 items-center justify-center gap-2 rounded-2xl border px-2 py-2 text-sm font-black ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
+                >
+                  <AvatarRenderer config={{ ...next, displayMode: "custom", pet: "none" }} size={44} />
+                  <span>{selected ? "✓ " : ""}{tone.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section>
         <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">眼鏡</div>
+        {portraitOptions?.active ? (
+          <div className="grid grid-cols-2 gap-2">
+            {(["none", ...portraitOptions.glassesStyles] as const).map((style) => {
+              const selected = style === "none" ? !avatar.glasses : avatar.glasses && portraitOptions.glassesStyle === style;
+              return (
+                <button
+                  key={style}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onChange(style === "none" ? { ...avatar, glasses: false } : { ...avatar, glasses: true, glassesStyle: style })}
+                  className={`min-h-11 rounded-2xl border px-3 py-2 text-sm font-black ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
+                >
+                  {style === "none" ? "無眼鏡" : AVATAR_GLASSES_LABELS[style]}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
         <div className="grid grid-cols-2 gap-2">
           {[false, true].map((value) => (
             <button
@@ -95,7 +219,16 @@ export function AvatarEditor({
             </button>
           ))}
         </div>
+        )}
       </section>
+
+      {materialChannels.length > 0 && (
+        <section>
+          <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">人物色彩</div>
+          <AvatarColorControls channels={materialChannels} values={avatar.materialColors ?? {}}
+            onChange={(part, color) => onChange(setAvatarMaterialColor(avatar, part, color))} />
+        </section>
+      )}
 
       <section>
         <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">背景</div>
@@ -141,12 +274,6 @@ export function AvatarEditor({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-[#E8D9A2] bg-[#FFF9E8] p-4">
-        <div className="text-xs font-black text-[#7A5A11]">更多 3D 特徵素材正在建立</div>
-        <p className="mt-1 text-xs font-medium leading-5 text-[#7B6A45]">
-          髮型、髮色、眼睛、配件與服裝會等同品質的 3D 素材準備完成後再開放，不使用不相容的扁平圖層。
-        </p>
-      </section>
       </div>
     </div>
   );

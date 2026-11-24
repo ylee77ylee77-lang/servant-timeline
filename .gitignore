@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/.avatar-material-rendering/
+/.avatar-material-rendering-proof/
 
 # next.js
 /.next/
