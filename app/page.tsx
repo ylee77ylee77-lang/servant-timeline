@@ -2483,30 +2483,9 @@ export default function App() {
 
   const simplifyTaskPhrase = (node: any) => {
     let phrase = String(node.title || node.details || "服事任務").trim();
-    const roleLabels = [
-      personalSettings.role,
-      node.assignee,
-      "總招",
-      "副總招",
-      "電梯專招",
-      "手扶梯專招",
-      "2樓外場專招",
-      "2樓大堂專招",
-      "3樓大堂專招",
-      "專招",
-      "牧招",
-      "聖餐助手"
-    ]
-      .filter(Boolean)
-      .map((item: string) => String(item).trim())
-      .sort((a, b) => b.length - a.length);
-
-    roleLabels.forEach((label) => {
-      if (!label) return;
-      phrase = phrase.replace(new RegExp(`^${label}[，,、\s]*`), "");
-      phrase = phrase.replace(new RegExp(`^請${label}[，,、\s]*`), "");
-    });
-
+    // Keep role words in the original task title. Stripping 「專招」 from
+    // 「專招就位」 left the ambiguous two-character phrase 「就位」, which can
+    // be misheard when synthesized. Scheduled and timeline cues share this.
     phrase = phrase
       .replace(/^請[您你]?/, "")
       .replace(/^負責/, "")
@@ -2552,12 +2531,26 @@ export default function App() {
     node: any,
     reminderType: "pre5" | "now",
     detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel,
-    leadSecondsOverride: number | null = null
+    leadSecondsOverride: number | null = null,
+    timelineKind: "current" | "next" | null = null
   ) => {
-    const customText = getCustomReminderText(node, reminderType, detailLevel);
+    // Timing-specific custom announcements still apply only when actually
+    // due; an early entry cannot claim a five-minute reminder has arrived.
+    const customText = timelineKind ? null : getCustomReminderText(node, reminderType, detailLevel);
     if (customText) return customText;
     const phrase = simplifyTaskPhrase(node);
     const detailHint = buildDetailedVoiceHint(node, detailLevel);
+
+    // First visit, manual activation and returning from another app all use
+    // the SAME reminder formatter and selected simple/standard/detailed
+    // preference. The only contextual difference is current vs upcoming;
+    // never invent a relative lead time before the scheduled due moment.
+    if (timelineKind) {
+      const prefix = timelineKind === "current" ? "目前任務" : "下一個任務";
+      const nextTime = timelineKind === "next" && detailLevel !== "simple"
+        ? formatTaskTimeForVoice(node.time) : "";
+      return `${prefix}，${nextTime ? `${nextTime}，` : ""}${phrase}。${detailHint}`;
+    }
 
     if (reminderType === "pre5") {
       // Simple mode speaks only the action; the scheduler honors the selected advance interval.
@@ -2974,10 +2967,10 @@ export default function App() {
     }
 
     if (selected) {
-      const phrase = simplifyTaskPhrase(selected.task);
-      const taskSpeech = selected.kind === "current"
-        ? `目前任務，${phrase}。`
-        : `下一個任務，${phrase}。`;
+      const taskSpeech = buildReminderSpeechText(
+        selected.task, selected.kind === "current" ? "now" : "pre5",
+        personalSettings.voiceDetailLevel, null, selected.kind
+      );
       speak(buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION), "return");
       return;
     }
@@ -3208,10 +3201,10 @@ export default function App() {
       if (isFirstCheckinEntry) speak(VOICE_STARTUP_CONFIRMATION, "return");
       return;
     }
-    const phrase = simplifyTaskPhrase(selected.task);
-    const taskSpeech = selected.kind === "current"
-      ? `目前任務，${phrase}。`
-      : `下一個任務，${phrase}。`;
+    const taskSpeech = buildReminderSpeechText(
+      selected.task, selected.kind === "current" ? "now" : "pre5",
+      personalSettings.voiceDetailLevel, null, selected.kind
+    );
     speak(isFirstCheckinEntry
       ? buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)
       : taskSpeech, "return");
