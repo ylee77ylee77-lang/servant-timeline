@@ -49,6 +49,7 @@ import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
 import {
   buildFirstCheckinTimelineSpeech,
   canRetryReturnCueAfterGesture,
+  getTaskCueDetailLevel,
   isNearFormalVoiceReminder,
   selectReturnCueTask,
   shouldQueueReturnCue,
@@ -421,6 +422,7 @@ export default function App() {
   const voiceStartupPreloadRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
   const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
+  const returnCueTriggerRef = useRef<"foreground" | "checkin" | null>(null);
   const firstCheckinTimelineCueServiceRef = useRef<string | null>(null);
   // Only the first visit after a *new successful check-in* receives the
   // activation greeting. Background-return cues stay task-only.
@@ -1072,6 +1074,7 @@ export default function App() {
     ++voiceQueueGenerationRef.current;
     stopVoiceStartupConfirmation();
     setReturnCuePendingAt(null);
+    returnCueTriggerRef.current = null;
     firstCheckinTimelineIntroServiceRef.current = null;
     setReturnCueRetryText(null);
     returnCueQueuedTextRef.current = null;
@@ -2541,10 +2544,9 @@ export default function App() {
     const phrase = simplifyTaskPhrase(node);
     const detailHint = buildDetailedVoiceHint(node, detailLevel);
 
-    // First visit, manual activation and returning from another app all use
-    // the SAME reminder formatter and selected simple/standard/detailed
-    // preference. The only contextual difference is current vs upcoming;
-    // never invent a relative lead time before the scheduled due moment.
+    // First visit, manual activation and an external-app return share this
+    // formatter. Their caller selects the configured level or the always-simple
+    // return cue; neither invents a reminder interval before its due time.
     if (timelineKind) {
       const prefix = timelineKind === "current" ? "目前任務" : "下一個任務";
       const nextTime = timelineKind === "next" && detailLevel !== "simple"
@@ -2963,6 +2965,7 @@ export default function App() {
     if (mayAnnounceTasks) {
       firstCheckinTimelineCueServiceRef.current = null;
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
     }
 
@@ -3005,6 +3008,7 @@ export default function App() {
     } else {
       stopVoiceStartupConfirmation();
       setReturnCuePendingAt(null);
+      returnCueTriggerRef.current = null;
       firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCueRetryText(null);
       returnCueQueuedTextRef.current = null;
@@ -3130,6 +3134,7 @@ export default function App() {
         // iOS may have suspended the one-second clock in the background.
         // Re-evaluate any *currently due* formal reminder immediately.
         setCurrentDate(new Date());
+        returnCueTriggerRef.current = "foreground";
         setReturnCuePendingAt(Date.now());
       }
     };
@@ -3159,6 +3164,7 @@ export default function App() {
       || (!isAdmin && checkinStatus === "not_checked_in") || !isServiceType(currentService)
       || (!isAdmin && isCurrentServiceVoiceClosed()) || !showLiveTimeline) {
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
@@ -3168,9 +3174,12 @@ export default function App() {
     if (isLoading) return;
     if (voiceAudioContextRef.current && voiceAudioContextRef.current.state !== "running") return;
     if (filteredNodes.length === 0) {
+      const isFirstEntry = returnCueTriggerRef.current === "checkin"
+        && firstCheckinTimelineIntroServiceRef.current === currentService;
+      returnCueTriggerRef.current = null;
+      firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCuePendingAt(null);
-      if (firstCheckinTimelineIntroServiceRef.current === currentService) {
-        firstCheckinTimelineIntroServiceRef.current = null;
+      if (isFirstEntry) {
         // Confirm activation without pretending there is a scheduled task.
         speak(VOICE_STARTUP_CONFIRMATION, "return");
       }
@@ -3188,13 +3197,17 @@ export default function App() {
     )) {
       // An imminent formal announcement takes priority over the check-in cue.
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
 
     const selected = selectReturnCueTask(filteredNodes, now);
+    const trigger = returnCueTriggerRef.current;
+    returnCueTriggerRef.current = null;
     setReturnCuePendingAt(null);
-    const isFirstCheckinEntry = firstCheckinTimelineIntroServiceRef.current === currentService;
+    const isFirstCheckinEntry = trigger === "checkin"
+      && firstCheckinTimelineIntroServiceRef.current === currentService;
     firstCheckinTimelineIntroServiceRef.current = null;
     if (!selected) {
       // An empty/currently-expired timeline has no real task to announce.
@@ -3203,7 +3216,7 @@ export default function App() {
     }
     const taskSpeech = buildReminderSpeechText(
       selected.task, selected.kind === "current" ? "now" : "pre5",
-      personalSettings.voiceDetailLevel, null, selected.kind
+      getTaskCueDetailLevel(trigger, personalSettings.voiceDetailLevel), null, selected.kind
     );
     speak(isFirstCheckinEntry
       ? buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)
@@ -3214,7 +3227,7 @@ export default function App() {
     personalSettings.role, personalSettings.name,
     personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
     personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
-    personalSettings.reminderLeadSeconds
+    personalSettings.reminderLeadSeconds, personalSettings.voiceDetailLevel
   ]);
 
   // One brief announcement on the first timeline visit after a verified
@@ -3234,6 +3247,7 @@ export default function App() {
       && !returnCueQueuedTextRef.current && !voiceProcessingRef.current
       && voiceQueueRef.current.length === 0) {
       firstCheckinTimelineIntroServiceRef.current = service;
+      returnCueTriggerRef.current = "checkin";
       setReturnCuePendingAt(Date.now());
     }
   }, [
