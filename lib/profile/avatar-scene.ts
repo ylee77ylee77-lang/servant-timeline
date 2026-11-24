@@ -1,5 +1,7 @@
 import { normalizeAvatarConfig, type AvatarConfig, type AvatarPet } from "./avatar.ts";
 import { AVATAR_ICON_TONES } from "./avatar-icon.ts";
+import { AVATAR_ART_DIR, getAvatarPortraitPlan } from "./avatar-portrait.ts";
+export { AVATAR_ART_DIR, AVATAR_PORTRAITS } from "./avatar-portrait.ts";
 
 /**
  * Stable, versioned full-canvas artwork contract.
@@ -21,19 +23,6 @@ export const AVATAR_LAYER_ORDER = [
   "companion-behind-frame",
   "white-frame",
 ] as const;
-
-export const AVATAR_ART_DIR = "/avatar/scenes/v2";
-
-export const AVATAR_PORTRAITS = {
-  masculine: {
-    plain: `${AVATAR_ART_DIR}/male.webp`,
-    glasses: `${AVATAR_ART_DIR}/male-glasses.webp`,
-  },
-  feminine: {
-    plain: `${AVATAR_ART_DIR}/female.webp`,
-    glasses: `${AVATAR_ART_DIR}/female-glasses.webp`,
-  },
-} as const;
 
 export type CompanionKind = Exclude<AvatarPet, "none">;
 
@@ -72,12 +61,12 @@ export function getAvatarScene(input: unknown) {
   const avatar = normalizeAvatarConfig(input);
   // Neutral means the user has not selected a base portrait.
   const custom = avatar.displayMode === "custom";
-  const base = custom && avatar.style !== "neutral" ? avatar.style : null;
-  const portraits = base ? AVATAR_PORTRAITS[base] : null;
+  const { portrait, layers: portraitLayers } = getAvatarPortraitPlan(avatar);
   const companion = custom && avatar.pet !== "none" ? AVATAR_COMPANIONS[avatar.pet] : null;
   return {
     avatar,
-    portrait: portraits ? (avatar.glasses ? portraits.glasses : portraits.plain) : null,
+    portrait,
+    portraitLayers,
     companion,
     gradient: avatar.displayMode === "default"
       ? AVATAR_ICON_TONES[avatar.iconTone].gradient

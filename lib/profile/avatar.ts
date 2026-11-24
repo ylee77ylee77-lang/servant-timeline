@@ -2,6 +2,7 @@ export type AvatarStyle = "masculine" | "feminine" | "neutral";
 export type AvatarSkinTone = "light" | "warm" | "medium" | "deep";
 export type AvatarHair = "short" | "side" | "wave" | "bob" | "long" | "bun";
 export type AvatarHairColor = "dark" | "brown" | "auburn" | "gray" | "blonde";
+export type AvatarGlassesStyle = "classic" | "round" | "square";
 export type AvatarOutfit = "shirt" | "polo" | "knit" | "jacket";
 export type AvatarBackground = "lavender" | "peach" | "mint" | "sky" | "sand";
 export type AvatarEyeStyle = "soft" | "bright" | "smile";
@@ -26,6 +27,10 @@ export type AvatarConfig = {
   background: AvatarBackground;
   eyeStyle: AvatarEyeStyle;
   glasses: boolean;
+  /** Optional, explicit opt-in; absent means the original v2 portrait. */
+  portraitVersion?: "v3";
+  /** Separate from the existing on/off flag for backwards compatibility. */
+  glassesStyle?: AvatarGlassesStyle;
   accessory: AvatarAccessory;
   pet: AvatarPet;
   displayMode: AvatarDisplayMode;
@@ -88,6 +93,7 @@ const hairColors = new Set<AvatarHairColor>(["dark", "brown", "auburn", "gray", 
 const outfits = new Set<AvatarOutfit>(["shirt", "polo", "knit", "jacket"]);
 const backgrounds = new Set<AvatarBackground>(["lavender", "peach", "mint", "sky", "sand"]);
 const eyeStyles = new Set<AvatarEyeStyle>(["soft", "bright", "smile"]);
+const glassesStyles = new Set<AvatarGlassesStyle>(["classic", "round", "square"]);
 const accessories = new Set<AvatarAccessory>(["none", "earrings", "hairclip", "cap"]);
 const pets = new Set<AvatarPet>(["none", "sheep", "doe", "lion", "eagle"]);
 const displayModes = new Set<AvatarDisplayMode>(["custom", "default", "name"]);
@@ -130,6 +136,9 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
       ? (input.eyeStyle as AvatarEyeStyle)
       : base.eyeStyle,
     glasses: input.glasses === true,
+    ...(style !== "neutral" && input.portraitVersion === "v3" ? { portraitVersion: "v3" as const } : {}),
+    ...(glassesStyles.has(input.glassesStyle as AvatarGlassesStyle)
+      ? { glassesStyle: input.glassesStyle as AvatarGlassesStyle } : {}),
     accessory: accessories.has(input.accessory as AvatarAccessory)
       ? (input.accessory as AvatarAccessory)
       : base.accessory,

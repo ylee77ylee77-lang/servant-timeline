@@ -32,7 +32,7 @@ export function AvatarRenderer({
   className?: string;
   displayName?: string | null;
 }) {
-  const { avatar, portrait, companion, gradient } = getAvatarScene(config);
+  const { avatar, portrait, portraitLayers, companion, gradient } = getAvatarScene(config);
   const nameMark = avatar.displayMode === "name" ? getAvatarNameMark(displayName) : "";
   const id = useId().replace(/:/g, "");
   const clipId = `avatar-circle-${id}`;
@@ -75,13 +75,16 @@ export function AvatarRenderer({
         {avatar.displayMode === "default" ? (
           <SystemIconArtwork icon={avatar.iconType} tone={avatar.iconTone} x={82} y={82} size={348} />
         ) : portrait ? (
-          <image
-            href={portrait}
-            x={AVATAR_PORTRAIT_BOUNDS.x}
-            y={AVATAR_PORTRAIT_BOUNDS.y}
-            width={AVATAR_PORTRAIT_BOUNDS.size}
-            height={AVATAR_PORTRAIT_BOUNDS.size}
-          />
+          portraitLayers.map((layer) => (
+            <image
+              key={layer.kind}
+              href={layer.src}
+              x={AVATAR_PORTRAIT_BOUNDS.x}
+              y={AVATAR_PORTRAIT_BOUNDS.y}
+              width={AVATAR_PORTRAIT_BOUNDS.size}
+              height={AVATAR_PORTRAIT_BOUNDS.size}
+            />
+          ))
         ) : nameMark ? (
           <text
             x={cx}
