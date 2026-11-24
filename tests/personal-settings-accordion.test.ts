@@ -78,3 +78,33 @@ test("personal settings retain local persistence and the avatar save API", () =>
   assert.match(avatar, /<AvatarEditor/);
   assert.match(avatar, /fetch\("\/api\/profile\/avatar"/);
 });
+
+
+test("vibration preference offers a direct native iOS switch tap without simulated clicks", () => {
+  const ui = read("components/profile/PersonalPreferencesCards.tsx");
+  const page = read("app/page.tsx");
+
+  assert.match(ui, /nativeHaptics\?: boolean/);
+  assert.match(ui, /<input\s+type="checkbox"\s+\{\.\.\.\{ switch: "" \}\}/);
+  assert.match(ui, /onChange=\{\(event\) => \{/);
+  assert.match(ui, /event\.currentTarget\.checked/);
+  assert.match(ui, /navigator\.vibrate\(150\)/);
+  assert.match(ui, /label="震動提醒"\s+nativeHaptics\s+checked=\{settings\.vibrationReminderEnabled\}/);
+  assert.match(ui, /onToggle=\{\(\) => onChange\(\{ vibrationReminderEnabled: !settings\.vibrationReminderEnabled \}\)\}/);
+  assert.match(ui, /checked=\{checked\}/);
+  assert.doesNotMatch(ui, /document\.createElement|\.click\(\);|dispatchEvent\(/);
+
+  // The original actual task-block vibration and the saved settings remain unchanged.
+  assert.match(page, /if \(!personalSettings\.vibrationReminderEnabled\) return;/);
+  assert.match(page, /triggerVibration\(getTaskBlockVibrationPattern\(currentNode\)\)/);
+  assert.match(page, /window\.localStorage\.setItem\(PERSONAL_REMINDER_STORAGE_KEY, JSON\.stringify\(personalSettings\)\)/);
+});
+
+test("iOS switch feedback is not represented as background task vibration", () => {
+  const ui = read("components/profile/PersonalPreferencesCards.tsx");
+  assert.match(ui, /vibrationCapability === "ios-switch"/);
+  assert.match(ui, /任務到點自動震動需使用系統通知或原生 App/);
+  assert.match(ui, /此瀏覽器不支援任務到點的網頁震動/);
+  assert.match(ui, /typeof navigator\.vibrate === "function"/);
+  assert.doesNotMatch(ui, /setInterval\(|setTimeout\(/);
+});

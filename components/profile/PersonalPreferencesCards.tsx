@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { AudioLines, Bell, ChevronDown, ChevronUp } from "lucide-react";
 import { SettingsAccordionCard, type SettingsPanel } from "@/components/profile/SettingsAccordionCard";
 import { MAX_REMINDER_LEAD_MINUTES, formatReminderLeadLabel, normalizeReminderLeadTime, stepReminderLeadTime } from "@/lib/voice/reminder-timing";
@@ -41,6 +41,17 @@ const DETAIL_OPTIONS = [
 
 const cardIconClass = "flex h-[52px] w-[52px] items-center justify-center rounded-full bg-[#F3EEFF] text-[#6D55A3]";
 
+type VibrationCapability = "web" | "ios-switch" | "none" | null;
+
+const subscribeToDeviceCapability = () => () => {};
+const serverVibrationCapability = (): VibrationCapability => null;
+const getVibrationCapability = (): VibrationCapability => {
+  if (typeof navigator === "undefined") return null;
+  const isAppleTouchDevice = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return typeof navigator.vibrate === "function" ? "web" : isAppleTouchDevice ? "ios-switch" : "none";
+};
+
 
 type PreferenceSwitchProps = {
   label: string;
@@ -48,10 +59,43 @@ type PreferenceSwitchProps = {
   controls?: string;
   checked: boolean;
   onToggle: () => void;
+  nativeHaptics?: boolean;
 };
 
-/** A single switch controls both the reminder and its nested options. */
-function PreferenceSwitch({ label, description, controls, checked, onToggle }: PreferenceSwitchProps) {
+/** Preserve the existing switch visuals; direct native touch provides iOS haptic feedback. */
+function PreferenceSwitch({ label, description, controls, checked, onToggle, nativeHaptics = false }: PreferenceSwitchProps) {
+  if (nativeHaptics) {
+    return (
+      <label className="relative inline-flex h-11 w-12 shrink-0 cursor-pointer items-center rounded-xl focus-within:outline-none focus-within:ring-2 focus-within:ring-[#6D55A3] focus-within:ring-offset-2">
+        <input
+          type="checkbox"
+          {...{ switch: "" }}
+          checked={checked}
+          aria-label={label}
+          onChange={(event) => {
+            // iOS 26.5+ requires a direct tap on the real switch; scripted .click() no longer vibrates.
+            // Other browsers keep their normal Web Vibration API activation preview.
+            if (event.currentTarget.checked && typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+              try {
+                navigator.vibrate(150);
+              } catch {
+                // Lack of vibration hardware should never block saving the preference.
+              }
+            }
+            onToggle();
+          }}
+          className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+        />
+        <span
+          aria-hidden="true"
+          className={"inline-flex h-7 w-12 shrink-0 items-center rounded-full p-1 transition-colors " + (checked ? "bg-[#6D55A3]" : "bg-[#E6EAF0]")}
+        >
+          <span className={"block h-5 w-5 rounded-full bg-white shadow-sm transition-transform " + (checked ? "translate-x-5" : "translate-x-0")} />
+        </span>
+      </label>
+    );
+  }
+
   return (
     <button
       type="button"
@@ -94,6 +138,9 @@ export function PersonalPreferencesCards({
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
   const lead = normalizeReminderLeadTime(settings.reminderLeadMinutes, settings.reminderLeadSeconds);
   const [contentExpanded, setContentExpanded] = useState(false);
+  const vibrationCapability = useSyncExternalStore(
+    subscribeToDeviceCapability, getVibrationCapability, serverVibrationCapability
+  );
   const adjustLead = (unit: "minutes" | "seconds", direction: -1 | 1) => {
     const next = stepReminderLeadTime(lead.minutes, lead.seconds, unit, direction);
     onChange({ reminderLeadMinutes: next.minutes, reminderLeadSeconds: next.seconds });
@@ -160,10 +207,17 @@ export function PersonalPreferencesCards({
           <div className="flex min-h-14 items-center justify-between gap-3 rounded-2xl border border-[#E6EAF0] bg-white p-3.5">
             <span className="min-w-0">
               <span className="block text-sm font-black text-[#1F2937]">震動提醒</span>
-              <span className="mt-0.5 block text-[11px] font-medium leading-4 text-[#7B7B74]">進入下一個任務區塊時震動提醒。</span>
+              <span className="mt-0.5 block text-[11px] font-medium leading-4 text-[#7B7B74]">
+                {vibrationCapability === "ios-switch"
+                  ? "iPhone 點選開關可有觸覺回饋；任務到點自動震動需使用系統通知或原生 App。"
+                  : vibrationCapability === "none"
+                    ? "此瀏覽器不支援任務到點的網頁震動。"
+                    : "進入下一個任務區塊時震動提醒。"}
+              </span>
             </span>
             <PreferenceSwitch
               label="震動提醒"
+              nativeHaptics
               checked={settings.vibrationReminderEnabled}
               onToggle={() => onChange({ vibrationReminderEnabled: !settings.vibrationReminderEnabled })}
             />
