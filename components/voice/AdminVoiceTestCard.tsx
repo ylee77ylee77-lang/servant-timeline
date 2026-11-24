@@ -11,6 +11,7 @@ import {
   type AdminVoiceTestPlan,
 } from "@/lib/voice/admin-test-plan";
 import { formatReminderLeadLabel } from "@/lib/voice/reminder-timing";
+import { beginVoicePlayback } from "@/lib/voice/ios-audio-session";
 
 type VoiceDetailLevel = "simple" | "standard" | "detailed";
 type VoiceProfile = "zephyr" | "iapetus";
@@ -56,6 +57,7 @@ export function AdminVoiceTestCard({
   const abortRef = useRef<AbortController | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const playbackReleaseRef = useRef<(() => void) | null>(null);
   const finishPlaybackRef = useRef<(() => void) | null>(null);
   const queuedRef = useRef<AdminVoiceTestCue[]>([]);
   const isPlayingRef = useRef(false);
@@ -70,6 +72,8 @@ export function AdminVoiceTestCard({
     queuedRef.current = [];
     scheduledRef.current = { advance: false, ontime: false };
     isPlayingRef.current = false;
+    playbackReleaseRef.current?.();
+    playbackReleaseRef.current = null;
     if (activeSourceRef.current) {
       const source = activeSourceRef.current;
       activeSourceRef.current = null;
@@ -115,10 +119,18 @@ export function AdminVoiceTestCard({
       const WindowAudioContext = window.AudioContext
         || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!WindowAudioContext) throw new Error("此裝置不支援語音播放器。");
-      const context = audioContextRef.current || new WindowAudioContext();
-      audioContextRef.current = context;
-      // iOS audio must be unlocked directly by this user gesture.
-      if (context.state !== "running") await context.resume();
+      const releasePreparation = beginVoicePlayback();
+      playbackReleaseRef.current = releasePreparation;
+      let context: AudioContext;
+      try {
+        context = audioContextRef.current || new WindowAudioContext();
+        audioContextRef.current = context;
+        // iOS audio must be unlocked directly by this user gesture.
+        if (context.state !== "running") await context.resume();
+      } finally {
+        releasePreparation();
+        if (playbackReleaseRef.current === releasePreparation) playbackReleaseRef.current = null;
+      }
       if (run !== runRef.current) return;
       if (context.state !== "running") throw new Error("手機未允許播放音訊。");
 
@@ -196,10 +208,14 @@ export function AdminVoiceTestCard({
             if (!prepared) throw new Error("此提醒沒有可用的預載音檔。");
             const buffer = await prepared;
             if (run !== runRef.current || prefetchController.signal.aborted) return;
-            if (context.state !== "running") await context.resume();
-            if (context.state !== "running") throw new Error("裝置阻擋了自動播放。");
+            const releasePlayback = beginVoicePlayback();
+            playbackReleaseRef.current = releasePlayback;
+            try {
+              if (context.state !== "running") await context.resume();
+              if (run !== runRef.current || prefetchController.signal.aborted) return;
+              if (context.state !== "running") throw new Error("裝置阻擋了自動播放。");
 
-            await new Promise<void>((resolve, reject) => {
+              await new Promise<void>((resolve, reject) => {
               const source = context.createBufferSource();
               source.buffer = buffer;
               source.connect(context.destination);
@@ -225,7 +241,11 @@ export function AdminVoiceTestCard({
                 if (activeSourceRef.current === source) activeSourceRef.current = null;
                 reject(error);
               }
-            });
+              });
+            } finally {
+              releasePlayback();
+              if (playbackReleaseRef.current === releasePlayback) playbackReleaseRef.current = null;
+            }
             if (run !== runRef.current) return;
             setEvents((previous) => previous.map((item) =>
               item.cue === cue ? { ...item, playbackEndedAt: Date.now() } : item

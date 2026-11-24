@@ -22,6 +22,9 @@ declare
   disabled_device uuid := gen_random_uuid();
   expired_device uuid := gen_random_uuid();
   wrong_binding uuid := gen_random_uuid();
+  -- The existing check-in trigger requires the real current Taipei date.
+  -- Seed on that date, then simulate a Sunday inside this rollback-only test.
+  today date := (current_timestamp at time zone 'Asia/Taipei')::date;
   day date := date '2030-01-06';
   opted timestamptz := '2030-01-06 08:00:00+08';
   due timestamptz := '2030-01-06 09:30:05+08';
@@ -59,16 +62,25 @@ begin
     on conflict do nothing;
 
   insert into public.worship_services (id, service_date, service_type, starts_at, status) values
-    (svc, day, '主一堂', '2030-01-06 09:00:00+08', 'published'),
-    (other_svc, day, '主二堂', '2030-01-06 11:00:00+08', 'published');
+    (svc, today, '__bg_fixture_first__', (today + time '09:00') at time zone 'Asia/Taipei', 'published'),
+    (other_svc, today, '__bg_fixture_second__', (today + time '11:00') at time zone 'Asia/Taipei', 'published');
   insert into public.service_assignments (id, service_id, user_id, role_label) values
     (lead_assignment,svc,lead_user,'總招'),
     (deputy_assignment,svc,deputy_user,'副總招'),
     (volunteer_assignment,svc,volunteer_user,'專招');
   insert into public.service_check_ins (id, service_id, user_id, assignment_id, checked_in_at) values
-    (lead_check,svc,lead_user,lead_assignment,opted),
-    (deputy_check,svc,deputy_user,deputy_assignment,opted),
-    (volunteer_check,svc,volunteer_user,volunteer_assignment,opted);
+    (lead_check,svc,lead_user,lead_assignment,(today + time '08:00') at time zone 'Asia/Taipei'),
+    (deputy_check,svc,deputy_user,deputy_assignment,(today + time '08:00') at time zone 'Asia/Taipei'),
+    (volunteer_check,svc,volunteer_user,volunteer_assignment,(today + time '08:00') at time zone 'Asia/Taipei');
+
+  -- Preserve all real insert-time authorization checks. Retimestamp only our
+  -- own isolated fixtures afterwards so the planner can use a fixed Sunday.
+  update public.worship_services set service_date = day, service_type = '主一堂',
+    starts_at = (day + time '09:00') at time zone 'Asia/Taipei' where id = svc;
+  update public.worship_services set service_date = day, service_type = '主二堂',
+    starts_at = (day + time '11:00') at time zone 'Asia/Taipei' where id = other_svc;
+  update public.service_check_ins set checked_in_at = opted
+    where id in (lead_check, deputy_check, volunteer_check);
 
   insert into public.timeline_nodes (id, service_id, service_type, time, title, sort_order, is_active) values
     ('__bg_first__',svc,'主一堂','08:30','三樓集合',0,true),
@@ -137,12 +149,14 @@ begin
   select id into event_id from public.background_task_reminder_deliveries where device_id = lead_device;
   select id into cancel_event from public.background_task_reminder_deliveries where device_id = second_device;
   select id into deputy_event from public.background_task_reminder_deliveries where device_id = deputy_device;
-  if (select count(*) from public.take_background_task_reminder(event_id,due)) <> 1
-    or exists(select 1 from public.take_background_task_reminder(event_id,due))
+  select count(*) into n from public.take_background_task_reminder(event_id,due);
+  if n <> 1 then raise exception 'First consumption must take exactly one event'; end if;
+  if exists(select 1 from public.take_background_task_reminder(event_id,due))
     then raise exception 'Claim may be consumed only once'; end if;
 
   if not public.finish_background_task_reminder(event_id,'accepted',201,due)
-    or public.finish_background_task_reminder(event_id,'accepted',201,due)
+    then raise exception 'First completion must finalize the delivery'; end if;
+  if public.finish_background_task_reminder(event_id,'accepted',201,due)
     then raise exception 'Final state may be recorded only once'; end if;
 
   -- Revalidate just before dispatch: changing a check-in or preference after
@@ -150,9 +164,16 @@ begin
   update public.background_reminder_devices set enabled = false where id = second_device;
   if exists(select 1 from public.take_background_task_reminder(cancel_event,due))
     then raise exception 'Disabled device must never be taken'; end if;
+  -- An invalidated old check-in must no longer authorize a claimed event,
+  -- including the cancellation performed by the existing correction RPC.
   update public.service_check_ins set status = 'cancelled' where id = deputy_check;
   if exists(select 1 from public.take_background_task_reminder(deputy_event,due))
     then raise exception 'Cancelled check-in must never be taken'; end if;
+  -- Even a matching check-in cannot authorize a now-cancelled assignment.
+  update public.service_assignments set status = 'cancelled' where id = volunteer_assignment;
+  if exists(select 1 from public.background_reminder_candidates(due) c where c.device_id = volunteer_device)
+    then raise exception 'Cancelled assignment must not receive a reminder'; end if;
+  update public.service_assignments set status = 'scheduled' where id = volunteer_assignment;
   update public.profiles set is_active = false where id = volunteer_user;
   if exists(select 1 from public.background_reminder_candidates(due) c where c.device_id = volunteer_device)
     then raise exception 'Inactive account must not receive a reminder'; end if;

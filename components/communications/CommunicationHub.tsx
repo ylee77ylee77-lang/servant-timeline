@@ -21,6 +21,7 @@ import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 import { createRingtoneWav } from "@/lib/communications/ringtone-wave";
+import { acquireVoiceCaptureStream, stopVoiceCaptureStream } from "@/lib/voice/ios-audio-session";
 import { createConversationCache } from "@/lib/communications/conversation-cache";
 import { getChatKeyboardBounds, type ChatKeyboardBounds } from "@/lib/communications/chat-viewport";
 import { MessageVoiceRecorder } from "@/components/communications/MessageVoiceRecorder";
@@ -365,10 +366,10 @@ export function CommunicationHub() {
       throw new Error("此瀏覽器不支援麥克風，無法使用語音通話。");
     }
     try {
-      return await navigator.mediaDevices.getUserMedia({
+      return await acquireVoiceCaptureStream(() => navigator.mediaDevices.getUserMedia({
         audio: true,
         video: false,
-      });
+      }));
     } catch (error) {
       if (error instanceof DOMException && error.name === "NotAllowedError") {
         throw new Error("請在瀏覽器中允許此網站使用麥克風，才能進行語音通話。");
@@ -687,7 +688,7 @@ export function CommunicationHub() {
     }
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    stopVoiceCaptureStream(localStreamRef.current);
     localStreamRef.current = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     pendingIceRef.current = [];
@@ -1205,7 +1206,7 @@ export function CommunicationHub() {
       await setupPeerConnection(call, true, stream, iceServersPromise);
       stream = null;
     } catch (error) {
-      stream?.getTracks().forEach((track) => track.stop());
+      stopVoiceCaptureStream(stream);
       if (createdCallId) {
         void requestJson("/api/communications/calls", {
           method: "POST",
@@ -1240,7 +1241,7 @@ export function CommunicationHub() {
       await setupPeerConnection(data.call as CallRow, false, stream, iceServersPromise);
       stream = null;
     } catch (error) {
-      stream?.getTracks().forEach((track) => track.stop());
+      stopVoiceCaptureStream(stream);
       cleanupPeerConnection();
       setErrorMessage(error instanceof Error ? error.message : "無法接聽通話。");
       void loadActiveCalls();
