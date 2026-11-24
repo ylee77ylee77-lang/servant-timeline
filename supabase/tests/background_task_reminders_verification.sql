@@ -1,0 +1,167 @@
+-- All rows and the staged schema exist only in this isolated transaction.
+begin;
+\ir ../staged/background_task_reminders.sql
+
+do $$
+declare
+  lead_user uuid := gen_random_uuid();
+  deputy_user uuid := gen_random_uuid();
+  volunteer_user uuid := gen_random_uuid();
+  svc uuid := gen_random_uuid();
+  other_svc uuid := gen_random_uuid();
+  lead_assignment uuid := gen_random_uuid();
+  deputy_assignment uuid := gen_random_uuid();
+  volunteer_assignment uuid := gen_random_uuid();
+  lead_check uuid := gen_random_uuid();
+  deputy_check uuid := gen_random_uuid();
+  volunteer_check uuid := gen_random_uuid();
+  lead_device uuid := gen_random_uuid();
+  second_device uuid := gen_random_uuid();
+  deputy_device uuid := gen_random_uuid();
+  volunteer_device uuid := gen_random_uuid();
+  disabled_device uuid := gen_random_uuid();
+  expired_device uuid := gen_random_uuid();
+  wrong_binding uuid := gen_random_uuid();
+  day date := date '2030-01-06';
+  opted timestamptz := '2030-01-06 08:00:00+08';
+  due timestamptz := '2030-01-06 09:30:05+08';
+  event_id uuid;
+  cancel_event uuid;
+  deputy_event uuid;
+  n integer;
+begin
+  if extract(dow from day) <> 0 then raise exception 'Fixture date must be Sunday'; end if;
+  if has_table_privilege('authenticated', 'public.background_reminder_devices', 'select')
+     or has_table_privilege('authenticated', 'public.background_reminder_devices', 'insert')
+     or has_table_privilege('anon', 'public.background_reminder_devices', 'select')
+     or has_table_privilege('authenticated', 'public.background_task_reminder_deliveries', 'select')
+     or has_function_privilege('authenticated', 'public.background_reminder_candidates(timestamptz)', 'execute')
+     or has_function_privilege('anon', 'public.claim_background_task_reminders(timestamptz, integer)', 'execute')
+     or has_function_privilege('authenticated', 'public.take_background_task_reminder(uuid, timestamptz)', 'execute')
+     or has_function_privilege('authenticated', 'public.finish_background_task_reminder(uuid, text, integer, timestamptz)', 'execute')
+     or not has_function_privilege('service_role', 'public.claim_background_task_reminders(timestamptz, integer)', 'execute')
+     or not has_function_privilege('service_role', 'public.take_background_task_reminder(uuid, timestamptz)', 'execute')
+  then raise exception 'Reminder tables and dispatch functions must be server-only'; end if;
+
+  if exists (
+    select 1 from pg_class c join pg_namespace s on s.oid = c.relnamespace
+    where s.nspname = 'public' and c.relname in ('background_reminder_devices','background_task_reminder_deliveries')
+    and not c.relrowsecurity
+  ) then raise exception 'Both reminder tables must enable RLS'; end if;
+
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (lead_user, 'bg-lead-' || lead_user::text || '@example.invalid', '{"display_name":"Test Lead"}'),
+    (deputy_user, 'bg-deputy-' || deputy_user::text || '@example.invalid', '{"display_name":"Test Deputy"}'),
+    (volunteer_user, 'bg-volunteer-' || volunteer_user::text || '@example.invalid', '{"display_name":"Test Volunteer"}');
+  update public.profiles set is_active = true where id in (lead_user, deputy_user, volunteer_user);
+  insert into public.user_roles (user_id, role) values
+    (lead_user,'coordinator'), (deputy_user,'coordinator'), (volunteer_user,'volunteer')
+    on conflict do nothing;
+
+  insert into public.worship_services (id, service_date, service_type, starts_at, status) values
+    (svc, day, '主一堂', '2030-01-06 09:00:00+08', 'published'),
+    (other_svc, day, '主二堂', '2030-01-06 11:00:00+08', 'published');
+  insert into public.service_assignments (id, service_id, user_id, role_label) values
+    (lead_assignment,svc,lead_user,'總招'),
+    (deputy_assignment,svc,deputy_user,'副總招'),
+    (volunteer_assignment,svc,volunteer_user,'專招');
+  insert into public.service_check_ins (id, service_id, user_id, assignment_id, checked_in_at) values
+    (lead_check,svc,lead_user,lead_assignment,opted),
+    (deputy_check,svc,deputy_user,deputy_assignment,opted),
+    (volunteer_check,svc,volunteer_user,volunteer_assignment,opted);
+
+  insert into public.timeline_nodes (id, service_id, service_type, time, title, sort_order, is_active) values
+    ('__bg_first__',svc,'主一堂','08:30','三樓集合',0,true),
+    ('__bg_two_floor__',svc,'主一堂','09:30','二樓就位',100,true),
+    ('__bg_three_floor__',svc,'主一堂','09:30','三樓就位',1,true),
+    ('__bg_own__',svc,'主一堂','09:30','專招任務',2,true),
+    ('__bg_inactive__',svc,'主一堂','09:30','三樓停用任務',1000,false),
+    ('__bg_late__',svc,'主一堂','10:45','三樓散場',0,true),
+    ('__bg_other__',other_svc,'主二堂','09:30','其他堂次',0,true),
+    ('__bg_invalid_time__',svc,'主一堂','invalid','三樓錯誤時間',0,true);
+  insert into public.service_task_assignments (service_id, assignment_id, timeline_node_id)
+  select svc, lead_assignment, n from unnest(array[
+    '__bg_first__','__bg_two_floor__','__bg_three_floor__','__bg_inactive__','__bg_late__','__bg_invalid_time__'
+  ]) n;
+  insert into public.service_task_assignments (service_id, assignment_id, timeline_node_id)
+  select svc, deputy_assignment, n from unnest(array[
+    '__bg_first__','__bg_two_floor__','__bg_three_floor__','__bg_late__'
+  ]) n;
+  insert into public.service_task_assignments (service_id, assignment_id, timeline_node_id)
+  select svc, volunteer_assignment, n from unnest(array['__bg_first__','__bg_own__']) n;
+
+  -- Fictional endpoints and non-cryptographic placeholder keys: never sent.
+  insert into public.background_reminder_devices (
+    id, user_id, check_in_id, service_id, assignment_id, endpoint, p256dh, auth_secret,
+    enabled, opted_in_at, expires_at
+  )
+  select fixture.id, fixture.user_id, fixture.check_in_id, svc, fixture.assignment_id,
+    'https://web.push.apple.com/test-' || fixture.id::text, repeat('A',87), repeat('B',22),
+    fixture.enabled, opted, fixture.expires_at
+  from (values
+    (lead_device, lead_user, lead_check, lead_assignment, true, opted + interval '4 hours'),
+    (second_device, lead_user, lead_check, lead_assignment, true, opted + interval '4 hours'),
+    (deputy_device, deputy_user, deputy_check, deputy_assignment, true, opted + interval '4 hours'),
+    (volunteer_device, volunteer_user, volunteer_check, volunteer_assignment, true, opted + interval '4 hours'),
+    (disabled_device, lead_user, lead_check, lead_assignment, false, opted + interval '4 hours'),
+    (expired_device, lead_user, lead_check, lead_assignment, true, opted + interval '1 hour'),
+    (wrong_binding, lead_user, deputy_check, lead_assignment, true, opted + interval '4 hours')
+  ) as fixture(id,user_id,check_in_id,assignment_id,enabled,expires_at);
+
+  if exists(select 1 from public.background_reminder_candidates('2030-01-06 08:30:02+08'))
+    then raise exception 'Initial task must not produce an extra block vibration'; end if;
+  if exists(select 1 from public.background_reminder_candidates('2030-01-06 09:29:59+08'))
+    then raise exception 'Do not send early'; end if;
+  if exists(select 1 from public.background_reminder_candidates('2030-01-06 09:30:21+08'))
+    then raise exception 'Do not replay stale events'; end if;
+
+  select count(*) into n from public.background_reminder_candidates(due);
+  if n <> 4 then raise exception 'Expected 4 eligible devices, got %', n; end if;
+  if not exists(select 1 from public.background_reminder_candidates(due) c
+    where c.device_id = deputy_device and c.timeline_node_id = '__bg_three_floor__')
+    or not exists(select 1 from public.background_reminder_candidates(due) c
+    where c.device_id = volunteer_device and c.timeline_node_id = '__bg_own__')
+    or not exists(select 1 from public.background_reminder_candidates(due) c
+    where c.device_id = lead_device and c.timeline_node_id = '__bg_two_floor__')
+    then raise exception 'Scope, mappings, active nodes and simultaneous block selection must be correct'; end if;
+  if exists(select 1 from public.background_reminder_candidates(due) c
+    where c.service_id <> svc or c.task_time <> '09:30' or c.service_date <> day)
+    then raise exception 'Wrong service date/time'; end if;
+
+  select count(*) into n from public.claim_background_task_reminders(due, 50);
+  if n <> 4 then raise exception 'Claim count expected 4, got %', n; end if;
+  select count(*) into n from public.claim_background_task_reminders(due, 50);
+  if n <> 4 or (select count(*) from public.background_task_reminder_deliveries) <> 4
+    then raise exception 'Repeated claim should recover the same four unstarted events'; end if;
+
+  select id into event_id from public.background_task_reminder_deliveries where device_id = lead_device;
+  select id into cancel_event from public.background_task_reminder_deliveries where device_id = second_device;
+  select id into deputy_event from public.background_task_reminder_deliveries where device_id = deputy_device;
+  if (select count(*) from public.take_background_task_reminder(event_id,due)) <> 1
+    or exists(select 1 from public.take_background_task_reminder(event_id,due))
+    then raise exception 'Claim may be consumed only once'; end if;
+
+  if not public.finish_background_task_reminder(event_id,'accepted',201,due)
+    or public.finish_background_task_reminder(event_id,'accepted',201,due)
+    then raise exception 'Final state may be recorded only once'; end if;
+
+  -- Revalidate just before dispatch: changing a check-in or preference after
+  -- a claim invalidates the pending event.
+  update public.background_reminder_devices set enabled = false where id = second_device;
+  if exists(select 1 from public.take_background_task_reminder(cancel_event,due))
+    then raise exception 'Disabled device must never be taken'; end if;
+  update public.service_check_ins set status = 'cancelled' where id = deputy_check;
+  if exists(select 1 from public.take_background_task_reminder(deputy_event,due))
+    then raise exception 'Cancelled check-in must never be taken'; end if;
+  update public.profiles set is_active = false where id = volunteer_user;
+  if exists(select 1 from public.background_reminder_candidates(due) c where c.device_id = volunteer_device)
+    then raise exception 'Inactive account must not receive a reminder'; end if;
+  if exists(select 1 from public.background_reminder_candidates('2030-01-06 10:45:01+08') c where c.device_id = lead_device)
+    then raise exception 'Lead first-service cutoff must be honored'; end if;
+  update public.worship_services set status = 'completed' where id = svc;
+  if exists(select 1 from public.background_reminder_candidates(due))
+    then raise exception 'Completed service must not generate reminders'; end if;
+end;
+$$;
+
+rollback;
