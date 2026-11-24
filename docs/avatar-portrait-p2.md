@@ -71,3 +71,11 @@ including old `hairColor: "dark"` values. The shared editor exposes two real col
 selecting the original brown clears the opt-in. Existing glasses, backgrounds, companions,
 icon display and name mode remain independent. No new hair geometry or eyewear styles are exposed.
 The empty v3 layered catalog remains gated until real compatible artwork is ready.
+
+## Visual direction review
+
+Four new full-portrait hairstyle candidates and their limitations are preserved
+in [the art direction review](avatar-art-direction/README.md). They improve the
+visual reference for future authoring but do not satisfy the fixed-face layered
+contract above. They remain under docs, outside public runtime artwork, with
+no additional options exposed in the editor.

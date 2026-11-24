@@ -49,3 +49,13 @@ The proof keeps the existing v2 artwork and avatar_config behavior intact.
 The next art pass should improve the shared face/skin, hair volumes and
 materials, clothing and soft lighting before preparing a complete reviewed
 v3 family. Do not expand the live UI with these unapproved candidates.
+
+## Subsequent visual direction pass
+
+The [2026-11-24 art review](avatar-art-direction/README.md) preserves four
+Imagegen portrait candidates based on the existing v2 characters, along with
+the exact prompts and file hashes. Their skin, clothing and hair finish is
+closer to v2 than this procedural prototype, but the generated full portraits
+still contain face and alignment drift. They are visual references only, not
+editable 3D source or interchangeable hair/eyewear layers. Neither this rig
+nor those candidates are registered in the runtime catalog.

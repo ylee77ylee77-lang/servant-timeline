@@ -1,0 +1,68 @@
+{
+  "date": "2026-11-24",
+  "time_zone": "Asia/Taipei",
+  "tool": "built-in image_gen",
+  "status": "visual direction candidates only; not approved or registered",
+  "input_commit": "b6af78d1993e0766617ffe8b76db95900575907b",
+  "transparent_background": true,
+  "source_output_preserved": true,
+  "runtime_changes": false,
+  "assets": [
+    {
+      "file": "male-short-candidate.png",
+      "input": "public/avatar/scenes/v2/male.webp",
+      "bytes": 1553401,
+      "sha256": "1fa78384fb894bae89aa9c0f1d3659a42e81b1910da4c57cb939a5e83a945f2f",
+      "prompt": "Use case: identity-preserve. Asset type: a single transparent square portrait asset for an existing church volunteer avatar app, a visual candidate awaiting review. The attached image is both the EDIT TARGET and the exact identity/style reference. Edit only the hairstyle of the male character to a neat short textured haircut: lower overall volume than the reference, natural short soft strands, subtle tapered sides, soft irregular hairline, forehead clearly visible. Keep the same warm dark-brown hair color. Do not make a shaved head or an undercut. Preserve the exact same face identity and facial landmarks, eye size and iris color, eyebrows, nose, warm smile and teeth, skin tone, ears, neck, clothing and collar/hood, pose, camera angle, head/body scale, and soft lighting of the input. Keep the high-end stylized 3D animated-feature rendering, softly scattered warm skin, smooth sophisticated shading and detailed dimensional hair strands. Keep the same front-facing centered head-and-shoulders composition on a square full canvas. Entire hair silhouette fits in the image. Genuine transparent background, clean natural antialiased alpha edges. No background, no circular rim, no text, no props, no glasses. Do not simplify into a clay doll, plastic toy, vector cartoon, hard flat shading, or a different person. This is an isolated 2D rendered preview, not a claim of an editable 3D model or independently aligned layers.",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "male-side-candidate.png",
+      "input": "public/avatar/scenes/v2/male.webp",
+      "bytes": 1625941,
+      "sha256": "88b499077e778f66a0dad38cf4cb11a7444c787e863b1ad37745ba852f1b522a",
+      "prompt": "Use case: identity-preserve. Asset type: one transparent square portrait for the existing volunteer avatar app, visual candidate only. The attached image is the EDIT TARGET and exact face identity/art-style reference. Change ONLY the male character's hairstyle to a tidy classic side-part haircut, clear part at the subject's left, short sides, a moderate-volume swept quiff with gently combed natural strands, restrained soft shape, no dramatic curls. The original hairstyle is a full wavy mop; make this side-part shape clearly distinct, yet natural. Keep warm dark-brown hair color. Preserve the original same face identity, eye size and brown irises, eyebrows, nose, warm smile and teeth, cheek contours, skin tone, clothing, pose, centered camera, original face/body scale and facial landmark placement. Retain the reference's high-end stylized 3D animated-feature finish with subtle warm skin subsurface scattering, dimensional strand detail, soft studio illumination, and detailed fabric. Genuine transparent background with clean alpha edges, square full canvas and head-and-shoulders crop. No glasses, no text, no animals, no background or border. Do not turn into a plastic toy, clay doll, flat cartoon, realistic photo or a different person. Do not claim editable 3D geometry or independently aligned artwork layers.",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "female-bob-candidate.png",
+      "input": "public/avatar/scenes/v2/female.webp",
+      "bytes": 1746990,
+      "sha256": "3925f317c14b9b65ff26870f2a3661f7e04534a8542a83b498efe4f3775d0b3d",
+      "prompt": "Use case: identity-preserve. Asset type: a single transparent square portrait asset for an existing church volunteer avatar app, a visual candidate awaiting review. The attached image is both the EDIT TARGET and the exact identity/style reference. Edit only the hairstyle of the female character to a refined chin-length side-parted bob: natural layered volume and softly curved ends tucked around the jaw, with the neck and ivory sweater visible. Keep the same warm dark-brown hair color and part direction. No bangs across the eyes. Preserve the exact same face identity and facial landmarks, eye size and iris color, eyebrows, nose, warm smile and teeth, skin tone, ears, neck, clothing and collar/hood, pose, camera angle, head/body scale, and soft lighting of the input. Keep the high-end stylized 3D animated-feature rendering, softly scattered warm skin, smooth sophisticated shading and detailed dimensional hair strands. Keep the same front-facing centered head-and-shoulders composition on a square full canvas. Entire hair silhouette fits in the image. Genuine transparent background, clean natural antialiased alpha edges. No background, no circular rim, no text, no props, no glasses. Do not simplify into a clay doll, plastic toy, vector cartoon, hard flat shading, or a different person. This is an isolated 2D rendered preview, not a claim of an editable 3D model or independently aligned layers.",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_range": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "female-bun-candidate.png",
+      "input": "public/avatar/scenes/v2/female.webp",
+      "bytes": 1408469,
+      "sha256": "c93694b8051dce71d1d099dbdd56cacf11f4160e8de632271934cd04bbaf0a35",
+      "prompt": "Use case: identity-preserve. Asset type: one transparent square portrait for the existing volunteer avatar app, visual candidate only. The attached image is the EDIT TARGET and exact face identity/art-style reference. Change ONLY the female character's hairstyle to a graceful medium-high bun with neatly swept-back hair and a soft side part, one natural loose strand near each temple, ears and neck visible. The whole bun must fit completely inside the square frame, with visible transparent margin above it; use a compact bun, do not zoom or change the face scale. Keep warm dark-brown hair color. Preserve the original same face identity, eye size and brown irises, eyebrows, nose, warm smile and teeth, cheek contours, skin tone, clothing, pose, centered camera, original face/body scale and facial landmark placement. Retain the reference's high-end stylized 3D animated-feature finish with subtle warm skin subsurface scattering, dimensional strand detail, soft studio illumination, and detailed fabric. Genuine transparent background with clean alpha edges, square full canvas and head-and-shoulders crop. No glasses, no text, no animals, no background or border. Do not turn into a plastic toy, clay doll, flat cartoon, realistic photo or a different person. Do not claim editable 3D geometry or independently aligned artwork layers.",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "alpha_range": [
+        0,
+        255
+      ]
+    }
+  ]
+}
