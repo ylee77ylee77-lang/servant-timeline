@@ -2138,7 +2138,7 @@ export default function App() {
     // A fixed startup test is allowed before check-in; scheduled announcements
     // require a check-in for non-admins. Admin role is verified by AuthProvider.
     if (!isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
-      || isCurrentServiceVoiceClosed() || nodes.length === 0
+      || (!isAdmin && isCurrentServiceVoiceClosed()) || nodes.length === 0
       || !personalSettings.voiceReminderEnabled) return;
 
     const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
