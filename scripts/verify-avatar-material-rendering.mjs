@@ -277,7 +277,58 @@ async function verifySharedRenderer(output, loadComponent) {
     }
   }
   await sharp({ create: { width: widths.reduce((a, b) => a + b, 0), height: 584, channels: 3, background: "#F4F1F8" } }).composite(strip).png().toFile(path.join(output, "shared-renderer-strip.png"));
-  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results };
+  const eyewearCases = [], eyewearSheet = [];
+  const { selectAvatarLegacyEyewear } = loadComponent(path.join(ROOT, "lib/profile/avatar-eyewear.ts"));
+  async function renderEyewear(config, size) {
+    const svg = await embedAssets(renderToStaticMarkup(React.createElement(AvatarRenderer, { config, size })));
+    const png = await sharp(svg).png().toBuffer();
+    const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    assert.deepEqual([info.width, info.height, info.channels], [size, size, 4]);
+    return { data, png };
+  }
+  for (const [row, fixture] of fixtures.entries()) {
+    const base = normalizeAvatarConfig({ style: fixture.style, background: "sky", glasses: false, materialColors: { hair: "#654539", skin: "#BC855E" } });
+    for (const size of sizes) {
+      const plain = await renderEyewear(base, size);
+      for (const [column, choice] of ["round", "square"].entries()) {
+        const selected = selectAvatarLegacyEyewear(base, choice);
+        const original = await renderEyewear(selected, size);
+        const colored = await renderEyewear({ ...selected, materialColors: { ...base.materialColors, frame: choice === "round" ? "#B88E55" : "#496C94" } }, size);
+        let added = 0, tinted = 0;
+        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+          const offset = (y * size + x) * 4;
+          const sx = (x * SIZE / size - AVATAR_PORTRAIT_BOUNDS.x) * SIZE / AVATAR_PORTRAIT_BOUNDS.size;
+          const sy = (y * SIZE / size - AVATAR_PORTRAIT_BOUNDS.y) * SIZE / AVATAR_PORTRAIT_BOUNDS.size;
+          const delta = pixelDelta(plain.data, original.data, offset);
+          const tintDelta = pixelDelta(original.data, colored.data, offset);
+          const margin = 2 * SIZE / size * SIZE / AVATAR_PORTRAIT_BOUNDS.size;
+          if (sx < 145 - margin || sx > 382 + margin || sy < 160 - margin || sy > 270 + margin) {
+            assert.ok(delta <= 1 && tintDelta <= 1, `${fixture.name}/${choice}/${size}: frame affected an unrelated region`);
+          }
+          assert.equal(original.data[offset + 3], colored.data[offset + 3], "frame color affected alpha");
+          if (delta > 8) added++;
+          if (tintDelta > 8) tinted++;
+        }
+        assert.ok(added > 0 && tinted > 0, "frame shape or color missing");
+        if (size >= 104) for (const point of PROTECTED_POINTS[fixture.name].slice(0, 3)) {
+          const x = Math.floor((AVATAR_PORTRAIT_BOUNDS.x + point.x / SIZE * AVATAR_PORTRAIT_BOUNDS.size) / SIZE * size);
+          const y = Math.floor((AVATAR_PORTRAIT_BOUNDS.y + point.y / SIZE * AVATAR_PORTRAIT_BOUNDS.size) / SIZE * size);
+          const offset = (y * size + x) * 4;
+          assert.ok(pixelDelta(plain.data, original.data, offset) <= 1 && pixelDelta(plain.data, colored.data, offset) <= 1, "frame crossed a protected eye/mouth center");
+        }
+        const filename = `${fixture.name}-eyewear-${choice}-${size}.png`;
+        await fs.writeFile(path.join(output, filename), colored.png);
+        if (size === 256) {
+          if (column === 0) eyewearSheet.push({ input: plain.png, left: 0, top: row * 256 });
+          eyewearSheet.push({ input: original.png, left: (column * 2 + 1) * 256, top: row * 256 });
+          eyewearSheet.push({ input: colored.png, left: (column * 2 + 2) * 256, top: row * 256 });
+        }
+        eyewearCases.push({ character: fixture.name, choice, size, file: filename, added, tinted, passed: true });
+      }
+    }
+  }
+  await sharp({ create: { width: 5 * 256, height: 2 * 256, channels: 3, background: "#F4F1F8" } }).composite(eyewearSheet).png().toFile(path.join(output, "eyewear-review.png"));
+  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases };
 }
 
 async function main() {
