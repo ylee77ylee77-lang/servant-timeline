@@ -22,7 +22,7 @@ test("admin preview reuses real reminder wording for both timing and all detail 
   const source = page();
   assert.match(source, /const buildReminderSpeechText = \(\s*node: any,\s*reminderType: "pre5" \| "now",\s*detailLevel: ReminderDetailLevel = personalSettings\.voiceDetailLevel,\s*leadSecondsOverride: number \| null = null/);
   assert.ok(source.includes('const detailHint = buildDetailedVoiceHint(node, detailLevel);'));
-  assert.ok(source.includes('const customText = getCustomReminderText(node, reminderType, detailLevel);'));
+  assert.ok(source.includes('const customText = timelineKind ? null : getCustomReminderText(node, reminderType, detailLevel);'));
   assert.ok(source.includes('if (customText) return customText;'));
   assert.ok(source.includes('const text = normalizeReminderText(timelinePreviewDraftText);'));
   assert.ok(source.includes('value={timelinePreviewDraftText}'));
