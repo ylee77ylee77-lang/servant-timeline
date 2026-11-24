@@ -85,35 +85,55 @@ test("advanced cues wrap midnight without changing on-time alerts", () => {
   assert.equal(isReminderDue(time(12, 0, 30), "12:01", -1), false);
 });
 
-test("master reminder switch sits beside header and toggles all four preferences", () => {
+test("the reminder settings have no master toggle and keep independent switches", () => {
   const ui = read("components/profile/PersonalPreferencesCards.tsx");
-  const heading = ui.indexOf('>提醒</h3>');
-  const master = ui.indexOf('aria-label="提醒總開關"');
-  const switches = ui.indexOf('REMINDER_SWITCHES.map((item)');
-  assert.ok(heading > 0 && master > heading && switches > master);
-  assert.ok(ui.includes('REMINDER_SWITCHES.every((item) => settings[item.key])'));
-  assert.ok(ui.includes('aria-checked={hasActiveReminders}'));
-  assert.ok(ui.includes('const nextEnabled = !hasActiveReminders;'));
-  for (const key of [
-    "voiceReminderEnabled", "vibrationReminderEnabled", "reminderPre5Enabled", "reminderNowEnabled",
-  ]) assert.ok(ui.includes(`${key}: nextEnabled,`), `${key} follows master control`);
-  assert.ok(ui.includes('hasActiveReminders ? "translate-x-6" : "translate-x-1"'));
+  assert.doesNotMatch(ui, /提醒總開關|hasActiveReminders|REMINDER_SWITCHES|>提醒<\/h3>/);
+  assert.match(ui, /data-reminder-settings-layers/);
+  assert.match(ui, /role="switch"/);
+  assert.match(ui, /aria-checked=\{checked\}/);
+  for (const [label, key] of [
+    ["震動提醒", "vibrationReminderEnabled"],
+    ["語音助理", "voiceReminderEnabled"],
+    ["提前提醒", "reminderPre5Enabled"],
+    ["準點提醒", "reminderNowEnabled"],
+  ]) {
+    assert.ok(ui.includes('label="' + label + '"'), label + " has its own switch");
+    assert.ok(ui.includes(key + ": !settings." + key), label + " toggles only its preference");
+  }
+  const vibration = ui.indexOf('label="震動提醒"');
+  const voice = ui.indexOf('label="語音助理"');
+  const advance = ui.indexOf('label="提前提醒"');
+  const punctual = ui.indexOf('label="準點提醒"');
+  const content = ui.indexOf('>提醒內容</span>');
+  assert.ok(vibration > 0 && voice > vibration && advance > voice && punctual > advance && content > punctual);
 });
 
-test("advance time extends immediately below the advance reminder card when enabled", () => {
+test("voice and advance switches immediately reveal their nested settings", () => {
   const ui = read("components/profile/PersonalPreferencesCards.tsx");
-  const listStart = ui.indexOf('REMINDER_SWITCHES.map((item)');
-  const activeCheck = ui.indexOf('const showAdvanceTime = item.key === "reminderPre5Enabled" && active;', listStart);
-  const buttonEnd = ui.indexOf('</button>', activeCheck);
-  const panelStart = ui.indexOf('{showAdvanceTime && (', activeCheck);
-  const stepper = ui.indexOf('data-reminder-lead-stepper', panelStart);
-  const mapEnd = ui.indexOf('          })}', panelStart);
-  assert.ok(listStart >= 0 && activeCheck > listStart);
-  assert.ok(buttonEnd > activeCheck && panelStart > buttonEnd && stepper > panelStart);
-  assert.ok(mapEnd > stepper, "the stepper must remain in the matching card loop");
-  assert.ok(ui.includes('border border-t-0 border-[#6D55A3]/20 bg-[#F3EEFF]'));
-  assert.ok(ui.includes('showAdvanceTime ? "border-b-0" : ""'));
-  assert.ok(ui.includes('className="overflow-hidden rounded-2xl"'));
+  assert.match(ui, /aria-checked=\{checked\}/);
+  assert.match(ui, /aria-expanded=\{controls \? checked : undefined\}/);
+  assert.match(ui, /aria-controls=\{controls\}/);
+  assert.match(ui, /controls="personal-reminder-voice-options"/);
+  assert.match(ui, /controls="personal-reminder-lead-options"/);
+  assert.match(ui, /hidden=\{!settings\.voiceReminderEnabled\}/);
+  assert.match(ui, /hidden=\{!settings\.reminderPre5Enabled\}/);
+  assert.match(ui, /onToggle=\{\(\) => onChange\(\{ voiceReminderEnabled: !settings\.voiceReminderEnabled \}\)\}/);
+  assert.match(ui, /onToggle=\{\(\) => onChange\(\{ reminderPre5Enabled: !settings\.reminderPre5Enabled \}\)\}/);
+  assert.match(ui, /data-reminder-lead-stepper/);
+  assert.doesNotMatch(ui, /leadTimeExpanded|openReminderSection|setOpenReminderSection|setLeadTimeExpanded/);
+  // Neither voice nor advance requires clicking a separate disclosure arrow.
+  const nested = ui.slice(ui.indexOf('{/* The voice switch directly'), ui.indexOf('data-reminder-lead-stepper'));
+  assert.doesNotMatch(nested, /<ChevronDown|onClick=\{\(\) => set.*Expanded/);
+});
+
+test("reminder content keeps its own collapsible card", () => {
+  const ui = read("components/profile/PersonalPreferencesCards.tsx");
+  assert.match(ui, /useState\(false\)/);
+  assert.match(ui, /aria-expanded=\{contentExpanded\}/);
+  assert.match(ui, /aria-controls="personal-reminder-content-options"/);
+  assert.match(ui, /hidden=\{!contentExpanded\}/);
+  assert.match(ui, /onClick=\{\(\) => setContentExpanded\(\(current\) => !current\)\}/);
+  assert.match(ui, /onChange\(\{ voiceDetailLevel: option\.value \}\)/);
   assert.doesNotMatch(ui, /<select/);
 });
 
@@ -121,16 +141,16 @@ test("profile controls, saved preferences, speech, and upcoming cue share the sa
   const ui = read("components/profile/PersonalPreferencesCards.tsx");
   const page = read("app/page.tsx");
   assert.match(ui, /data-reminder-lead-stepper/);
-  assert.match(ui, /const showAdvanceTime = item\.key === "reminderPre5Enabled" && active;/);
+  assert.match(ui, /hidden=\{!settings\.reminderPre5Enabled\}/);
   assert.match(ui, /aria-label="增加提前提醒分鐘"/);
   assert.match(ui, /aria-label="減少提前提醒分鐘"/);
   assert.match(ui, /aria-label="增加提前提醒秒數"/);
   assert.match(ui, /aria-label="減少提前提醒秒數"/);
   assert.match(ui, /stepReminderLeadTime\(lead\.minutes, lead\.seconds, unit, direction\)/);
   assert.match(ui, /padStart\(2, "0"\)/);
-  assert.match(ui, /<h3 className="text-xs font-black tracking-widest text-\[#7B7B74\]">提醒<\/h3>/);
-  assert.match(ui, /label: "準點提醒"/);
-  assert.match(ui, /description: "任務開始前先提醒一次。"/);
+  assert.doesNotMatch(ui, />提醒<\/h3>/);
+  assert.match(ui, /label="準點提醒"/);
+  assert.match(ui, /label="提前提醒"/);
   assert.doesNotMatch(ui, /<select|每次 1 分鐘|每次 15 秒|提醒開關|可設 0–60 分鐘/);
   assert.match(ui, /reminderLeadMinutes: number;/);
   assert.match(ui, /reminderLeadSeconds: number;/);

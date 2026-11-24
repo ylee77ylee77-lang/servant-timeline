@@ -34,7 +34,9 @@ test("profile settings have a single expanded card rather than independent state
   assert.match(preferences, /expanded=\{expandedPanel === "reminder"\}/);
   assert.match(preferences, /onToggle=\{\(\) => onToggle\("voice"\)\}/);
   assert.match(preferences, /onToggle=\{\(\) => onToggle\("reminder"\)\}/);
-  assert.doesNotMatch(preferences, /voiceExpanded|reminderExpanded|useState/);
+  // Top-level cards share one accordion, while voice/advance options follow their switches.
+  assert.doesNotMatch(preferences, /voiceExpanded|reminderExpanded|leadTimeExpanded|openReminderSection/);
+  assert.match(preferences, /const \[contentExpanded, setContentExpanded\] = useState\(false\)/);
   for (const key of [
     "voiceProfile", "voiceReminderEnabled", "vibrationReminderEnabled",
     "reminderPre5Enabled", "reminderNowEnabled", "voiceDetailLevel",
