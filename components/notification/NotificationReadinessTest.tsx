@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { ServerPushTest } from "@/components/notification/ServerPushTest";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { BellRing, CheckCircle2, ChevronLeft, Smartphone } from "lucide-react";
 
 type TestResult = { kind: "success" | "warning" | "error"; message: string } | null;
@@ -17,6 +19,7 @@ function isApplePhoneOrTablet() {
 }
 
 export function NotificationReadinessTest() {
+  const { isAdmin, session } = useAuth();
   const [result, setResult] = useState<TestResult>(null);
   const [busy, setBusy] = useState(false);
 
@@ -139,9 +142,11 @@ export function NotificationReadinessTest() {
           )}
         </section>
 
+        {isAdmin && <ServerPushTest accessToken={session.access_token} />}
+
         <p className="px-2 text-xs font-medium leading-5 text-[#7B7B74]">
           這是使用者按鈕觸發的測試通知，不是服事任務到點的自動推播。
-          背景及鎖屏定時提醒尚需要伺服器 Web Push、個人訂閱與任務排程；iPhone
+          下方獨立測試僅驗證伺服器推播；正式服事仍需要個人訂閱與任務排程。iPhone
           靜音、專注模式和通知設定仍可能影響提示方式。
         </p>
       </div>
