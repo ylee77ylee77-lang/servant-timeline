@@ -21,6 +21,17 @@ function parseTaskMinute(value: unknown): number | null {
   return hour * 60 + minute;
 }
 
+export type TaskCueTrigger = "foreground" | "checkin";
+export type TaskCueDetailLevel = "simple" | "standard" | "detailed";
+
+/** Only external-app returns force a minimalist task cue. */
+export function getTaskCueDetailLevel(
+  trigger: TaskCueTrigger | null,
+  configured: TaskCueDetailLevel
+): TaskCueDetailLevel {
+  return trigger === "foreground" ? "simple" : configured;
+}
+
 /** Only a real return from a hidden app can arm a task cue; elapsed time is irrelevant. */
 export function shouldQueueReturnCue(wasAppBackgrounded: boolean, visibilityState: string): boolean {
   return wasAppBackgrounded && visibilityState === "visible";

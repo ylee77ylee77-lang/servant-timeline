@@ -49,6 +49,7 @@ import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
 import {
   buildFirstCheckinTimelineSpeech,
   canRetryReturnCueAfterGesture,
+  getTaskCueDetailLevel,
   isNearFormalVoiceReminder,
   selectReturnCueTask,
   shouldQueueReturnCue,
@@ -421,6 +422,7 @@ export default function App() {
   const voiceStartupPreloadRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
   const appWasInBackgroundRef = useRef(false);
   const [returnCuePendingAt, setReturnCuePendingAt] = useState<number | null>(null);
+  const returnCueTriggerRef = useRef<"foreground" | "checkin" | null>(null);
   const firstCheckinTimelineCueServiceRef = useRef<string | null>(null);
   // Only the first visit after a *new successful check-in* receives the
   // activation greeting. Background-return cues stay task-only.
@@ -1072,6 +1074,7 @@ export default function App() {
     ++voiceQueueGenerationRef.current;
     stopVoiceStartupConfirmation();
     setReturnCuePendingAt(null);
+    returnCueTriggerRef.current = null;
     firstCheckinTimelineIntroServiceRef.current = null;
     setReturnCueRetryText(null);
     returnCueQueuedTextRef.current = null;
@@ -2138,7 +2141,7 @@ export default function App() {
     // A fixed startup test is allowed before check-in; scheduled announcements
     // require a check-in for non-admins. Admin role is verified by AuthProvider.
     if (!isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
-      || isCurrentServiceVoiceClosed() || nodes.length === 0
+      || (!isAdmin && isCurrentServiceVoiceClosed()) || nodes.length === 0
       || !personalSettings.voiceReminderEnabled) return;
 
     const leadSeconds = getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds);
@@ -2483,30 +2486,9 @@ export default function App() {
 
   const simplifyTaskPhrase = (node: any) => {
     let phrase = String(node.title || node.details || "服事任務").trim();
-    const roleLabels = [
-      personalSettings.role,
-      node.assignee,
-      "總招",
-      "副總招",
-      "電梯專招",
-      "手扶梯專招",
-      "2樓外場專招",
-      "2樓大堂專招",
-      "3樓大堂專招",
-      "專招",
-      "牧招",
-      "聖餐助手"
-    ]
-      .filter(Boolean)
-      .map((item: string) => String(item).trim())
-      .sort((a, b) => b.length - a.length);
-
-    roleLabels.forEach((label) => {
-      if (!label) return;
-      phrase = phrase.replace(new RegExp(`^${label}[，,、\s]*`), "");
-      phrase = phrase.replace(new RegExp(`^請${label}[，,、\s]*`), "");
-    });
-
+    // Keep role words in the original task title. Stripping 「專招」 from
+    // 「專招就位」 left the ambiguous two-character phrase 「就位」, which can
+    // be misheard when synthesized. Scheduled and timeline cues share this.
     phrase = phrase
       .replace(/^請[您你]?/, "")
       .replace(/^負責/, "")
@@ -2552,12 +2534,25 @@ export default function App() {
     node: any,
     reminderType: "pre5" | "now",
     detailLevel: ReminderDetailLevel = personalSettings.voiceDetailLevel,
-    leadSecondsOverride: number | null = null
+    leadSecondsOverride: number | null = null,
+    timelineKind: "current" | "next" | null = null
   ) => {
-    const customText = getCustomReminderText(node, reminderType, detailLevel);
+    // Timing-specific custom announcements still apply only when actually
+    // due; an early entry cannot claim a five-minute reminder has arrived.
+    const customText = timelineKind ? null : getCustomReminderText(node, reminderType, detailLevel);
     if (customText) return customText;
     const phrase = simplifyTaskPhrase(node);
     const detailHint = buildDetailedVoiceHint(node, detailLevel);
+
+    // First visit, manual activation and an external-app return share this
+    // formatter. Their caller selects the configured level or the always-simple
+    // return cue; neither invents a reminder interval before its due time.
+    if (timelineKind) {
+      const prefix = timelineKind === "current" ? "目前任務" : "下一個任務";
+      const nextTime = timelineKind === "next" && detailLevel !== "simple"
+        ? formatTaskTimeForVoice(node.time) : "";
+      return `${prefix}，${nextTime ? `${nextTime}，` : ""}${phrase}。${detailHint}`;
+    }
 
     if (reminderType === "pre5") {
       // Simple mode speaks only the action; the scheduler honors the selected advance interval.
@@ -2970,14 +2965,15 @@ export default function App() {
     if (mayAnnounceTasks) {
       firstCheckinTimelineCueServiceRef.current = null;
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
     }
 
     if (selected) {
-      const phrase = simplifyTaskPhrase(selected.task);
-      const taskSpeech = selected.kind === "current"
-        ? `目前任務，${phrase}。`
-        : `下一個任務，${phrase}。`;
+      const taskSpeech = buildReminderSpeechText(
+        selected.task, selected.kind === "current" ? "now" : "pre5",
+        personalSettings.voiceDetailLevel, null, selected.kind
+      );
       speak(buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION), "return");
       return;
     }
@@ -3012,6 +3008,7 @@ export default function App() {
     } else {
       stopVoiceStartupConfirmation();
       setReturnCuePendingAt(null);
+      returnCueTriggerRef.current = null;
       firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCueRetryText(null);
       returnCueQueuedTextRef.current = null;
@@ -3137,6 +3134,7 @@ export default function App() {
         // iOS may have suspended the one-second clock in the background.
         // Re-evaluate any *currently due* formal reminder immediately.
         setCurrentDate(new Date());
+        returnCueTriggerRef.current = "foreground";
         setReturnCuePendingAt(Date.now());
       }
     };
@@ -3166,6 +3164,7 @@ export default function App() {
       || (!isAdmin && checkinStatus === "not_checked_in") || !isServiceType(currentService)
       || (!isAdmin && isCurrentServiceVoiceClosed()) || !showLiveTimeline) {
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
@@ -3175,9 +3174,12 @@ export default function App() {
     if (isLoading) return;
     if (voiceAudioContextRef.current && voiceAudioContextRef.current.state !== "running") return;
     if (filteredNodes.length === 0) {
+      const isFirstEntry = returnCueTriggerRef.current === "checkin"
+        && firstCheckinTimelineIntroServiceRef.current === currentService;
+      returnCueTriggerRef.current = null;
+      firstCheckinTimelineIntroServiceRef.current = null;
       setReturnCuePendingAt(null);
-      if (firstCheckinTimelineIntroServiceRef.current === currentService) {
-        firstCheckinTimelineIntroServiceRef.current = null;
+      if (isFirstEntry) {
         // Confirm activation without pretending there is a scheduled task.
         speak(VOICE_STARTUP_CONFIRMATION, "return");
       }
@@ -3195,23 +3197,27 @@ export default function App() {
     )) {
       // An imminent formal announcement takes priority over the check-in cue.
       firstCheckinTimelineIntroServiceRef.current = null;
+      returnCueTriggerRef.current = null;
       setReturnCuePendingAt(null);
       return;
     }
 
     const selected = selectReturnCueTask(filteredNodes, now);
+    const trigger = returnCueTriggerRef.current;
+    returnCueTriggerRef.current = null;
     setReturnCuePendingAt(null);
-    const isFirstCheckinEntry = firstCheckinTimelineIntroServiceRef.current === currentService;
+    const isFirstCheckinEntry = trigger === "checkin"
+      && firstCheckinTimelineIntroServiceRef.current === currentService;
     firstCheckinTimelineIntroServiceRef.current = null;
     if (!selected) {
       // An empty/currently-expired timeline has no real task to announce.
       if (isFirstCheckinEntry) speak(VOICE_STARTUP_CONFIRMATION, "return");
       return;
     }
-    const phrase = simplifyTaskPhrase(selected.task);
-    const taskSpeech = selected.kind === "current"
-      ? `目前任務，${phrase}。`
-      : `下一個任務，${phrase}。`;
+    const taskSpeech = buildReminderSpeechText(
+      selected.task, selected.kind === "current" ? "now" : "pre5",
+      getTaskCueDetailLevel(trigger, personalSettings.voiceDetailLevel), null, selected.kind
+    );
     speak(isFirstCheckinEntry
       ? buildFirstCheckinTimelineSpeech(taskSpeech, VOICE_STARTUP_CONFIRMATION)
       : taskSpeech, "return");
@@ -3221,7 +3227,7 @@ export default function App() {
     personalSettings.role, personalSettings.name,
     personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled,
     personalSettings.reminderNowEnabled, personalSettings.reminderLeadMinutes,
-    personalSettings.reminderLeadSeconds
+    personalSettings.reminderLeadSeconds, personalSettings.voiceDetailLevel
   ]);
 
   // One brief announcement on the first timeline visit after a verified
@@ -3241,6 +3247,7 @@ export default function App() {
       && !returnCueQueuedTextRef.current && !voiceProcessingRef.current
       && voiceQueueRef.current.length === 0) {
       firstCheckinTimelineIntroServiceRef.current = service;
+      returnCueTriggerRef.current = "checkin";
       setReturnCuePendingAt(Date.now());
     }
   }, [
