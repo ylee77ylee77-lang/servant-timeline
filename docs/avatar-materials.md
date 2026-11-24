@@ -8,12 +8,12 @@ independent material colors. Target four character families (two male, two
 female), three hairstyles per family, and classic/round/square/no glasses.
 Only ship art that passes review.
 
-- Hair: convenient swatches plus a user-selected custom RGB color.
-- Skin: common natural tones plus fine adjustment within a reviewed natural
-  skin-tone gamut; not an unrestricted rainbow picker. The exact gamut and
-  swatch set still require visual approval, including a range of deeper tones.
-- Frame: convenient swatches plus custom RGB color. Do not recolor lens
-  transparency, reflection, eye whites, iris or adjacent skin.
+- Hair: 360-degree continuous HSV color wheel and independent brightness slider.
+- Skin: a continuous warm-color disc and brightness slider limited to a reviewed
+  natural skin-tone gamut, including deeper tones. The initial numerical range
+  is provisional and requires review against real source materials.
+- Frame: 360-degree continuous HSV color wheel and independent brightness slider.
+  Do not recolor lens transparency, reflection, eye whites, iris or adjacent skin.
 - Keep original color as a reset option, and never change a saved legacy
   avatar automatically. Selecting a color must update a local draft, not
   initiate a network request.
@@ -91,3 +91,27 @@ public assets are changed in this step.
    including hidden display modes; confirm old avatar appearance.
 5. Review on iPhone PWA and all avatar surfaces, pass application/security CI,
    then obtain explicit approval before merging the Draft PR.
+
+## Shared color-wheel interaction foundation
+
+`lib/profile/avatar-color-wheel.ts` defines one deterministic coordinate-to-color
+mapping for rendered pixels, pointer interaction, and keyboard movement. Hair
+and frame use full HSV hue/saturation; skin uses a warm Cartesian disc without
+an abrupt hue-wrap seam. Brightness remains separate, retaining the chosen
+position even at black. The skin disc's range is an unapproved first design,
+not a dermatological or final art palette.
+
+`components/profile/AvatarColorControls.tsx` is a controlled, reusable picker:
+collapsed color dots, one open section, pointer capture for touch dragging,
+keyboard arrow support, native brightness slider and reset to the source color.
+The canvas only redraws for brightness/channel changes; changing the selection
+moves the marker and calls the parent's local-draft callback. A null draft
+means original source color. Merely opening or closing the picker never changes
+any color. No fixed-color grid is required. No new dependency, API call, or
+profile data change is involved. The component is deliberately not mounted in
+registration or profile settings until compatible material rendering is ready.
+
+`tests/avatar-color-wheel.test.ts` covers hue primaries, RGB roundtrip, black
+and restore, bounded skin gamut, invalid coordinates, and exact agreement
+between wheel pixels and selection math. Physical touch, browser integration,
+production art, persisted RGB roundtrip and rendering performance remain gates.
