@@ -41,6 +41,13 @@ const DETAIL_OPTIONS = [
 
 const cardIconClass = "flex h-[52px] w-[52px] items-center justify-center rounded-full bg-[#F3EEFF] text-[#6D55A3]";
 
+/** Shared single-choice treatment for the personal preference selectors. */
+const preferenceOptionClass = (selected: boolean) =>
+  "min-h-12 rounded-xl border px-2 py-2 text-center text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2 " +
+  (selected
+    ? "border-[#6D55A3] bg-[#F3EEFF] text-[#6D55A3]"
+    : "border-[#E6EAF0] bg-white text-[#7B7B74]");
+
 type VibrationCapability = "web" | "ios-switch" | "none" | null;
 
 const subscribeToDeviceCapability = () => () => {};
@@ -163,15 +170,9 @@ export function PersonalPreferencesCards({
                 type="button"
                 aria-pressed={settings.voiceProfile === option.value}
                 onClick={() => onChange({ voiceProfile: option.value })}
-                className={`min-h-20 rounded-2xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2 ${
-                  settings.voiceProfile === option.value
-                    ? "border-transparent bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white"
-                    : "border-[#E6EAF0] bg-white text-[#7B7B74]"
-                }`}
+                className={preferenceOptionClass(settings.voiceProfile === option.value)}
               >
-                <span className="block text-sm font-black">
-                  {settings.voiceProfile === option.value ? "✓ " : ""}{option.label}
-                </span>
+                {settings.voiceProfile === option.value ? "✓ " : ""}{option.label}
               </button>
             ))}
           </div>
@@ -331,13 +332,9 @@ export function PersonalPreferencesCards({
                     type="button"
                     aria-pressed={settings.voiceDetailLevel === option.value}
                     onClick={() => onChange({ voiceDetailLevel: option.value })}
-                    className={"min-h-11 rounded-2xl border px-2 py-2.5 text-xs font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6D55A3] focus-visible:ring-offset-2 " + (
-                      settings.voiceDetailLevel === option.value
-                        ? "border-transparent bg-gradient-to-r from-[#F25D6B] to-[#6D55A3] text-white shadow-md shadow-[#F25D6B]/15"
-                        : "border-[#E6EAF0] bg-white text-[#7B7B74]"
-                    )}
+                    className={preferenceOptionClass(settings.voiceDetailLevel === option.value)}
                   >
-                    {option.label}
+                    {settings.voiceDetailLevel === option.value ? "✓ " : ""}{option.label}
                   </button>
                 ))}
               </div>
