@@ -233,51 +233,53 @@ async function verifySharedRenderer(output, loadComponent) {
     for (const match of svg.matchAll(/url\(([^)]+)\)/g)) assert.match(match[1], /^#[A-Za-z0-9_:-]+$/, "SVG resource references must stay inside the document");
     return Buffer.from(svg);
   }
-  // Exercise the actual shared renderer, not a separate candidate compositor.
-  const {getAvatarIndependentOptions,selectAvatarIndependent}=loadComponent(path.join(ROOT,"lib/profile/avatar-independent.ts"));
-  const {getAvatarOutfitOptions,selectAvatarFormalOutfit}=loadComponent(path.join(ROOT,"lib/profile/avatar-formal-outfit.ts"));
-  const {selectAvatarLegacyEyewear}=loadComponent(path.join(ROOT,"lib/profile/avatar-eyewear.ts"));
-  const b1Cases=[],b1Tiles=[];
-  async function renderB1(config,size){
-    const svg=await embedAssets(renderToStaticMarkup(React.createElement(AvatarRenderer,{config,size})));
-    const png=await sharp(svg).png().toBuffer();
-    const {data,info}=await sharp(png).ensureAlpha().raw().toBuffer({resolveWithObject:true});
-    assert.deepEqual([info.width,info.height,info.channels],[size,size,4]);
-    return {png,data};
-  }
-  let b1Row=0;
-  for(const style of ["masculine","feminine"]){
-    for(const source of getAvatarIndependentOptions(style)){
-      const base=selectAvatarIndependent(normalizeAvatarConfig({style,background:"sky",materialColors:{hair:"#654539",skin:"#986448",frame:"#B88E55"}}),source.id);
-      const framed=selectAvatarLegacyEyewear(base,"round");
-      const choices=getAvatarOutfitOptions(style);
-      for(const size of sizes){
-        const reference=await renderB1(framed,size);
-        if(size===256)b1Tiles.push({input:reference.png,left:0,top:b1Row*256});
-        for(const [col,choice] of choices.entries()){
-          const selected=selectAvatarFormalOutfit(framed,choice.id);
-          const reopened=normalizeAvatarConfig(JSON.parse(JSON.stringify(selected)));
-          assert.deepEqual(reopened,selected);
-          const result=await renderB1(reopened,size);
-          let changed=0;
-          for(let y=0;y<size;y++)for(let x=0;x<size;x++){
-            const i=(y*size+x)*4,sy=((y+.5)*512/size-AVATAR_PORTRAIT_BOUNDS.y)*512/AVATAR_PORTRAIT_BOUNDS.size;
-            const margin=3*512/size*512/AVATAR_PORTRAIT_BOUNDS.size;
-            assert.ok(Math.abs(reference.data[i+3]-result.data[i+3])<=1,source.id+": alpha");
-            if(sy<390-margin)assert.ok(pixelDelta(reference.data,result.data,i)<=2,source.id+"/"+choice.id+"/"+size+": head changed");
-            if(pixelDelta(reference.data,result.data,i)>8)changed++;
-          }
-          assert.ok(changed>0,source.id+"/"+choice.id+"/"+size+": outfit not visible");
-          b1Cases.push({source:source.id,outfit:choice.id,size,changed});
-          if(size===256)b1Tiles.push({input:result.png,left:(col+1)*256,top:b1Row*256});
-        }
-      }
-      b1Row++;
+  {
+    // Exercise the actual shared renderer, not a separate candidate compositor.
+    const {getAvatarIndependentOptions,selectAvatarIndependent}=loadComponent(path.join(ROOT,"lib/profile/avatar-independent.ts"));
+    const {getAvatarOutfitOptions,selectAvatarFormalOutfit}=loadComponent(path.join(ROOT,"lib/profile/avatar-formal-outfit.ts"));
+    const {selectAvatarLegacyEyewear}=loadComponent(path.join(ROOT,"lib/profile/avatar-eyewear.ts"));
+    const b1Cases=[],b1Tiles=[];
+    async function renderB1(config,size){
+      const svg=await embedAssets(renderToStaticMarkup(React.createElement(AvatarRenderer,{config,size})));
+      const png=await sharp(svg).png().toBuffer();
+      const {data,info}=await sharp(png).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+      assert.deepEqual([info.width,info.height,info.channels],[size,size,4]);
+      return {png,data};
     }
+    let b1Row=0;
+    for(const style of ["masculine","feminine"]){
+      for(const source of getAvatarIndependentOptions(style)){
+        const base=selectAvatarIndependent(normalizeAvatarConfig({style,background:"sky",materialColors:{hair:"#654539",skin:"#986448",frame:"#B88E55"}}),source.id);
+        const framed=selectAvatarLegacyEyewear(base,"round");
+        const choices=getAvatarOutfitOptions(style);
+        for(const size of sizes){
+          const reference=await renderB1(framed,size);
+          if(size===256)b1Tiles.push({input:reference.png,left:0,top:b1Row*256});
+          for(const [col,choice] of choices.entries()){
+            const selected=selectAvatarFormalOutfit(framed,choice.id);
+            const reopened=normalizeAvatarConfig(JSON.parse(JSON.stringify(selected)));
+            assert.deepEqual(reopened,selected);
+            const result=await renderB1(reopened,size);
+            let changed=0;
+            for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+              const i=(y*size+x)*4,sy=((y+.5)*512/size-AVATAR_PORTRAIT_BOUNDS.y)*512/AVATAR_PORTRAIT_BOUNDS.size;
+              const margin=3*512/size*512/AVATAR_PORTRAIT_BOUNDS.size;
+              assert.ok(Math.abs(reference.data[i+3]-result.data[i+3])<=1,source.id+": alpha");
+              if(sy<390-margin)assert.ok(pixelDelta(reference.data,result.data,i)<=2,source.id+"/"+choice.id+"/"+size+": head changed");
+              if(pixelDelta(reference.data,result.data,i)>8)changed++;
+            }
+            assert.ok(changed>0,source.id+"/"+choice.id+"/"+size+": outfit not visible");
+            b1Cases.push({source:source.id,outfit:choice.id,size,changed});
+            if(size===256)b1Tiles.push({input:result.png,left:(col+1)*256,top:b1Row*256});
+          }
+        }
+        b1Row++;
+      }
+    }
+    assert.equal(b1Cases.length,120);
+    await sharp({create:{width:1536,height:1536,channels:3,background:"#F4F1F8"}}).composite(b1Tiles).png().toFile(path.join(output,"independent-shared-renderer-review.png"));
+    console.log("INDEPENDENT_SHARED_RENDERER_PROOF "+JSON.stringify({cases:b1Cases.length,visualAcceptance:"NOT_APPROVED"}));
   }
-  assert.equal(b1Cases.length,120);
-  await sharp({create:{width:1536,height:1536,channels:3,background:"#F4F1F8"}}).composite(b1Tiles).png().toFile(path.join(output,"independent-shared-renderer-review.png"));
-  console.log("INDEPENDENT_SHARED_RENDERER_PROOF "+JSON.stringify({cases:b1Cases.length,visualAcceptance:"NOT_APPROVED"}));
   const results = [];
   const strip = [];
   const widths = [88, 120, 144, 288];
