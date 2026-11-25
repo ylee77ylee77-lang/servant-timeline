@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createECDH, randomBytes } from "node:crypto";
+import { createECDH, createHmac, randomBytes } from "node:crypto";
 import fs from "node:fs";
-import { isApplePushEndpoint, parseAppleSubscription, makeReminderPayload, sendBackgroundPush, validDispatcherSecret, validVapidKeys } from "../lib/notifications/background-push.ts";
+import { isApplePushEndpoint, parseAppleSubscription, makeReminderPayload, sendBackgroundPush, validDispatcherAuthorization, validVapidKeys } from "../lib/notifications/background-push.ts";
 import { dispatchBackgroundReminders, type Taken } from "../lib/notifications/dispatch-reminders.ts";
 
 const pair = () => {
@@ -89,11 +89,20 @@ test("dispatcher rechecks each claim, deduplicates, and never retries uncertain 
   assert.deepEqual(counts, { claimed: 5, skipped: 2, accepted: 1, rejected: 1, uncertain: 1, errors: 0 });
 });
 
-test("dispatch secret fails closed and routes do not take user-controlled IDs or clock", () => {
+test("short-lived dispatch signature fails closed and routes do not take user-controlled IDs or clock", () => {
   const secret = "s".repeat(40);
-  assert.equal(validDispatcherSecret("Bearer " + secret, secret), true);
-  assert.equal(validDispatcherSecret("Bearer " + secret, ""), false);
-  assert.equal(validDispatcherSecret("Bearer wrong", secret), false);
+  const ts = Math.floor(due / 1000);
+  const sign = (timestamp: number) => "Bearer v1." + timestamp + "." +
+    createHmac("sha256", secret).update("background-reminders:dispatch:v1:" + timestamp).digest("hex");
+  const token = sign(ts);
+  assert.equal(validDispatcherAuthorization(token, secret, () => due), true);
+  assert.equal(validDispatcherAuthorization(token, secret, () => due + 30_000), true);
+  assert.equal(validDispatcherAuthorization(token, secret, () => due + 31_000), false);
+  assert.equal(validDispatcherAuthorization(sign(ts + 6), secret, () => due), false);
+  assert.equal(validDispatcherAuthorization(token.slice(0, -1), secret, () => due), false);
+  assert.equal(validDispatcherAuthorization(token, "x".repeat(40), () => due), false);
+  assert.equal(validDispatcherAuthorization(token, "", () => due), false);
+  assert.equal(validDispatcherAuthorization("Bearer " + secret, secret, () => due), false);
   const device = fs.readFileSync("app/api/background-reminders/device/route.ts", "utf8");
   const route = fs.readFileSync("app/api/background-reminders/dispatch/route.ts", "utf8");
   const config = fs.readFileSync("lib/notifications/background-config.ts", "utf8");
@@ -102,7 +111,7 @@ test("dispatch secret fails closed and routes do not take user-controlled IDs or
   assert.match(device, /requireActiveUser\(request\)/);
   assert.match(device, /request\.headers\.get\("origin"\) !== request\.nextUrl\.origin/);
   assert.doesNotMatch(device, /p_at:|body\.userId|body\.assignmentId|body\.checkInId/);
-  assert.match(route, /validDispatcherSecret/);
+  assert.match(route, /validDispatcherAuthorization/);
   assert.doesNotMatch(route, /request\.json|request\.text|p_at:/);
   assert.match(config, /process\.env\.VERCEL_ENV === "production"/);
   assert.match(config, /ENABLE_BACKGROUND_TASK_REMINDERS !== "true"/);

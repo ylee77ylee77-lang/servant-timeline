@@ -128,39 +128,6 @@ jobs:
           sed -i '/^\[auth\.email\]$/,/^\[/s/^enable_signup = false$/enable_signup = true/' supabase/config.toml
           python3 -c 'import tomllib; a=tomllib.load(open("supabase/config.toml","rb"))["auth"]; assert a["enable_signup"] is False and a["email"]["enable_signup"] is True'
 
-      - name: Generate and verify the candidate migration locally
-        shell: bash
-        run: |
-          set -euo pipefail
-          supabase --version
-          supabase migration new --help
-          # This step creates a migration ONLY in the temporary CI checkout.
-          # It exercises the real migration path instead of applying staged
-          # SQL after the stack has already started.
-          if ! compgen -G 'supabase/migrations/*_background_task_reminders.sql' >/dev/null; then
-            supabase migration new background_task_reminders
-            mapfile -t candidates < <(find supabase/migrations -maxdepth 1 -name '*_background_task_reminders.sql' -type f)
-            test "${#candidates[@]}" -eq 1
-            candidate="${candidates[0]}"
-            {
-              printf '%s\n\n' '-- Review candidate: schema only; no scheduler or push is enabled.'
-              cat supabase/staged/background_task_reminders.sql
-              printf '\n'
-              cat supabase/staged/background_task_reminder_cron.sql
-            } > "$candidate"
-            echo "Generated migration candidate: $(basename "$candidate")"
-            echo "REMINDER_MIGRATION_CANDIDATE=$candidate" >> "$GITHUB_ENV"
-          fi
-
-      - name: Upload migration candidate for review
-        if: env.REMINDER_MIGRATION_CANDIDATE != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: background-reminder-migration-candidate
-          path: ${{ env.REMINDER_MIGRATION_CANDIDATE }}
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Start isolated local Supabase and apply migrations
         id: supabase_start
         shell: bash
@@ -260,7 +227,7 @@ jobs:
           supabase db advisors --help
           # Existing unrelated advisory findings do not alter release policy.
           # Review findings for the new reminder objects before approval.
-          supabase db advisors --local --type security --fail-on none
+          supabase db advisors --local --type security --fail-on error
 
       - name: Stop local Supabase
         if: always()

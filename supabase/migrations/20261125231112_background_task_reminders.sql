@@ -1,7 +1,9 @@
--- Executable staging schema. Not a live migration: the isolated CI test includes
--- this file inside a transaction and rolls back. Enable only after review,
--- a real migration, and the authenticated subscription/dispatch integration.
--- No existing table, trigger, voice behavior, or cron job is changed.
+-- CLI-generated migration filename; reviewed from isolated CI run 45719337175.
+-- Short-lived dispatch authorization is included and must pass new CI.
+
+-- Reviewed background reminder schema. This migration creates dormant tables
+-- and functions only. It does not modify the existing service or check-in
+-- logic, enable extensions, register devices, create jobs or send notifications.
 
 create table public.background_reminder_devices (
   id uuid primary key default gen_random_uuid(),
@@ -454,3 +456,110 @@ grant execute on function public.background_reminder_candidates(timestamptz),
   public.take_background_task_reminder(uuid, timestamptz),
   public.finish_background_task_reminder(uuid, text, integer, timestamptz)
   to service_role;
+
+-- Scheduler definitions only: no extensions, job or HTTP calls on migration.
+
+create function background_reminder_private.should_dispatch(p_at timestamptz)
+returns boolean
+language sql stable security invoker
+set search_path = pg_catalog
+as $$
+  select case
+    when p_at is null then false
+    when extract(second from p_at at time zone 'Asia/Taipei') > 20 then false
+    when not (
+      (extract(dow from p_at at time zone 'Asia/Taipei') = 6
+        and (p_at at time zone 'Asia/Taipei')::time >= time '17:00'
+        and (p_at at time zone 'Asia/Taipei')::time < time '21:45')
+      or (extract(dow from p_at at time zone 'Asia/Taipei') = 0
+        and (p_at at time zone 'Asia/Taipei')::time < time '12:45')
+    ) then false
+    when not exists (
+      select 1 from public.background_reminder_devices d
+      where d.enabled and d.expires_at > p_at
+    ) then false
+    else exists (
+      select 1 from public.background_reminder_candidates(p_at) c
+      where not exists (
+        select 1 from public.background_task_reminder_deliveries old
+        where old.device_id = c.device_id
+          and old.service_id = c.service_id
+          and old.scheduled_at = c.scheduled_at
+          and (old.state <> 'claimed' or old.user_id <> c.user_id
+            or old.check_in_id <> c.check_in_id
+            or old.assignment_id <> c.assignment_id
+            or old.timeline_node_id <> c.timeline_node_id)
+      )
+    )
+  end;
+$$;
+
+-- pg_net queues the HTTP headers. Sign a short-lived route-specific token
+-- rather than putting a reusable shared secret in that queue. Never grant
+-- these helpers to application roles, including service_role.
+create function background_reminder_private.dispatch_authorization(
+  p_secret text, p_at timestamptz
+)
+returns text
+language sql stable security invoker
+set search_path = pg_catalog
+as $$
+  select case
+    when p_secret is null or length(btrim(p_secret)) < 32
+      or length(btrim(p_secret)) > 512 or p_at is null then null
+    else 'Bearer v1.' || floor(extract(epoch from p_at))::bigint::text || '.'
+      || encode(extensions.hmac(
+        convert_to('background-reminders:dispatch:v1:' || floor(extract(epoch from p_at))::bigint::text, 'UTF8'),
+        convert_to(btrim(p_secret), 'UTF8'), 'sha256'), 'hex')
+  end;
+$$;
+
+-- Owner-only helper permits deterministic rollback-only integration tests.
+-- The public dispatch endpoint never accepts a caller-supplied clock.
+create function background_reminder_private.queue_due_dispatch_at(p_at timestamptz)
+returns boolean
+language plpgsql volatile security invoker
+set search_path = pg_catalog
+as $$
+declare
+  dispatch_secret text;
+  authorization_header text;
+begin
+  if not background_reminder_private.should_dispatch(p_at) then return false; end if;
+  -- Fail closed until extensions have been explicitly prepared.
+  if to_regclass('vault.decrypted_secrets') is null
+    or to_regprocedure('net.http_post(text,jsonb,jsonb,jsonb,integer)') is null then
+    return false;
+  end if;
+  select s.decrypted_secret into dispatch_secret
+  from vault.decrypted_secrets s
+  where s.name = 'background_reminder_dispatch_secret';
+  authorization_header := background_reminder_private.dispatch_authorization(dispatch_secret, p_at);
+  if authorization_header is null then return false; end if;
+
+  -- Hardcoded trusted production origin. No client-supplied URLs.
+  perform net.http_post(
+    url := 'https://servant-timeline.vercel.app/api/background-reminders/dispatch',
+    body := '{}'::jsonb,
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', authorization_header
+    ),
+    timeout_milliseconds := 60000
+  );
+  return true;
+end;
+$$;
+
+create function background_reminder_private.queue_due_dispatch()
+returns boolean
+language sql volatile security invoker
+set search_path = pg_catalog
+as $$
+  select background_reminder_private.queue_due_dispatch_at(clock_timestamp());
+$$;
+
+revoke all on function background_reminder_private.should_dispatch(timestamptz),
+  background_reminder_private.dispatch_authorization(text,timestamptz),
+  background_reminder_private.queue_due_dispatch_at(timestamptz),
+  background_reminder_private.queue_due_dispatch() from public, anon, authenticated, service_role;

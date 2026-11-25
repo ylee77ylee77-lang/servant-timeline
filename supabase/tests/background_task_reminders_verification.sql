@@ -1,13 +1,6 @@
--- All fixtures exist only in this isolated transaction. CI validates the
--- installed CLI migration candidate; standalone local staging tests may load
--- the definitions when they are not installed.
+-- Run after applying the committed migrations in a disposable local database.
+-- All test data is rolled back. No extensions or network requests here.
 begin;
-select to_regclass('public.background_reminder_devices') is not null as reminder_schema_installed \gset
-\if :reminder_schema_installed
-\else
-  \ir ../staged/background_task_reminders.sql
-  \ir ../staged/background_task_reminder_cron.sql
-\endif
 
 do $$
 declare
@@ -200,7 +193,15 @@ begin
 
   if has_function_privilege('authenticated','background_reminder_private.queue_due_dispatch()','execute')
     or has_function_privilege('service_role','background_reminder_private.queue_due_dispatch()','execute')
-    then raise exception 'Cron must be owner-only'; end if;
+    or has_function_privilege('anon','background_reminder_private.queue_due_dispatch_at(timestamptz)','execute')
+    or has_function_privilege('authenticated','background_reminder_private.queue_due_dispatch_at(timestamptz)','execute')
+    or has_function_privilege('service_role','background_reminder_private.queue_due_dispatch_at(timestamptz)','execute')
+    or has_function_privilege('authenticated','background_reminder_private.dispatch_authorization(text,timestamptz)','execute')
+    or has_function_privilege('service_role','background_reminder_private.dispatch_authorization(text,timestamptz)','execute')
+    then raise exception 'Cron and signer must be owner-only'; end if;
+  if background_reminder_private.dispatch_authorization(null,due) is not null
+    or background_reminder_private.dispatch_authorization('invalid',due) is not null
+    then raise exception 'Signer must fail closed without a valid secret'; end if;
   if background_reminder_private.should_dispatch('2030-01-06 09:29:59+08')
     or background_reminder_private.should_dispatch('2030-01-06 09:30:21+08')
     or background_reminder_private.should_dispatch('2030-01-07 09:30:05+08')

@@ -1,4 +1,4 @@
-import { createECDH, ECDH, createHash, timingSafeEqual } from "node:crypto";
+import { createECDH, ECDH, createHmac, timingSafeEqual } from "node:crypto";
 import webpush from "web-push";
 
 export type AppleSubscription = {
@@ -97,11 +97,24 @@ export function makeReminderPayload(cue: ReminderCue): string {
   });
 }
 
-/** Compare fixed-length hashes to avoid timing-dependent secret comparisons. */
-export function validDispatcherSecret(authorization: string | null, secret: string) {
-  if (secret.length < 32 || secret.length > 512 || !authorization || authorization.length > 1024) return false;
-  const digest = (value: string) => createHash("sha256").update(value).digest();
-  return timingSafeEqual(digest(authorization), digest("Bearer " + secret));
+/** Verify the short-lived, route-specific token produced in PostgreSQL.
+ * The long-lived secret never appears in pg_net's queued headers.
+ * A replay during this narrow validity window cannot bypass the database's
+ * due-time/recipient checks or atomic delivery deduplication.
+ */
+export function validDispatcherAuthorization(
+  authorization: string | null, secret: string, now: () => number = Date.now,
+) {
+  if (secret.length < 32 || secret.length > 512 || !authorization || authorization.length > 100) return false;
+  const match = /^Bearer v1\.(\d{1,11})\.([0-9a-f]{64})$/.exec(authorization);
+  if (!match) return false;
+  const timestamp = Number(match[1]);
+  const age = Math.floor(now() / 1000) - timestamp;
+  if (!Number.isSafeInteger(timestamp) || String(timestamp) !== match[1]
+      || !Number.isFinite(age) || age < -5 || age > 30) return false;
+  const expected = createHmac("sha256", secret)
+    .update("background-reminders:dispatch:v1:" + match[1], "utf8").digest();
+  return timingSafeEqual(expected, Buffer.from(match[2], "hex"));
 }
 
 /** Use the pinned Web Push library for RFC 8291 encryption, not custom crypto.

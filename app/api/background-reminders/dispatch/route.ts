@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { getBackgroundPushConfig } from "@/lib/notifications/background-config";
-import { validDispatcherSecret, sendBackgroundPush } from "@/lib/notifications/background-push";
+import { validDispatcherAuthorization, sendBackgroundPush } from "@/lib/notifications/background-push";
 import { dispatchBackgroundReminders, type Claim, type Taken } from "@/lib/notifications/dispatch-reminders";
 
 export const runtime = "nodejs";
@@ -13,7 +13,7 @@ export const maxDuration = 60;
 export async function POST(request: NextRequest) {
   const config = getBackgroundPushConfig();
   const headers = { "Cache-Control": "no-store" };
-  if (!config || !validDispatcherSecret(request.headers.get("authorization"), config.dispatcherSecret)) {
+  if (!config || !validDispatcherAuthorization(request.headers.get("authorization"), config.dispatcherSecret)) {
     return NextResponse.json({ error: "Unavailable" }, { status: 404, headers });
   }
   try {

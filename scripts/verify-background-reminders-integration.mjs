@@ -11,7 +11,7 @@ import vm from "node:vm";
 import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
 import ece from "http_ece";
-import { getVerifiedSessionId, sendBackgroundPush } from "../lib/notifications/background-push.ts";
+import { getVerifiedSessionId, sendBackgroundPush, validDispatcherAuthorization } from "../lib/notifications/background-push.ts";
 import { dispatchBackgroundReminders } from "../lib/notifications/dispatch-reminders.ts";
 
 const dbUrl = new URL(process.env.DATABASE_URL ?? "http://invalid");
@@ -127,6 +127,29 @@ try {
   assert.ok((await browser.rpc("register_background_reminder_device", deniedArgs)).error, "Authenticated RPC denied");
   assert.ok((await browser.from("background_reminder_devices").select("endpoint")).error, "Subscription table denied");
   stages.push("real Auth session, REST registration, RLS and RPC grants");
+
+  // Exercise actual Vault -> pg_net queue -> Node authorization with the
+  // fixed task time. pg_net only sends after COMMIT; all of this is rolled
+  // back. The only secret here is randomly generated in the disposable CI
+  // process. Never print SQL, queued headers, or the test secret.
+  const dispatchSecret = randomBytes(32).toString("hex");
+  const signedHeader = sql("begin;\n" +
+    "create schema if not exists vault;\n" +
+    "create extension if not exists supabase_vault with schema vault;\n" +
+    "create extension if not exists pg_net with schema extensions;\n" +
+    "do $$ begin " +
+    "if background_reminder_private.queue_due_dispatch_at('" + due + "') then raise exception 'Missing vault secret must not queue'; end if; " +
+    "perform vault.create_secret('" + dispatchSecret + "','background_reminder_dispatch_secret'); " +
+    "if background_reminder_private.queue_due_dispatch_at('" + day + "T09:29:59+08:00') then raise exception 'Early queue forbidden'; end if; " +
+    "if not background_reminder_private.queue_due_dispatch_at('" + due + "') then raise exception 'Expected due queue'; end if; " +
+    "if (select count(*) from net.http_request_queue) <> 1 then raise exception 'Expected exactly one queued request'; end if; " +
+    "end $$;\n" +
+    "select headers->>'Authorization' from net.http_request_queue where method='POST' and url='https://servant-timeline.vercel.app/api/background-reminders/dispatch';\n" +
+    "rollback;");
+  equal(signedHeader.includes(dispatchSecret), false, "No reusable secret in queued header");
+  equal(validDispatcherAuthorization(signedHeader, dispatchSecret, () => Date.parse(due)), true, "Postgres/Node signed dispatch interoperability");
+  equal(validDispatcherAuthorization(signedHeader, dispatchSecret, () => Date.parse(due) + 31_000), false, "Queued signature expires");
+  stages.push("real Vault and pg_net queue, short-lived signed authorization, rollback without HTTP");
 
   const notifications = [];
   const handlers = new Map();
