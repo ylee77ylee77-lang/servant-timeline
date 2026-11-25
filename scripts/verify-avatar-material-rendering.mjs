@@ -382,7 +382,7 @@ async function verifySharedRenderer(output, loadComponent) {
   }
   await sharp({ create: { width: 7*256, height: 4*256, channels: 3, background: "#F4F1F8" } }).composite(hairstyleSheet).png().toFile(path.join(output, "hairstyle-shared-renderer.png"));
   console.log("P4 shared hairstyle renderer: " + hairstyleCases.length + " frame/size cases passed");
-  const { getAvatarFormalOptions, selectAvatarFormalOutfit, setAvatarOutfitColor } = loadComponent(path.join(ROOT,"lib/profile/avatar-formal-outfit.ts"));
+  const { getAvatarOutfitOptions, selectAvatarFormalOutfit, setAvatarOutfitColor } = loadComponent(path.join(ROOT,"lib/profile/avatar-formal-outfit.ts"));
   const outfitFixtures = [
     ...fixtures.map(f => ({ style:f.style, id:f.name+"-original" })),
     ...AVATAR_HAIRSTYLES.map(f => ({ style:f.style, id:f.id, hairstyle:f.id })),
@@ -393,15 +393,18 @@ async function verifySharedRenderer(output, loadComponent) {
     ]),
   ];
   const { selectClassicHairTone } = loadComponent(path.join(ROOT,"lib/profile/avatar-portrait.ts"));
-  const outfitCases=[], outfitSheet=[];
+  const outfitCases=[], outfitSheet=[], casualCases=[], casualSheet=[];
   for (const [row,fixture] of outfitFixtures.entries()) {
     let original=normalizeAvatarConfig({style:fixture.style,glasses:fixture.glasses??false,background:"sky",materialColors:fixture.materialColors});
     if(fixture.hairstyle) original=selectAvatarHairstyle(original,fixture.hairstyle);
     if(fixture.dark) original=selectClassicHairTone(original,"dark");
     for(const size of [48,256]) {
       const before=await renderEyewear(original,size);
-      if(size===256&&row<6) outfitSheet.push({input:before.png,left:0,top:row*size});
-      for(const [column,choice] of getAvatarFormalOptions(fixture.style).entries()) {
+      if(size===256&&row<6) {
+        outfitSheet.push({input:before.png,left:0,top:row*size});
+        casualSheet.push({input:before.png,left:0,top:row*size});
+      }
+      for(const [column,choice] of getAvatarOutfitOptions(fixture.style).entries()) {
         const selected=selectAvatarFormalOutfit(original,choice.id);
         const after=await renderEyewear(selected,size);
         const recolored=await renderEyewear(setAvatarOutfitColor(selected,"clothing","#886785"),size);
@@ -430,10 +433,13 @@ async function verifySharedRenderer(output, loadComponent) {
           assert.ok(affected>0,fixture.id+"/"+choice.id+"/"+part+": color channel not visible");
         }
         if(size===256) {
-          if(row<6) outfitSheet.push({input:after.png,left:(column+1)*size,top:row*size});
+          if(row<6) {
+            if(choice.id.startsWith("casual-")) casualSheet.push({input:after.png,left:(column-2)*size,top:row*size});
+            else outfitSheet.push({input:after.png,left:(column+1)*size,top:row*size});
+          }
           await fs.writeFile(path.join(output,fixture.id+"-"+choice.id+".png"),after.png);
         }
-        outfitCases.push({fixture:fixture.id,outfit:choice.id,size,changed,tint,passed:true});
+        (choice.id.startsWith("casual-") ? casualCases : outfitCases).push({fixture:fixture.id,outfit:choice.id,size,changed,tint,passed:true});
       }
     }
   }
@@ -442,7 +448,13 @@ async function verifySharedRenderer(output, loadComponent) {
   const outfitEncoded=outfitReview.toString("base64");
   for(let i=0;i<outfitEncoded.length;i+=2000) console.log("FORMAL_REVIEW "+String(i/2000).padStart(5,"0")+" "+outfitEncoded.slice(i,i+2000));
   console.log("FORMAL_OUTFIT_PROOF "+JSON.stringify({cases:outfitCases.length,faceProtected:true,source:"actual shared renderer"}));
-  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases };
+  assert.equal(outfitCases.length,72,"P5 rendering coverage changed");
+  assert.equal(casualCases.length,48,"P6 casual rendering coverage changed");
+  await sharp({create:{width:3*256,height:6*256,channels:3,background:"#F4F1F8"}}).composite(casualSheet).png().toFile(path.join(output,"casual-outfit-review.png"));
+  const casualEncoded=(await sharp(path.join(output,"casual-outfit-review.png")).resize({width:600}).jpeg({quality:83}).toBuffer()).toString("base64");
+  for(let i=0;i<casualEncoded.length;i+=2000) console.log("CASUAL_REVIEW "+String(i/2000).padStart(5,"0")+" "+casualEncoded.slice(i,i+2000));
+  console.log("CASUAL_OUTFIT_PROOF "+JSON.stringify({cases:casualCases.length,faceProtected:true,source:"actual shared renderer"}));
+  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases, casualCases };
 }
 
 async function main() {
