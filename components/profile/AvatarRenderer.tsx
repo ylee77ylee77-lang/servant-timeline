@@ -4,6 +4,8 @@ import { useId } from "react";
 import { getAvatarNameMark, type AvatarConfig } from "@/lib/profile/avatar";
 import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "@/lib/profile/avatar-icon";
 import { SystemIconArtwork } from "@/components/profile/SystemIconArtwork";
+import { AvatarFormalOutfitArtwork } from "@/components/profile/AvatarFormalOutfit";
+import { getAvatarFormalOutfitPlan } from "@/lib/profile/avatar-formal-outfit";
 import { AvatarEyewear } from "@/components/profile/AvatarEyewear";
 import { getAvatarEyewearPlan } from "@/lib/profile/avatar-eyewear";
 import { AvatarMaterialFilter } from "@/components/profile/AvatarMaterialFilter";
@@ -42,6 +44,8 @@ export function AvatarRenderer({
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
   const eyewear = portraitLayers.some(layer => layer.kind === "face-body") ? null : getAvatarEyewearPlan(avatar);
+  const outfit = getAvatarFormalOutfitPlan(avatar, portrait);
+  const outfitClipId = `avatar-outfit-head-${id}`;
   const materials = portraitLayers.map((layer) => getAvatarMaterialPlan(layer.src, avatar.materialColors));
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
   const iconLabel = AVATAR_ICON_OPTIONS.find((option) => option.value === avatar.iconType)?.label || "十字架";
@@ -71,6 +75,11 @@ export function AvatarRenderer({
         <clipPath id={clipId}>
           <circle cx={cx} cy={cy} r={radius} />
         </clipPath>
+        {outfit ? (
+          <clipPath id={outfitClipId} clipPathUnits="userSpaceOnUse">
+            {outfit.cutout.map(d => <path key={d} d={d} transform={`translate(${AVATAR_PORTRAIT_BOUNDS.x} ${AVATAR_PORTRAIT_BOUNDS.y}) scale(${AVATAR_PORTRAIT_BOUNDS.size / AVATAR_CANVAS_SIZE})`} />)}
+          </clipPath>
+        ) : null}
         {materials.map((plan, index) => plan && (
           <AvatarMaterialFilter key={portraitLayers[index].kind} id={`avatar-material-${id}-${index}`}
             plan={plan} {...AVATAR_PORTRAIT_BOUNDS} />
@@ -85,7 +94,9 @@ export function AvatarRenderer({
         {avatar.displayMode === "default" ? (
           <SystemIconArtwork icon={avatar.iconType} tone={avatar.iconTone} x={82} y={82} size={348} />
         ) : portrait ? (
-          portraitLayers.map((layer, index) => (
+          <>
+          {outfit ? <AvatarFormalOutfitArtwork plan={outfit} id={`avatar-outfit-${id}`} /> : null}
+          {portraitLayers.map((layer, index) => (
             <image
               key={layer.kind}
               href={layer.src}
@@ -94,8 +105,10 @@ export function AvatarRenderer({
               width={AVATAR_PORTRAIT_BOUNDS.size}
               height={AVATAR_PORTRAIT_BOUNDS.size}
               filter={materials[index] ? `url(#avatar-material-${id}-${index})` : undefined}
+              clipPath={outfit ? `url(#${outfitClipId})` : undefined}
             />
-          ))
+          ))}
+          </>
         ) : nameMark ? (
           <text
             x={cx}

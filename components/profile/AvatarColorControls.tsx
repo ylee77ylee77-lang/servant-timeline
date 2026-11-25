@@ -10,13 +10,13 @@ import {
   normalizeAvatarColorSelection,
   rasterizeAvatarColorWheel,
   type AvatarColorHex,
-  type AvatarColorPart,
+  type AvatarPickerPart,
   type AvatarColorSelection,
 } from "@/lib/profile/avatar-color-wheel";
 
-export type AvatarColorChannel = Readonly<{ part: AvatarColorPart; original: AvatarColorHex }>;
-type ColorValues = Readonly<Partial<Record<AvatarColorPart, AvatarColorHex>>>;
-type DraftCache = Partial<Record<AvatarColorPart, Readonly<{
+export type AvatarColorChannel = Readonly<{ part: AvatarPickerPart; original: AvatarColorHex }>;
+type ColorValues = Readonly<Partial<Record<AvatarPickerPart, AvatarColorHex>>>;
+type DraftCache = Partial<Record<AvatarPickerPart, Readonly<{
   color: AvatarColorHex;
   selection: AvatarColorSelection;
 }>>>;
@@ -198,13 +198,13 @@ export function AvatarColorControls({
 }: {
   channels: readonly AvatarColorChannel[];
   values: ColorValues;
-  onChange: (part: AvatarColorPart, value: AvatarColorHex | null) => void;
+  onChange: (part: AvatarPickerPart, value: AvatarColorHex | null) => void;
 }) {
-  const [openPart, setOpenPart] = useState<AvatarColorPart | null>(null);
+  const [openPart, setOpenPart] = useState<AvatarPickerPart | null>(null);
   const [drafts, setDrafts] = useState<DraftCache>({});
   const id = useId();
 
-  function changeColor(part: AvatarColorPart, next: AvatarColorSelection | null) {
+  function changeColor(part: AvatarPickerPart, next: AvatarColorSelection | null) {
     if (next === null) {
       setDrafts((previous) => {
         const updated = { ...previous };

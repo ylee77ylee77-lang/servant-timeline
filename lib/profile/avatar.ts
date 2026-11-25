@@ -1,5 +1,6 @@
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
 import { normalizeAvatarHairstyle, type AvatarHairstyleId } from "./avatar-hairstyle.ts";
+import { normalizeAvatarFormalOutfit, type AvatarFormalOutfit } from "./avatar-formal-outfit.ts";
 
 export type AvatarStyle = "masculine" | "feminine" | "neutral";
 export type AvatarSkinTone = "light" | "warm" | "medium" | "deep";
@@ -38,6 +39,8 @@ export type AvatarConfig = {
   hair: AvatarHair;
   hairColor: AvatarHairColor;
   outfit: AvatarOutfit;
+  /** Explicit opt-in; the existing outfit field remains a legacy preference. */
+  formalOutfit?: AvatarFormalOutfit;
   background: AvatarBackground;
   eyeStyle: AvatarEyeStyle;
   glasses: boolean;
@@ -176,8 +179,10 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
     ? normalizePortraitFamily(input.portraitFamily, style) : undefined;
   const hairstyleVariant = Object.hasOwn(input, "hairstyleVariant")
     ? normalizeAvatarHairstyle(input.hairstyleVariant, style) : undefined;
+  const formalOutfit = Object.hasOwn(input, "formalOutfit") ? normalizeAvatarFormalOutfit(input.formalOutfit, style) : undefined;
   return {
     style,
+    ...(formalOutfit ? { formalOutfit } : {}),
     ...(portraitFamily ? { portraitFamily } : {}),
     ...(hairstyleVariant ? { hairstyleVariant } : {}),
     skinTone: skins.has(input.skinTone as AvatarSkinTone)
