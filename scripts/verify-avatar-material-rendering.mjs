@@ -23,6 +23,7 @@ import { avatarMaterialTransfer, getAvatarMaterialPlan, getAvatarMaterialSource 
 import { AVATAR_FRAME_PATHS } from "../lib/profile/avatar-frame-paths.ts";
 import { AVATAR_FEATURE_PATHS } from "../lib/profile/avatar-feature-paths.ts";
 import { createAvatarMaterialMask } from "./build-avatar-material-masks.mjs";
+import { refineCandidateMaterial } from "./refine-avatar-candidate-materials.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SIZE = 512;
@@ -572,62 +573,68 @@ async function main() {
       { name: "combined", colors: { hair: "#30343C", skin: "#E2B18A" } },
     ];
     report.independentCandidates = { visualAcceptance: "NOT_APPROVED", sources: [], cases: [] };
-    const candidateTiles = [];
+    const candidateTiles = { initial: [], refined: [] };
     const tile = 192, rowHeight = 218;
     for (const [row, [id, spec]] of Object.entries(manifest.sources).entries()) {
       assert.ok(["male-b", "female-b"].includes(id));
       const art = await fs.readFile(path.join(candidateRoot, id + ".webp"));
-      const mask = await fs.readFile(path.join(candidateRoot, "materials", id + ".png"));
+      const initialMask = await fs.readFile(path.join(candidateRoot, "materials", id + ".png"));
       assert.equal(sha256(art), spec.sourceSha256);
-      assert.equal(sha256(mask), spec.maskSha256);
+      assert.equal(sha256(initialMask), spec.maskSha256);
+      const refinement = await refineCandidateMaterial(id, art, initialMask);
+      await fs.writeFile(path.join(output, id + "-refined-mask.png"), refinement.png);
       const sourceUri = dataUri(await sharp(art).png().toBuffer());
       const baselinePng = await sharp(svgFor(sourceUri, null)).png().toBuffer();
       const baseline = await rgba(baselinePng);
-      const coverage = await rgba(mask);
-      const coverageCount = [0,0];
-      for (let i = 0; i < coverage.length; i += 4) {
-        assert.equal(coverage[i + 3], 255, id + ": mask must be opaque");
-        assert.equal(coverage[i + 2], 0, id + ": no eyewear channel");
-        assert.ok(coverage[i] + coverage[i + 1] <= 256, id + ": overlapping ownership");
-        for (let c = 0; c < 2; c++) if (coverage[i+c] > 128 && baseline[i+3] > 200) coverageCount[c]++;
-      }
-      for (let c = 0; c < 2; c++) {
-        const [x,y] = c === 0 ? spec.hairPoint : spec.skinPoint;
-        const i = imageIndex(x,y);
-        assert.ok(baseline[i+3] > 200 && coverage[i+c] > 200 && coverageCount[c] > 10000, id + ": channel missing");
-      }
-      report.independentCandidates.sources.push({ id, sourceSha256: spec.sourceSha256, maskSha256: spec.maskSha256, coverageCount });
-      const addTile = async (png, col, label) => {
-        const thumbnail = await sharp(png).resize(tile, tile).flatten({background:"#E9E1F3"}).png().toBuffer();
-        candidateTiles.push({input:thumbnail,left:col*tile,top:row*rowHeight+26});
-        candidateTiles.push({input:Buffer.from(`<svg width="${tile}" height="26"><text x="6" y="17" font-size="11" font-family="sans-serif" fill="#484151">${id} / ${label}</text></svg>`),left:col*tile,top:row*rowHeight});
-      };
-      await addTile(baselinePng, 0, "original");
-      for (const [col, item] of candidateCases.entries()) {
-        const parts = Object.keys(item.colors);
-        const plan = {
-          coverageUri: dataUri(mask), frameGuard: false,
-          channels: parts.map(part => ({part, tables:avatarMaterialTransfer(spec.originals[part], item.colors[part], part)})),
+      for (const [variant, mask] of [["initial", initialMask], ["refined", refinement.png]]) {
+        const coverage = await rgba(mask);
+        const coverageCount = [0,0];
+        for (let i = 0; i < coverage.length; i += 4) {
+          assert.equal(coverage[i + 3], 255, id + ": mask must be opaque");
+          assert.equal(coverage[i + 2], 0, id + ": no eyewear channel");
+          assert.ok(coverage[i] + coverage[i + 1] <= 256, id + ": overlapping ownership");
+          for (let c = 0; c < 2; c++) if (coverage[i+c] > 128 && baseline[i+3] > 200) coverageCount[c]++;
+        }
+        for (let c = 0; c < 2; c++) {
+          const [x,y] = c === 0 ? spec.hairPoint : spec.skinPoint;
+          const i = imageIndex(x,y);
+          assert.ok(baseline[i+3] > 200 && coverage[i+c] > 200 && coverageCount[c] > 10000, id + ": channel missing");
+        }
+        report.independentCandidates.sources.push({ id, variant, sourceSha256: spec.sourceSha256, maskSha256: sha256(mask), coverageCount, ...(variant === "refined" ? {restoredEye:refinement.restoredEye,restoredLip:refinement.restoredLip} : {}) });
+        const addTile = async (png, col, label) => {
+          const thumbnail = await sharp(png).resize(tile, tile).flatten({background:"#E9E1F3"}).png().toBuffer();
+          candidateTiles[variant].push({input:thumbnail,left:col*tile,top:row*rowHeight+26});
+          candidateTiles[variant].push({input:Buffer.from(`<svg width="${tile}" height="26"><text x="6" y="17" font-size="11" font-family="sans-serif" fill="#484151">${id} / ${label}</text></svg>`),left:col*tile,top:row*rowHeight});
         };
-        const png = await sharp(svgFor(sourceUri, plan)).png().toBuffer();
-        const pixels = await rgba(png);
-        const stats = rasterStats(baseline, pixels, coverage, parts);
-        const failures = [];
-        if (stats.maxAlphaDelta > 1) failures.push("alpha changed");
-        if (stats.opaqueOutsideChanged !== 0) failures.push("opaque RGB outside mask changed");
-        if (stats.maxOutsidePremultipliedDelta > 1) failures.push("premultiplied RGB outside mask changed");
-        for (const part of parts) if (stats.targetChangedPixels[part] < 100) failures.push(part + ": insufficient target change");
-        const protectedPixelsChecked = checkProtectedPatches(baseline, pixels, coverage, parts, spec.protected.map(([x,y])=>({x,y})), id, failures);
-        report.independentCandidates.cases.push({id, name:item.name, stats, protectedPixelsChecked, passed:failures.length===0, failures});
-        await addTile(png, col+1, item.name);
+        await addTile(baselinePng, 0, "original");
+        for (const [col, item] of candidateCases.entries()) {
+          const parts = Object.keys(item.colors);
+          const plan = {
+            coverageUri: dataUri(mask), frameGuard: false,
+            channels: parts.map(part => ({part, tables:avatarMaterialTransfer(spec.originals[part], item.colors[part], part)})),
+          };
+          const png = await sharp(svgFor(sourceUri, plan)).png().toBuffer();
+          const pixels = await rgba(png);
+          const stats = rasterStats(baseline, pixels, coverage, parts);
+          const failures = [];
+          if (stats.maxAlphaDelta > 1) failures.push("alpha changed");
+          if (stats.opaqueOutsideChanged !== 0) failures.push("opaque RGB outside mask changed");
+          if (stats.maxOutsidePremultipliedDelta > 1) failures.push("premultiplied RGB outside mask changed");
+          for (const part of parts) if (stats.targetChangedPixels[part] < 100) failures.push(part + ": insufficient target change");
+          const protectedPixelsChecked = checkProtectedPatches(baseline, pixels, coverage, parts, spec.protected.map(([x,y])=>({x,y})), id, failures);
+          report.independentCandidates.cases.push({id, variant, name:item.name, stats, protectedPixelsChecked, passed:failures.length===0, failures});
+          await addTile(png, col+1, item.name);
+        }
       }
     }
-    await sharp({create:{width:tile*(candidateCases.length+1),height:rowHeight*2,channels:3,background:"#F4F1F8"}})
-      .composite(candidateTiles).png().toFile(path.join(output,"independent-material-review.png"));
-    assert.equal(report.independentCandidates.cases.length,12);
+    for (const variant of ["initial","refined"]) {
+      await sharp({create:{width:tile*(candidateCases.length+1),height:rowHeight*2,channels:3,background:"#F4F1F8"}})
+        .composite(candidateTiles[variant]).png().toFile(path.join(output,variant === "initial" ? "independent-material-review.png" : "independent-material-refined-review.png"));
+    }
+    assert.equal(report.independentCandidates.cases.length,24);
     const failedCandidate = report.independentCandidates.cases.find(item=>!item.passed);
-    assert.ok(!failedCandidate, failedCandidate && failedCandidate.id + "/" + failedCandidate.name + ": " + failedCandidate.failures[0]);
-    console.log("INDEPENDENT_MATERIAL_PROOF " + JSON.stringify({cases:12,source:"actual AvatarMaterialFilter, candidate only",visualAcceptance:"NOT_APPROVED"}));
+    assert.ok(!failedCandidate, failedCandidate && failedCandidate.id + "/" + failedCandidate.variant + "/" + failedCandidate.name + ": " + failedCandidate.failures[0]);
+    console.log("INDEPENDENT_MATERIAL_PROOF " + JSON.stringify({cases:24,source:"actual AvatarMaterialFilter, initial and refined candidates only",visualAcceptance:"NOT_APPROVED"}));
     report.status = "passed";
   } catch (error) {
     report.status = "failed";

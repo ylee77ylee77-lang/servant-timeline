@@ -54,3 +54,25 @@ and lips. Keep this candidate-only; do not register in runtime until refined
 and approved. The 2D masters still need identity-locked hairstyle assets,
 source-specific eyewear and outfit fitting, and browser/device validation.
 No profile fields, runtime UI, or production behavior change.
+
+## Periocular and lip-edge refinement
+
+The previous 12-case SVG filter CI (#275) passed, but visual review still
+showed pale original-tone borders. The new source-aware refinement helper
+uses tight feature envelopes, warm skin evidence, protected eye interiors,
+and graded lip-edge ownership for these two closed-mouth masters. The
+original masks remain pinned, the hair channel is bit-identical, and no
+ownership outside the local envelopes is changed. The existing 16 protected
+3x3 patches and all existing renderer thresholds remain intact.
+
+Local Sharp generation restored skin coverage on 318 eye-edge and 1,011
+lip-edge pixels (male), 434 and 1,467 respectively (female). Local offline
+color simulation preserved unselected pixels and source alpha and showed
+less conspicuous lip outlines. Fine eye-edge variation and extreme-tone
+artistry still need visual approval; this is not an iPhone test. Lip-edge
+tissue may now tint partially while central protected samples remain exact.
+
+The CI verifier keeps the original 12 cases as controls and adds 12 cases
+for the deterministically refined masks. It saves both comparison sheets and
+regenerated masks as review artifacts. New CI is pending. Runtime remains
+unchanged; hairstyle, eyewear and garment alignment are not implemented.
