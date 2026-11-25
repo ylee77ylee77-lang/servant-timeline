@@ -73,6 +73,45 @@ function Seams({ shades, male }: { shades: Shade; male: boolean }) {
   );
 }
 
+/** Casual garments reuse the source-fitted silhouette and palette.
+ * The shared cutout preserves the original face, hair and neck. */
+function CasualDetails({ plan, mainId, innerId, primary, inner }: {
+  plan: Plan; mainId: string; innerId: string; primary: Shade; inner: Shade;
+}) {
+  const male = plan.style === "masculine";
+  const neck = male ? "M189 388Q259 459 338 388" : "M210 408Q276 458 344 407";
+  if (plan.id === "casual-polo") return (
+    <>
+      <path d="M181 389Q259 449 346 388L350 403Q261 462 176 404Z" fill={primary.deep} opacity=".45" />
+      <path d="M245 425Q259 435 273 425L277 512H242Z" fill={paint(mainId + "-fold")} stroke={primary.dark} strokeWidth="1.5" />
+      <Fold raised d="M189 388Q218 408 256 426L219 468Q190 450 160 411Z" edge="M160 411Q190 450 219 468L256 426" id={mainId} shades={primary} />
+      <Fold raised d="M338 388Q309 408 263 426L300 468Q334 448 360 409Z" edge="M360 409Q334 448 300 468L263 426" id={mainId} shades={primary} />
+      <Button cx={260} cy={476} shades={primary} radius={4.2} />
+      <Button cx={260} cy={501} shades={primary} radius={4.2} />
+    </>
+  );
+  if (plan.id === "casual-cardigan") return (
+    <>
+      <path d="M208 408L276 436L346 407L321 512H231Z" fill={paint(innerId)} />
+      <path d={neck} fill="none" stroke={inner.dark} strokeWidth="6" opacity=".42" />
+      <path d={neck} fill="none" stroke={inner.light} strokeWidth="2.5" opacity=".76" />
+      <Fold raised d="M210 408Q231 451 270 493L262 512H243Q208 469 188 419Z" edge="M188 419Q208 469 243 512" id={mainId} shades={primary} />
+      <Fold raised d="M344 407Q324 453 285 493L294 512H312Q347 466 365 419Z" edge="M365 419Q347 466 312 512" id={mainId} shades={primary} />
+      <Button cx={245} cy={503} shades={primary} radius={4} />
+    </>
+  );
+  return (
+    <>
+      <path d={neck} fill="none" stroke={primary.deep} strokeWidth="15" opacity=".36" />
+      <path d={neck} fill="none" stroke={paint(mainId + "-raised")} strokeWidth="11" strokeLinecap="round" />
+      <path d={neck} transform="translate(0 4)" fill="none" stroke={primary.edge} strokeWidth="2.2" opacity=".68" />
+      {(male ? [205, 228, 251, 274, 297, 320] : [218, 242, 266, 290, 314, 338]).map((x, i) => (
+        <path key={x} d={`M${x} ${male ? 443 : 456}q${(i - 2.5) * 1.6} 20 ${(i - 2.5) * 3} 59`} fill="none" stroke={primary.light} strokeWidth="2.2" opacity=".23" strokeLinecap="round" />
+      ))}
+    </>
+  );
+}
+
 /** Garment-only artwork aligned to the pinned 512px portrait sources.
  * The source head/hair/neck is composed independently above it. This is
  * dimensionally shaded 2D artwork, not a rigged 3D garment mesh. */
@@ -86,6 +125,7 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
   const jacket = plan.id === "suit-tie" || plan.id === "blazer" || plan.id === "tailored-suit";
   const open = plan.id === "blazer";
   const satin = plan.id === "formal-dress";
+  const casual = plan.id === "casual-polo" || plan.id === "casual-crewneck" || plan.id === "casual-knit" || plan.id === "casual-cardigan";
   const weaveId = id + "-weave";
   const collar = jacket ? inner : primary;
   const collarId = jacket ? innerId : mainId;
@@ -119,7 +159,9 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
         <path d="M-8 515Q50 442 159 429Q109 455 91 512Z" fill={primary.light} opacity=".15" />
         <path d="M361 422Q469 449 524 512H430Q431 475 361 422Z" fill={primary.deep} opacity=".13" />
         <Seams male={male} shades={primary} />
-        {male ? (
+        {casual ? (
+          <CasualDetails plan={plan} mainId={mainId} innerId={innerId} primary={primary} inner={inner} />
+        ) : male ? (
           <>
             {jacket && <path d={open ? "M183 388L259 424L342 388L313 460L288 512H225L203 459Z" : "M189 388L259 424L338 388L309 466L289 512H223L211 466Z"} fill={paint(innerId)} />}
             {open ? (
