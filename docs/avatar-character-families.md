@@ -18,3 +18,7 @@ artwork is exposed yet. The next source art pass must provide the four complete
 aligned families, coverage verification and actual mobile visual acceptance.
 Original five backgrounds, four animals, sticky preview and released eyewear
 choices remain unchanged. This draft must not merge before review.
+
+## Actual art trial
+
+See [four expression-locked hairstyle candidates](avatar-character-art-review.md). The protected-face check passes; the full art/material/size/release gates remain open.
