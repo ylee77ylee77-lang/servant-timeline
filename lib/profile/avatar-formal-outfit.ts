@@ -69,17 +69,19 @@ export function getAvatarOutfitChannels(avatar: AvatarConfig) {
 
 /** Source-specific cutouts remove the old painted garment, retaining face,
  * hair and the visible neck. Paths are expressed in the pinned 512px source
- * artboard, not in CSS or device-dependent coordinates. */
-const MALE = "M0 0H512V318H351Q337 339 329 345L330 368Q331 380 338 391L269 425Q260 430 251 425L188 391Q196 380 195 365L195 344Q179 331 171 318H0Z";
+ * artboard, not in CSS or device-dependent coordinates. The upper and side
+ * edges extend beyond the image bounds so clipping cannot multiply the
+ * fractional antialias coverage of the original image or filter viewport. */
+const MALE = "M-512 -512H1024V318H351Q337 339 329 345L330 368Q331 380 338 391L269 425Q260 430 251 425L188 391Q196 380 195 365L195 344Q179 331 171 318H-512Z";
 // A garment cutout is not a color-ownership mask. Keep the ENTIRE
 // upper portrait in a single contiguous path, including the hairline,
 // eyebrows, ears, and all transparent antialiased silhouette pixels.
 // Trace only the original sweater's lower edge and the front long hair.
 // The earlier union of hair/skin color paths left gaps through the face.
-const FEMALE_LONG_HAIR = "M0 0H512V448L451 447C426 440 404 433 385 426C367 421 354 413 342 416C332 432 311 437 282 439C255 441 229 435 211 423C216 442 213 462 202 477C195 492 193 504 197 512H52C51 484 54 466 68 452Q75 446 82 442H0Z";
+const FEMALE_LONG_HAIR = "M-512 -512H1024V448H512L451 447C426 440 404 433 385 426C367 421 354 413 342 416C332 432 311 437 282 439C255 441 229 435 211 423C216 442 213 462 202 477C195 492 193 504 197 512H52C51 484 54 466 68 452Q75 446 82 442H-512Z";
 // Bob and bun have no original sweater above y393. Preserve the full
 // fringe, the bob silhouette, and the loose bun wisps before the collar.
-const FEMALE_HEAD = "M0 0H512V393H329Q333 405 343 414Q324 430 302 436Q275 443 249 436Q221 431 209 420Q218 408 211 393H0Z";
+const FEMALE_HEAD = "M-512 -512H1024V393H329Q333 405 343 414Q324 430 302 436Q275 443 249 436Q221 431 209 420Q218 408 211 393H-512Z";
 const FITS: Record<string, readonly string[]> = Object.fromEntries([
   ["/avatar/scenes/v2/male.webp", [MALE]],
   ["/avatar/scenes/v2/male-glasses.webp", [MALE]],
