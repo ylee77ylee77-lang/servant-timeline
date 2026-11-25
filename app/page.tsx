@@ -38,6 +38,7 @@ import { LiveServiceStatusDashboard } from '@/components/service/LiveServiceStat
 import { AvatarSettingsCard } from '@/components/profile/AvatarSettingsCard';
 import { SystemAvatar } from '@/components/profile/SystemAvatar';
 import { PersonalPreferencesCards } from '@/components/profile/PersonalPreferencesCards';
+import { useBackgroundReminders } from '@/components/notification/useBackgroundReminders';
 import { AdminVoiceTestCard } from '@/components/voice/AdminVoiceTestCard';
 import type { SettingsPanel } from '@/components/profile/SettingsAccordionCard';
 import { CommunicationHub } from '@/components/communications/CommunicationHub';
@@ -503,6 +504,14 @@ export default function App() {
     voiceProfile: "zephyr" as "zephyr" | "iapetus"
   });
 
+  const backgroundReminder = useBackgroundReminders({
+    accessToken: session.access_token, userId: session.user.id,
+    loaded: personalSettingsLoaded, enabled: personalSettings.vibrationReminderEnabled,
+    allowPreview: isAdmin,
+    serviceType: checkinStatus !== "not_checked_in" && checkInId ? checkedInService : "",
+    checkInId,
+  });
+
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -663,6 +672,9 @@ export default function App() {
 
   const updatePersonalSettings = (patch: Partial<typeof personalSettings>) => {
     setPersonalSettings(prev => ({ ...prev, ...patch }));
+    if (typeof patch.vibrationReminderEnabled === "boolean") {
+      backgroundReminder.onPreferenceChange(patch.vibrationReminderEnabled);
+    }
     if (typeof patch.voiceReminderEnabled !== "boolean") return;
     const nextEnabled = patch.voiceReminderEnabled;
     if (nextEnabled && !isAdmin && (checkinStatus === "not_checked_in"
@@ -5860,6 +5872,10 @@ export default function App() {
         <PersonalPreferencesCards
           settings={personalSettings}
           onChange={updatePersonalSettings}
+          backgroundVibrationStatus={backgroundReminder.status}
+          onAuthorizeBackgroundVibration={backgroundReminder.authorize}
+          onRetryBackgroundVibration={backgroundReminder.refresh}
+          backgroundVibrationTest={backgroundReminder.previewTest}
           isVoiceEnabled={isVoiceEnabled}
           isWakeLockActive={isWakeLockActive}
           expandedPanel={expandedSettingsPanel}

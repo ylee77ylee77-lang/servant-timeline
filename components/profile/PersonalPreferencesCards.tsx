@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { AudioLines, Bell, ChevronDown, ChevronUp } from "lucide-react";
 import { SettingsAccordionCard, type SettingsPanel } from "@/components/profile/SettingsAccordionCard";
+import type { DeviceSyncStatus } from "@/lib/notifications/background-device-client";
 import { MAX_REMINDER_LEAD_MINUTES, formatReminderLeadLabel, normalizeReminderLeadTime, stepReminderLeadTime } from "@/lib/voice/reminder-timing";
 
 type VoiceProfile = "zephyr" | "iapetus";
@@ -26,6 +27,10 @@ type PersonalPreferencesCardsProps = {
   isWakeLockActive: boolean;
   expandedPanel: SettingsPanel | null;
   onToggle: (panel: SettingsPanel) => void;
+  backgroundVibrationStatus?: DeviceSyncStatus | null;
+  onAuthorizeBackgroundVibration?: () => void;
+  onRetryBackgroundVibration?: () => void;
+  backgroundVibrationTest?: { pending: boolean; available: boolean; message: string; start: () => void };
 };
 
 const VOICE_OPTIONS = [
@@ -138,6 +143,10 @@ export function PersonalPreferencesCards({
   onChange,
   expandedPanel,
   onToggle,
+  backgroundVibrationStatus,
+  onAuthorizeBackgroundVibration,
+  onRetryBackgroundVibration,
+  backgroundVibrationTest,
 }: PersonalPreferencesCardsProps) {
   const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲" : "女聲";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
@@ -193,12 +202,19 @@ export function PersonalPreferencesCards({
             <span className="min-w-0">
               <span className="block text-sm font-black text-[#1F2937]">震動提醒</span>
               <span className="mt-0.5 block text-[11px] font-medium leading-4 text-[#7B7B74]">
-                {vibrationCapability === "ios-switch"
+                {backgroundVibrationStatus?.message ?? (vibrationCapability === "ios-switch"
                   ? "iPhone 點選開關可有觸覺回饋；任務到點自動震動需使用系統通知或原生 App。"
                   : vibrationCapability === "none"
                     ? "此瀏覽器不支援任務到點的網頁震動。"
-                    : "進入下一個任務區塊時震動提醒。"}
+                    : "進入下一個任務區塊時震動提醒。")}
               </span>
+              {backgroundVibrationStatus?.action && (settings.vibrationReminderEnabled || backgroundVibrationStatus.action === "retry") && (
+                <button type="button"
+                  onClick={backgroundVibrationStatus.action === "authorize" ? onAuthorizeBackgroundVibration : onRetryBackgroundVibration}
+                  className="mt-1 min-h-8 text-[11px] font-bold text-[#6D55A3] underline">
+                  {backgroundVibrationStatus.action === "authorize" ? "啟用背景通知" : "重新檢查"}
+                </button>
+              )}
             </span>
             <PreferenceSwitch
               label="震動提醒"
@@ -207,6 +223,20 @@ export function PersonalPreferencesCards({
               onToggle={() => onChange({ vibrationReminderEnabled: !settings.vibrationReminderEnabled })}
             />
           </div>
+
+          {backgroundVibrationTest && (
+            <div className="space-y-2 rounded-2xl border border-[#E6EAF0] bg-[#FFF9F3] p-3.5">
+              <p className="text-xs font-black text-[#6D55A3]">管理員｜背景震動實機驗收</p>
+              <p className="text-[11px] leading-4 text-[#7B7B74]">三個模擬任務，不需報到、不影響正式服事。關閉開關會嘗試取消手機訂閱；已送出的通知無法撤回。</p>
+              <button type="button"
+                disabled={!backgroundVibrationTest.available || backgroundVibrationTest.pending}
+                onClick={backgroundVibrationTest.start}
+                className="min-h-11 w-full rounded-xl bg-[#6D55A3] px-3 text-sm font-bold text-white disabled:opacity-40">
+                {backgroundVibrationTest.pending ? "正在啟動…" : "開始三個模擬任務"}
+              </button>
+              {backgroundVibrationTest.message && <p role="status" className="text-xs leading-5 text-[#1F2937]">{backgroundVibrationTest.message}</p>}
+            </div>
+          )}
 
           {/* The voice switch directly shows or hides its third-level options. */}
           <div className="overflow-hidden rounded-2xl border border-[#E6EAF0] bg-white">

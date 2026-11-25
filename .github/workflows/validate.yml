@@ -116,8 +116,17 @@ jobs:
           version: 2.101.0
           github-token: ${{ github.token }}
 
-      - name: Normalize local Supabase config for stable CLI
-        run: sed -i 's/^\[local_smtp\]$/[inbucket]/' supabase/config.toml
+      - name: Normalize disposable local Supabase config for stable CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/^\[local_smtp\]$/[inbucket]/' supabase/config.toml
+          # In this CLI version auth.email.enable_signup also toggles the
+          # provider itself. Enable password login in the disposable runner,
+          # while retaining the global prohibition on self-service signup.
+          # Never push this config to a remote project.
+          sed -i '/^\[auth\.email\]$/,/^\[/s/^enable_signup = false$/enable_signup = true/' supabase/config.toml
+          python3 -c 'import tomllib; a=tomllib.load(open("supabase/config.toml","rb"))["auth"]; assert a["enable_signup"] is False and a["email"]["enable_signup"] is True'
 
       - name: Start isolated local Supabase and apply migrations
         id: supabase_start
@@ -149,6 +158,9 @@ jobs:
           set -euo pipefail
           eval "$(supabase status -o env)"
           echo "DATABASE_URL=${DB_URL}" >> "$GITHUB_ENV"
+
+      - name: Verify migration history in local database
+        run: supabase migration list --local
 
       - name: Run database verification scripts
         id: database_tests
@@ -187,6 +199,35 @@ jobs:
       - name: Fail when database verification failed
         if: steps.database_tests.outputs.exit_code != '0'
         run: exit 1
+
+      - name: Set up Node.js for reminder integration
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install local integration dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify full background reminder path in disposable Supabase
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env)"
+          export LOCAL_SUPABASE_URL="$API_URL"
+          export LOCAL_SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          export LOCAL_SUPABASE_ANON_KEY="$ANON_KEY"
+          export BACKGROUND_REMINDER_LOCAL_TEST=1
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/verify-background-reminders-integration.mjs
+
+      - name: Review local database security advisors
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db advisors --help
+          # Existing unrelated advisory findings do not alter release policy.
+          # Review findings for the new reminder objects before approval.
+          supabase db advisors --local --type security --fail-on error
 
       - name: Stop local Supabase
         if: always()
