@@ -3,7 +3,7 @@
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import { AvatarLivePreview } from "@/components/profile/AvatarControls";
 import { getAvatarHairstyleOptions, getAvatarHairstyle, selectAvatarHairstyle } from "@/lib/profile/avatar-hairstyle";
-import { getAvatarFormalOptions, getAvatarOutfitChannels, selectAvatarFormalOutfit, setAvatarOutfitColor } from "@/lib/profile/avatar-formal-outfit";
+import { getAvatarOutfitOptions, getAvatarOutfitChannels, selectAvatarFormalOutfit, setAvatarOutfitColor } from "@/lib/profile/avatar-formal-outfit";
 import { AvatarColorControls } from "@/components/profile/AvatarColorControls";
 import { AVATAR_EYEWEAR_CHOICES, getAvatarLegacyEyewearChoice, selectAvatarLegacyEyewear } from "@/lib/profile/avatar-eyewear";
 import { getAvatarMaterialChannels, setAvatarMaterialColor } from "@/lib/profile/avatar-materials";
@@ -60,7 +60,7 @@ export function AvatarEditor({
   const materialChannels = getAvatarMaterialChannels(avatar);
   const hairstyleOptions = getAvatarHairstyleOptions(avatar.style);
   const selectedHairstyle = getAvatarHairstyle(avatar);
-  const outfitOptions = portraitOptions?.active ? [] : getAvatarFormalOptions(avatar.style);
+  const outfitOptions = portraitOptions?.active ? [] : getAvatarOutfitOptions(avatar.style);
   const outfitChannels = outfitOptions.length ? getAvatarOutfitChannels(avatar) : [];
   const colorChannels = [...materialChannels, ...outfitChannels];
 
