@@ -21,6 +21,13 @@ function Fabric({ id, shades }: { id: string; shades: Shade }) {
         <stop offset=".82" stopColor={shades.mid} />
         <stop offset="1" stopColor={shades.dark} />
       </linearGradient>
+      <linearGradient id={id + "-raised"} x1="0" y1="0" x2=".65" y2="1">
+        <stop offset="0" stopColor={shades.dark} />
+        <stop offset=".16" stopColor={shades.edge} />
+        <stop offset=".42" stopColor={shades.light} />
+        <stop offset=".76" stopColor={shades.mid} />
+        <stop offset="1" stopColor={shades.dark} />
+      </linearGradient>
       <linearGradient id={id + "-edge"} x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stopColor={shades.edge} />
         <stop offset=".48" stopColor={shades.mid} />
@@ -32,14 +39,15 @@ function Fabric({ id, shades }: { id: string; shades: Shade }) {
 
 /** Raised fabric fold: contact shadow, modeled face, and turned edge.
  * All colors derive from the independently adjustable material palette. */
-function Fold({ d, edge, id, shades }: { d: string; edge: string; id: string; shades: Shade }) {
+function Fold({ d, edge, id, shades, raised = false }: { d: string; edge: string; id: string; shades: Shade; raised?: boolean }) {
   return (
     <g strokeLinejoin="round" strokeLinecap="round">
-      <path d={d} transform="translate(1 4)" fill={shades.deep} stroke={shades.deep} strokeWidth="5" opacity=".26" />
-      <path d={d} fill={paint(id + "-fold")} stroke={shades.dark} strokeWidth="1.3" />
-      <path d={edge} fill="none" stroke={shades.deep} strokeWidth="4.4" opacity=".46" />
-      <path d={edge} transform="translate(0 -1.4)" fill="none" stroke={paint(id + "-edge")} strokeWidth="2.3" />
-      <path d={edge} transform="translate(0 -3.4)" fill="none" stroke={shades.edge} strokeWidth="1" opacity=".48" />
+      {/* Stronger contact shadows and lit turned edges on collars/lapels only. */}
+      <path d={d} transform={raised ? "translate(1 7)" : "translate(1 4)"} fill={shades.deep} stroke={shades.deep} strokeWidth={raised ? 7 : 5} opacity={raised ? .38 : .26} />
+      <path d={d} fill={paint(id + (raised ? "-raised" : "-fold"))} stroke={shades.dark} strokeWidth={raised ? 2 : 1.3} />
+      <path d={edge} fill="none" stroke={shades.deep} strokeWidth={raised ? 6 : 4.4} opacity={raised ? .58 : .46} />
+      <path d={edge} transform={raised ? "translate(0 -2)" : "translate(0 -1.4)"} fill="none" stroke={paint(id + "-edge")} strokeWidth={raised ? 3.3 : 2.3} />
+      <path d={edge} transform={raised ? "translate(0 -4.6)" : "translate(0 -3.4)"} fill="none" stroke={shades.edge} strokeWidth={raised ? 1.8 : 1} opacity={raised ? .72 : .48} />
     </g>
   );
 }
@@ -77,6 +85,8 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
   const male = plan.style === "masculine";
   const jacket = plan.id === "suit-tie" || plan.id === "blazer" || plan.id === "tailored-suit";
   const open = plan.id === "blazer";
+  const satin = plan.id === "formal-dress";
+  const weaveId = id + "-weave";
   const collar = jacket ? inner : primary;
   const collarId = jacket ? innerId : mainId;
   const body = male
@@ -87,9 +97,25 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
       <defs>
         <Fabric id={mainId} shades={primary} /><Fabric id={innerId} shades={inner} /><Fabric id={tieId} shades={tie} />
         <clipPath id={id + "-body"}><path d={body} /></clipPath>
+        {/* Restrained, palette-derived textile direction; no external images. */}
+        {!satin && (
+          <pattern id={weaveId} patternUnits="userSpaceOnUse" width="12" height="12" patternTransform={jacket ? "rotate(35)" : undefined}>
+            <path d="M1 0V12" stroke={primary.deep} strokeWidth="1" opacity=".15" />
+            <path d="M3 0V12" stroke={primary.edge} strokeWidth=".8" opacity=".2" />
+          </pattern>
+        )}
+        {satin && (
+          <linearGradient id={id + "-satin-sheen"} x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0" stopColor={primary.light} stopOpacity="0" />
+            <stop offset=".43" stopColor={primary.edge} stopOpacity=".09" />
+            <stop offset=".58" stopColor={primary.edge} stopOpacity=".18" />
+            <stop offset=".73" stopColor={primary.light} stopOpacity="0" />
+          </linearGradient>
+        )}
       </defs>
       <path d={body} fill={paint(mainId)} />
       <g clipPath={paint(id + "-body")}>
+        <path d={body} fill={paint(satin ? id + "-satin-sheen" : weaveId)} />
         <path d="M-8 515Q50 442 159 429Q109 455 91 512Z" fill={primary.light} opacity=".15" />
         <path d="M361 422Q469 449 524 512H430Q431 475 361 422Z" fill={primary.deep} opacity=".13" />
         <Seams male={male} shades={primary} />
@@ -105,7 +131,7 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
               </>
             ) : (
               <>
-                <path d="M181 389Q259 449 346 388L349 400Q261 458 177 401Z" fill={collar.deep} opacity=".34" />
+                <path d="M181 389Q259 449 346 388L350 403Q261 462 176 404Z" fill={collar.deep} opacity=".43" />
                 <path d="M253 428Q262 433 270 427L272 512H248Z" fill={paint(collarId + "-fold")} />
                 <path d="M249 450L248 512M270 451L272 512" stroke={collar.dark} strokeWidth="1.25" opacity=".42" />
               </>
@@ -126,14 +152,14 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
             ) : null}
             {!open && (
               <>
-                <Fold d="M189 388Q218 409 258 426L230 453Q200 437 168 410Z" edge="M169 410Q199 438 230 453L258 426" id={collarId} shades={collar} />
-                <Fold d="M338 388Q309 409 261 426L288 453Q324 436 353 409Z" edge="M353 409Q324 436 288 453L261 426" id={collarId} shades={collar} />
+                <Fold raised d="M189 388Q218 409 258 426L224 466Q192 447 164 410Z" edge="M164 410Q192 447 224 466L258 426" id={collarId} shades={collar} />
+                <Fold raised d="M338 388Q309 409 261 426L295 466Q331 445 357 409Z" edge="M357 409Q331 445 295 466L261 426" id={collarId} shades={collar} />
               </>
             )}
             {jacket && (
               <>
-                <Fold d="M189 388Q159 402 131 425L173 441L154 463Q193 490 232 512H254Q229 472 212 444Z" edge="M132 425L173 441L154 463Q194 490 232 512" id={mainId} shades={primary} />
-                <Fold d="M338 388Q369 402 395 425L352 441L371 464Q331 490 294 512H271Q290 474 310 444Z" edge="M395 425L352 441L371 464Q332 490 294 512" id={mainId} shades={primary} />
+                <Fold raised d="M189 388Q157 402 126 426L176 442L151 467Q193 494 232 512H257Q231 472 215 443Z" edge="M126 426L176 442L151 467Q193 494 232 512" id={mainId} shades={primary} />
+                <Fold raised d="M338 388Q372 402 401 426L348 442L375 467Q331 494 294 512H268Q289 473 306 443Z" edge="M401 426L348 442L375 467Q331 494 294 512" id={mainId} shades={primary} />
                 <path d="M345 472L395 478" stroke={primary.deep} strokeWidth="7" opacity=".32" strokeLinecap="round" />
                 <path d="M346 470L395 476" stroke={paint(mainId + "-fold")} strokeWidth="5" strokeLinecap="round" />
                 <path d="M346 469L395 475" stroke={primary.edge} strokeWidth="1.1" opacity=".5" strokeLinecap="round" />
@@ -145,8 +171,8 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
             <path d="M208 408L276 436L346 407L317 512H233Z" fill={paint(innerId)} />
             <path d="M210 410Q276 451 344 409" fill="none" stroke={inner.deep} strokeWidth="5" opacity=".32" />
             <path d="M210 408Q275 447 344 407" fill="none" stroke={inner.light} strokeWidth="3" opacity=".62" />
-            <Fold d="M210 408Q178 419 153 434L198 450L180 472Q215 493 245 512H268Q249 472 238 458Z" edge="M153 434L198 450L180 472Q216 493 245 512" id={mainId} shades={primary} />
-            <Fold d="M344 407Q376 417 399 433L353 451L371 472Q338 493 309 512H283Q301 474 316 455Z" edge="M399 433L353 451L371 472Q337 493 309 512" id={mainId} shades={primary} />
+            <Fold raised d="M210 408Q177 419 149 434L198 450L175 476Q213 496 245 512H270Q251 472 238 456Z" edge="M149 434L198 450L175 476Q213 496 245 512" id={mainId} shades={primary} />
+            <Fold raised d="M344 407Q377 417 405 433L353 451L376 476Q340 496 309 512H281Q299 474 316 454Z" edge="M405 433L353 451L376 476Q340 496 309 512" id={mainId} shades={primary} />
             <path d="M355 480L401 484" stroke={primary.deep} strokeWidth="6" opacity=".3" strokeLinecap="round" />
             <path d="M355 478L401 482" stroke={paint(mainId + "-fold")} strokeWidth="4" strokeLinecap="round" />
             <path d="M355 477L400 481" stroke={primary.edge} strokeWidth="1" opacity=".6" strokeLinecap="round" />
@@ -155,8 +181,8 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
           <>
             <path d="M267 437Q276 442 284 437L288 512H263Z" fill={paint(mainId + "-fold")} />
             <path d="M264 458L263 512M286 458L288 512" stroke={primary.dark} opacity=".45" strokeWidth="1.3" />
-            <Fold d="M210 408Q236 425 274 438Q262 452 245 462Q223 462 184 430Z" edge="M185 430Q221 462 245 462Q263 451 274 438" id={mainId} shades={primary} />
-            <Fold d="M344 407Q318 427 278 438Q289 453 305 462Q331 459 368 429Z" edge="M368 429Q331 459 305 462Q289 453 278 438" id={mainId} shades={primary} />
+            <Fold raised d="M210 408Q236 425 274 438Q262 458 240 473Q213 469 179 430Z" edge="M179 430Q213 469 240 473Q262 458 274 438" id={mainId} shades={primary} />
+            <Fold raised d="M344 407Q318 427 278 438Q289 458 311 473Q341 468 373 429Z" edge="M373 429Q341 468 311 473Q289 458 278 438" id={mainId} shades={primary} />
             <Button cx={276} cy={477} shades={primary} radius={4.1} />
             <Button cx={276} cy={503} shades={primary} radius={4.1} />
             <path d="M139 451Q164 462 177 486M410 451Q389 461 375 486" fill="none" stroke={primary.edge} strokeWidth="1.6" opacity=".34" strokeLinecap="round" />
