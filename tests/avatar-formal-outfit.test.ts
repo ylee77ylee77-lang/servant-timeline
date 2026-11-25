@@ -4,7 +4,7 @@ import { normalizeAvatarConfig, AVATAR_DEFAULTS } from "../lib/profile/avatar.ts
 import { getAvatarScene } from "../lib/profile/avatar-scene.ts";
 import { AVATAR_HAIRSTYLES, selectAvatarHairstyle } from "../lib/profile/avatar-hairstyle.ts";
 import { selectClassicHairTone } from "../lib/profile/avatar-portrait.ts";
-import { getAvatarFormalOptions, getAvatarFormalOutfitPlan, getAvatarOutfitChannels, selectAvatarFormalOutfit, setAvatarOutfitColor, outfitShades } from "../lib/profile/avatar-formal-outfit.ts";
+import { getAvatarCasualOptions, getAvatarOutfitOptions, getAvatarFormalOptions, getAvatarFormalOutfitPlan, getAvatarOutfitChannels, selectAvatarFormalOutfit, setAvatarOutfitColor, outfitShades } from "../lib/profile/avatar-formal-outfit.ts";
 
 test("original clothing is untouched; formal options are explicit and restore the old source", () => {
   for (const style of ["masculine","feminine"] as const) {
@@ -59,4 +59,31 @@ test("outfit availability follows the resolved source, not dormant family metada
   const scene=getAvatarScene(config);
   assert.ok(getAvatarFormalOutfitPlan(config,scene.portrait));
   assert.equal(getAvatarFormalOutfitPlan(config,"/avatar/scenes/v3/future/face.webp"),null);
+});
+
+test("P6 casual options are explicitly selected, independently colored and survive persistence", () => {
+  for (const style of ["masculine","feminine"] as const) {
+    const base=normalizeAvatarConfig({...AVATAR_DEFAULTS[style], pet:"eagle", glasses:true, materialColors:{hair:"#826E54"}});
+    assert.equal(getAvatarFormalOptions(style).length,3);
+    assert.equal(getAvatarCasualOptions(style).length,2);
+    assert.equal(getAvatarOutfitOptions(style).length,5);
+    for (const choice of getAvatarCasualOptions(style)) {
+      const selected=selectAvatarFormalOutfit(base,choice.id);
+      const colored=setAvatarOutfitColor(selected,"clothing","#667788");
+      const saved=normalizeAvatarConfig(JSON.parse(JSON.stringify(colored)));
+      assert.deepEqual(saved,colored);
+      assert.equal(saved.formalOutfit?.colors?.clothing,"#667788");
+      assert.deepEqual(saved.materialColors,base.materialColors);
+      assert.equal(saved.pet,base.pet);
+      assert.ok(getAvatarFormalOutfitPlan(saved,getAvatarScene(saved).portrait));
+      assert.deepEqual(selectAvatarFormalOutfit(saved,"original"),base);
+      assert.deepEqual(setAvatarOutfitColor(saved,"tie","#998877"),saved);
+      const other=normalizeAvatarConfig({...saved,style:style==="masculine"?"feminine":"masculine"});
+      assert.equal(other.formalOutfit,undefined);
+    }
+  }
+  const cardigan=selectAvatarFormalOutfit(AVATAR_DEFAULTS.feminine,"casual-cardigan");
+  assert.deepEqual(getAvatarOutfitChannels(cardigan).map(c=>c.part),["clothing","lining"]);
+  assert.equal(setAvatarOutfitColor(cardigan,"lining","#112233").formalOutfit?.colors?.lining,"#112233");
+  assert.equal(getAvatarCasualOptions("neutral").length,0);
 });
