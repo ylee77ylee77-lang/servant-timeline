@@ -49,6 +49,8 @@ export function AvatarRenderer({
   const outfit = getAvatarFormalOutfitPlan(avatar, portrait);
   const outfitClipId = `avatar-outfit-head-${id}`;
   const independent = getAvatarIndependent(avatar);
+  const independentScene = independent !== null && independent.src === portrait;
+  const sceneMaskId = `avatar-independent-scene-${id}`;
   const fitted = outfit && independent?.src === portrait ? getAvatarCandidateOutfitFit(independent.id) : null;
   const headMaskId = `avatar-fitted-head-${id}`;
   const garmentMaskId = `avatar-fitted-garment-${id}`;
@@ -74,7 +76,12 @@ export function AvatarRenderer({
       style={{ overflow: "visible", filter: "drop-shadow(0 3px 5px rgb(83 61 118 / 13%))" }}
     >
       <defs>
-        <radialGradient id={gradientId} cx="27%" cy="20%" r="85%">
+        <radialGradient id={gradientId} {...(independentScene ? {
+          gradientUnits: "userSpaceOnUse" as const,
+          cx: cx - radius + radius * 2 * .27,
+          cy: cy - radius + radius * 2 * .20,
+          r: radius * 2 * .85,
+        } : { cx: "27%", cy: "20%", r: "85%" })}>
           <stop offset="0%" stopColor={gradient.from} />
           <stop offset="58%" stopColor={gradient.middle} />
           <stop offset="100%" stopColor={gradient.to} />
@@ -82,6 +89,13 @@ export function AvatarRenderer({
         <clipPath id={clipId}>
           <circle cx={cx} cy={cy} r={radius} />
         </clipPath>
+        {/* Compose the opaque B1 scene before applying the circular alpha once.
+            Per-layer circle clipping changes antialiased rim pixels on small avatars. */}
+        {independentScene && (
+          <mask id={sceneMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={0} y={0} width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE}>
+            <circle cx={cx} cy={cy} r={radius} fill="white" />
+          </mask>
+        )}
         {fitted && independent ? (
           <>
             <mask id={headMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" {...maskBounds}><image href={independent.headUri} {...maskBounds} /></mask>
@@ -99,9 +113,10 @@ export function AvatarRenderer({
       </defs>
 
       {/* 1. Changeable background, entirely separate from transparent artwork. */}
-      <circle cx={cx} cy={cy} r={radius} fill={`url(#${gradientId})`} />
+      {!independentScene && <circle cx={cx} cy={cy} r={radius} fill={`url(#${gradientId})`} />}
 
-      <g clipPath={`url(#${clipId})`}>
+      <g clipPath={independentScene ? undefined : `url(#${clipId})`} mask={independentScene ? `url(#${sceneMaskId})` : undefined}>
+        {independentScene && <rect width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} fill={`url(#${gradientId})`} />}
         {/* 2. Portrait and 3. animal head/upper body stay inside the frame. */}
         {avatar.displayMode === "default" ? (
           <SystemIconArtwork icon={avatar.iconType} tone={avatar.iconTone} x={82} y={82} size={348} />

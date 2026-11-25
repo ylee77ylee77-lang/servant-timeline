@@ -233,6 +233,8 @@ async function verifySharedRenderer(output, loadComponent) {
     for (const match of svg.matchAll(/url\(([^)]+)\)/g)) assert.match(match[1], /^#[A-Za-z0-9_:-]+$/, "SVG resource references must stay inside the document");
     return Buffer.from(svg);
   }
+  const independentSceneCases = [];
+  let independentOutfitCases = [];
   {
     // Exercise the actual shared renderer, not a separate candidate compositor.
     const {getAvatarIndependentOptions,selectAvatarIndependent}=loadComponent(path.join(ROOT,"lib/profile/avatar-independent.ts"));
@@ -264,7 +266,7 @@ async function verifySharedRenderer(output, loadComponent) {
             for(let y=0;y<size;y++)for(let x=0;x<size;x++){
               const i=(y*size+x)*4,sy=((y+.5)*512/size-AVATAR_PORTRAIT_BOUNDS.y)*512/AVATAR_PORTRAIT_BOUNDS.size;
               const margin=3*512/size*512/AVATAR_PORTRAIT_BOUNDS.size;
-              assert.ok(Math.abs(reference.data[i+3]-result.data[i+3])<=1,source.id+": alpha");
+              assert.ok(Math.abs(reference.data[i+3]-result.data[i+3])<=1,source.id+"/"+choice.id+"/"+size+": alpha at "+x+","+y+" ("+reference.data[i+3]+" vs "+result.data[i+3]+")");
               if(sy<390-margin)assert.ok(pixelDelta(reference.data,result.data,i)<=2,source.id+"/"+choice.id+"/"+size+": head changed");
               if(pixelDelta(reference.data,result.data,i)>8)changed++;
             }
@@ -277,7 +279,55 @@ async function verifySharedRenderer(output, loadComponent) {
       }
     }
     assert.equal(b1Cases.length,120);
+    independentOutfitCases = b1Cases;
     await sharp({create:{width:1536,height:1536,channels:3,background:"#F4F1F8"}}).composite(b1Tiles).png().toFile(path.join(output,"independent-shared-renderer-review.png"));
+    // Every B1 hairstyle, all five existing backgrounds, all four companions
+    // plus none. Exercise a fitted outfit and glasses in the same mobile scene.
+    const {AVATAR_BACKGROUNDS,AVATAR_COMPANIONS,getAvatarScene}=loadComponent(path.join(ROOT,"lib/profile/avatar-scene.ts"));
+    const backgrounds=Object.keys(AVATAR_BACKGROUNDS);
+    const pets=["none",...Object.keys(AVATAR_COMPANIONS)];
+    assert.equal(backgrounds.length,5);assert.equal(pets.length,5);
+    const sceneTiles=[];
+    let sceneRow=0;
+    const size=80;
+    for(const style of ["masculine","feminine"]){
+      for(const source of getAvatarIndependentOptions(style)){
+        const chosen=selectAvatarIndependent(normalizeAvatarConfig({style,background:"sky",materialColors:{hair:"#654539",skin:"#986448",frame:"#B88E55"}}),source.id);
+        const framed=selectAvatarLegacyEyewear(chosen,"round");
+        const dressed=selectAvatarFormalOutfit(framed,style==="masculine"?"blazer":"tailored-suit");
+        const reference=await renderB1(dressed,size);
+        for(const [bgIndex,background] of backgrounds.entries()){
+          const bare={...dressed,background,pet:"none"};
+          const bareImage=await renderB1(bare,size);
+          let backgroundChanges=0;
+          for(let i=0;i<reference.data.length;i+=4){
+            assert.ok(Math.abs(reference.data[i+3]-bareImage.data[i+3])<=1,source.id+"/"+background+": background alpha");
+            if(pixelDelta(reference.data,bareImage.data,i)>8)backgroundChanges++;
+          }
+          if(background!=="sky")assert.ok(backgroundChanges>0,source.id+"/"+background+": background not visible");
+          for(const [petIndex,pet] of pets.entries()){
+            const config=normalizeAvatarConfig(JSON.parse(JSON.stringify({...bare,pet})));
+            assert.equal(getAvatarScene(config).portrait,source.src);
+            assert.deepEqual(getAvatarScene(config).gradient,AVATAR_BACKGROUNDS[background]);
+            assert.deepEqual(getAvatarScene(config).companion,pet==="none"?null:AVATAR_COMPANIONS[pet]);
+            assert.deepEqual(normalizeAvatarConfig(JSON.parse(JSON.stringify(config))),config);
+            const rendered=pet==="none"?bareImage:await renderB1(config,size);
+            let petChanges=0;
+            for(let i=0;i<rendered.data.length;i+=4){
+              assert.ok(Math.abs(rendered.data[i+3]-bareImage.data[i+3])<=1,source.id+"/"+background+"/"+pet+": companion alpha");
+              if(pixelDelta(rendered.data,bareImage.data,i)>8)petChanges++;
+            }
+            if(pet!=="none")assert.ok(petChanges>0,source.id+"/"+background+"/"+pet+": companion not visible");
+            independentSceneCases.push({source:source.id,background,pet,size,backgroundChanges,petChanges});
+            sceneTiles.push({input:rendered.png,left:(bgIndex*5+petIndex)*size,top:sceneRow*size});
+          }
+        }
+        sceneRow++;
+      }
+    }
+    assert.equal(independentSceneCases.length,150);
+    await sharp({create:{width:2000,height:480,channels:3,background:"#F4F1F8"}}).composite(sceneTiles).png().toFile(path.join(output,"independent-background-companion-review.png"));
+    console.log("INDEPENDENT_SCENE_PROOF "+JSON.stringify({cases:independentSceneCases.length,size:80,visualAcceptance:"NOT_APPROVED"}));
     console.log("INDEPENDENT_SHARED_RENDERER_PROOF "+JSON.stringify({cases:b1Cases.length,visualAcceptance:"NOT_APPROVED"}));
   }
   const results = [];
@@ -506,7 +556,7 @@ async function verifySharedRenderer(output, loadComponent) {
   const casualEncoded=(await sharp(path.join(output,"casual-outfit-review.png")).resize({width:600}).jpeg({quality:83}).toBuffer()).toString("base64");
   for(let i=0;i<casualEncoded.length;i+=2000) console.log("CASUAL_REVIEW "+String(i/2000).padStart(5,"0")+" "+casualEncoded.slice(i,i+2000));
   console.log("CASUAL_OUTFIT_PROOF "+JSON.stringify({cases:casualCases.length,faceProtected:true,source:"actual shared renderer"}));
-  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases, casualCases };
+  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases, casualCases, independentOutfitCases, independentSceneCases };
 }
 
 async function main() {

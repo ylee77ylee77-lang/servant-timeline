@@ -202,3 +202,19 @@ of malformed data, and JSON round trips. New CI, actual browser rendering,
 visual approval, registration and authenticated save/reopen on a preview
 site, and iPhone acceptance remain required before merge. Known residual
 hair-strand and feature-edge tint issues remain subject to visual review.
+
+## Integration rim and combined-scene regression
+
+CI #282 passed 227 unit tests and lint, but the shared renderer failed its
+first B1 outfit alpha assertion. A separate Sharp/librsvg diagnostic using
+the six actual portraits and their fit masks reproduced a maximum three-level
+alpha difference at the 48px antialiased circle boundary with the old scene
+composition. Compositing the B1 background and artwork into one opaque group
+and applying the circular mask once gave zero alpha difference across 30
+local comparisons (6 sources x 48/80/104/256/512px). This diagnostic used a
+plain fill garment, not the React component. The B1 gradient keeps the original
+circle-relative coordinates. Legacy, name and icon rendering are unchanged.
+The existing strict renderer thresholds remain. A new 150-case mobile matrix
+covers six B1 sources, five backgrounds, and four animals plus none, with
+fitted clothing, glasses, and JSON normalization. Latest full CI and
+actual browser/device/visual review are still required.
