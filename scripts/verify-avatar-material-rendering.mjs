@@ -26,6 +26,7 @@ import { createAvatarMaterialMask } from "./build-avatar-material-masks.mjs";
 import { refineCandidateMaterial } from "./refine-avatar-candidate-materials.mjs";
 import { verifyIndependentHairstyles } from "./verify-independent-avatar-hairstyles.mjs";
 import { makeVariantMask } from "./build-avatar-hairstyle-candidate-masks.mjs";
+import { verifyIndependentEyewear } from "./verify-independent-avatar-eyewear.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SIZE = 512;
@@ -712,6 +713,7 @@ async function main() {
     const failedHairstyleMaterial=report.independentHairstyleMaterials.cases.find(item=>!item.passed);
     assert.ok(!failedHairstyleMaterial,failedHairstyleMaterial && failedHairstyleMaterial.id+"/"+failedHairstyleMaterial.name+": "+failedHairstyleMaterial.failures[0]);
     console.log("INDEPENDENT_HAIRSTYLE_MATERIAL_PROOF "+JSON.stringify({cases:24,lockedOwnershipPixels:report.independentHairstyleMaterials.sources.reduce((n,item)=>n+item.lockedOwnershipPixels,0),visualAcceptance:"NOT_APPROVED"}));
+    report.independentEyewear = await verifyIndependentEyewear(ROOT, output, loadComponent, svgFor);
     report.status = "passed";
   } catch (error) {
     report.status = "failed";

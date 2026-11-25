@@ -122,3 +122,29 @@ bun hair strands and other edges at extreme light hair tones. This is a
 candidate stage, not visual approval or an actual interactive avatar. The
 sources still need eyewear and garment alignment, runtime registration,
 shared-renderer tests and device acceptance. No production or database change.
+
+## Candidate eyewear fitting
+
+CI #278 passed the preceding four source-specific hairstyle masks and 48
+candidate material cases, production build and database authorization. The
+new candidate geometry fits the original-style (recreated vector), round and
+square frames to the two B-face eye landmarks. Each hairstyle uses its own
+hair coverage to occlude the frame; the existing AvatarEyewear component's
+stroke, gradient, and frame color are reused. No eyewear is baked into the
+portrait, and the three choices can be removed without changing the source.
+
+Local CairoSVG/Pillow compositing of the same frame paths and shading checked
+30 cases (six hairstyles, three original frame styles plus gold round and
+blue square). All 60 pupil patches remained clear, fully covered hair masked
+the frame, and source alpha did not change. This is a local path preview,
+not the React component's raster result. The CI verifier renders the real
+AvatarEyewear component in the established portrait bounds: 72 combinations
+across 48/80/104/256px, 18 full-source checks for eye patches, hair occlusion
+and transparency, and 18 combined hair/skin/frame tint cases. It exports
+independent-eyewear-review.png. The new CI results are pending. The original
+frame style is a fitted vector approximation, not the original baked raster.
+
+The new hair and eye components are still candidates; visual acceptance,
+full formal/casual outfit alignment, application catalog and shared renderer
+integration, persistence and iPhone testing remain necessary. Existing
+runtime, main, and database are unchanged.
