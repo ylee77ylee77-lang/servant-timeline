@@ -564,6 +564,8 @@ async function main() {
   const output = path.resolve(process.argv[2] ?? path.join(ROOT, ".avatar-material-rendering"));
   await fs.mkdir(output, { recursive: true });
   const canonicalOutput = await fs.realpath(output);
+  const { buildFemaleMediumCandidate } = await import("./build-avatar-female-medium-candidate.mjs");
+  await buildFemaleMediumCandidate(ROOT, output);
   const publicRoot = await fs.realpath(path.join(ROOT, "public"));
   const publicRelative = path.relative(publicRoot, canonicalOutput);
   assert.ok(publicRelative.startsWith(`..${path.sep}`) || path.isAbsolute(publicRelative), "QA output must stay outside public/");
