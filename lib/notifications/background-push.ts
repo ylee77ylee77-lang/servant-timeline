@@ -11,6 +11,8 @@ export type ReminderCue = {
   service_type: string;
   task_time: string;
   scheduled_at: string;
+  /** Only the isolated preview planner supplies this marker. */
+  previewTest?: boolean;
 };
 export type PushKeys = { subject: string; publicKey: string; privateKey: string };
 
@@ -89,7 +91,7 @@ export function makeReminderPayload(cue: ReminderCue): string {
     throw new Error("Invalid reminder cue");
   }
   return JSON.stringify({
-    kind: "service-task-reminder",
+    kind: cue.previewTest === true ? "service-task-reminder-preview" : "service-task-reminder",
     id: cue.delivery_id,
     date: cue.service_date,
     service: cue.service_type,

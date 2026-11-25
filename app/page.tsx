@@ -507,6 +507,7 @@ export default function App() {
   const backgroundReminder = useBackgroundReminders({
     accessToken: session.access_token, userId: session.user.id,
     loaded: personalSettingsLoaded, enabled: personalSettings.vibrationReminderEnabled,
+    allowPreview: isAdmin,
     serviceType: checkinStatus !== "not_checked_in" && checkInId ? checkedInService : "",
     checkInId,
   });
@@ -5874,6 +5875,7 @@ export default function App() {
           backgroundVibrationStatus={backgroundReminder.status}
           onAuthorizeBackgroundVibration={backgroundReminder.authorize}
           onRetryBackgroundVibration={backgroundReminder.refresh}
+          backgroundVibrationTest={backgroundReminder.previewTest}
           isVoiceEnabled={isVoiceEnabled}
           isWakeLockActive={isWakeLockActive}
           expandedPanel={expandedSettingsPanel}

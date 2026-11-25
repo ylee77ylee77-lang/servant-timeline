@@ -8,13 +8,14 @@ self.addEventListener("push", event => {
     try { payload = event.data?.json(); } catch { payload = null; }
     // Web Push on iOS requires a visible notification. A malformed or stale
     // payload can still show a generic alert, never untrusted arbitrary text.
-    const valid = payload && payload.kind === "service-task-reminder"
+    const preview = payload?.kind === "service-task-reminder-preview";
+    const valid = payload && (payload.kind === "service-task-reminder" || preview)
       && /^[0-9a-f-]{36}$/i.test(payload.id)
       && ["六晚崇", "主一堂", "主二堂"].includes(payload.service)
       && /^\d{4}-\d{2}-\d{2}$/.test(payload.date)
       && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(payload.time);
-    await self.registration.showNotification("夏凱納招待｜任務提醒", {
-      body: valid ? payload.date + " " + payload.service + " " + payload.time + " 任務到點" : "請回到招待服事系統確認目前任務。",
+    await self.registration.showNotification(preview ? "夏凱納招待｜測試任務" : "夏凱納招待｜任務提醒", {
+      body: valid ? payload.date + " " + payload.service + " " + payload.time + " 任務到點" + (preview ? "（模擬，非正式服事）" : "") : "請回到招待服事系統確認目前任務。",
       icon: "/logo.png",
       tag: valid ? "shekinah-task-" + payload.id : "shekinah-task-reminder",
     });

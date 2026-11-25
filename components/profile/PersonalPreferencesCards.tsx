@@ -30,6 +30,7 @@ type PersonalPreferencesCardsProps = {
   backgroundVibrationStatus?: DeviceSyncStatus | null;
   onAuthorizeBackgroundVibration?: () => void;
   onRetryBackgroundVibration?: () => void;
+  backgroundVibrationTest?: { pending: boolean; available: boolean; message: string; start: () => void };
 };
 
 const VOICE_OPTIONS = [
@@ -145,6 +146,7 @@ export function PersonalPreferencesCards({
   backgroundVibrationStatus,
   onAuthorizeBackgroundVibration,
   onRetryBackgroundVibration,
+  backgroundVibrationTest,
 }: PersonalPreferencesCardsProps) {
   const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲" : "女聲";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
@@ -221,6 +223,20 @@ export function PersonalPreferencesCards({
               onToggle={() => onChange({ vibrationReminderEnabled: !settings.vibrationReminderEnabled })}
             />
           </div>
+
+          {backgroundVibrationTest && (
+            <div className="space-y-2 rounded-2xl border border-[#E6EAF0] bg-[#FFF9F3] p-3.5">
+              <p className="text-xs font-black text-[#6D55A3]">管理員｜背景震動實機驗收</p>
+              <p className="text-[11px] leading-4 text-[#7B7B74]">三個模擬任務，不需報到、不影響正式服事。關閉開關會嘗試取消手機訂閱；已送出的通知無法撤回。</p>
+              <button type="button"
+                disabled={!backgroundVibrationTest.available || backgroundVibrationTest.pending}
+                onClick={backgroundVibrationTest.start}
+                className="min-h-11 w-full rounded-xl bg-[#6D55A3] px-3 text-sm font-bold text-white disabled:opacity-40">
+                {backgroundVibrationTest.pending ? "正在啟動…" : "開始三個模擬任務"}
+              </button>
+              {backgroundVibrationTest.message && <p role="status" className="text-xs leading-5 text-[#1F2937]">{backgroundVibrationTest.message}</p>}
+            </div>
+          )}
 
           {/* The voice switch directly shows or hides its third-level options. */}
           <div className="overflow-hidden rounded-2xl border border-[#E6EAF0] bg-white">

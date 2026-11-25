@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isAppleMobile, isStandaloneReminderApp, canUseBackgroundPush,
-  getBackgroundDeviceConfig, prepareBackgroundDevice, subscribeFromGesture,
+  getBackgroundDeviceConfig, getBackgroundPreviewConfig, startBackgroundPreviewTest,
+  prepareBackgroundDevice, subscribeFromGesture,
   readReminderConsent, writeReminderConsent, nextReminderIntent, currentReminderIntent,
   revokeBackgroundDevice, syncBackgroundDevice,
   type PreparedReminder, type DeviceSyncStatus,
@@ -11,11 +12,15 @@ import {
 
 type Input = {
   accessToken: string; userId: string; loaded: boolean; enabled: boolean;
-  serviceType: string; checkInId: string;
+  serviceType: string; checkInId: string; allowPreview?: boolean;
 };
 
-export function useBackgroundReminders({ accessToken, userId, loaded, enabled, serviceType, checkInId }: Input) {
+export function useBackgroundReminders({ accessToken, userId, loaded, enabled, serviceType, checkInId, allowPreview = false }: Input) {
   const [featureEnabled, setFeatureEnabled] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
+  const [testPending, setTestPending] = useState(false);
+  const [testMessage, setTestMessage] = useState("");
+  const testInFlight = useRef(false);
   const [prepared, setPrepared] = useState<PreparedReminder | null>(null);
   const [status, setStatus] = useState<DeviceSyncStatus | null>(null);
   const [revision, setRevision] = useState(0);
@@ -27,8 +32,11 @@ export function useBackgroundReminders({ accessToken, userId, loaded, enabled, s
     let disposed = false;
     async function prepare() {
       try {
-        const key = await getBackgroundDeviceConfig(accessToken);
+        const formalKey = await getBackgroundDeviceConfig(accessToken);
+        const previewKey = !formalKey && allowPreview ? await getBackgroundPreviewConfig(accessToken) : null;
+        const key = formalKey ?? previewKey;
         if (disposed) return;
+        setPreviewMode(Boolean(previewKey));
         setFeatureEnabled(Boolean(key));
         if (!key) { setPrepared(null); setStatus(null); return; }
         if (!isStandaloneReminderApp() || !canUseBackgroundPush()) {
@@ -53,17 +61,17 @@ export function useBackgroundReminders({ accessToken, userId, loaded, enabled, s
       window.removeEventListener("pageshow", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [accessToken, userId, revision, refresh]);
+  }, [accessToken, userId, revision, refresh, allowPreview]);
 
   useEffect(() => {
     if (!featureEnabled || !prepared || !loaded) return;
     let disposed = false;
-    void syncBackgroundDevice({ prepared, accessToken, userId, enabled, serviceType, checkInId, isCurrent: () => !disposed })
+    void syncBackgroundDevice({ prepared, accessToken, userId, enabled, serviceType, checkInId, previewMode, isCurrent: () => !disposed })
       .then(result => { if (!disposed) setStatus(result); })
       .catch(() => { if (!disposed) setStatus({ message: enabled
         ? "尚未完成背景提醒同步，請重試。" : "尚未確認停止背景提醒，請重試。", action: "retry" }); });
     return () => { disposed = true; };
-  }, [featureEnabled, prepared, accessToken, userId, loaded, enabled, serviceType, checkInId]);
+  }, [featureEnabled, prepared, accessToken, userId, loaded, enabled, serviceType, checkInId, previewMode]);
 
   const authorize = useCallback(() => {
     if (!featureEnabled || !prepared || authorizationPending.current) return;
@@ -111,6 +119,7 @@ export function useBackgroundReminders({ accessToken, userId, loaded, enabled, s
       // temporarily unavailable or the feature flag has been disabled.
       if (!featureEnabled && readReminderConsent()?.userId !== userId) return;
       writeReminderConsent(userId, false);
+      setTestMessage("");
       setStatus({ message: "正在停止背景提醒…" });
       // The same device operation queue handles both registration and revoke.
       void revokeBackgroundDevice(accessToken).then(stopped => {
@@ -121,7 +130,28 @@ export function useBackgroundReminders({ accessToken, userId, loaded, enabled, s
     }
   }, [featureEnabled, authorize, userId, accessToken]);
 
+  const runPreview = useCallback(async () => {
+    if (!previewMode || !enabled || !prepared || testInFlight.current) return;
+    testInFlight.current = true;
+    setTestPending(true);
+    const epoch = nextReminderIntent();
+    try {
+      await startBackgroundPreviewTest(prepared, accessToken, userId);
+      if (currentReminderIntent(epoch)) setTestMessage("已接受測試，請立即鎖屏。約 15、30、45 秒各一則測試通知。");
+    } catch (error) {
+      if (currentReminderIntent(epoch)) setTestMessage(error instanceof Error ? error.message : "測試啟動失敗。");
+    } finally {
+      testInFlight.current = false;
+      setTestPending(false);
+    }
+  }, [previewMode, enabled, prepared, accessToken, userId]);
+
   return {
+    previewTest: previewMode && allowPreview ? {
+      pending: testPending, message: testMessage,
+      available: Boolean(enabled && prepared && status?.message.startsWith("測試模式｜已允許通知")),
+      start: runPreview,
+    } : undefined,
     status: featureEnabled ? status : null,
     authorize,
     refresh,

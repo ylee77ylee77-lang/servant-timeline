@@ -26,3 +26,6 @@
 `supabase/tests/background_task_reminders_verification.sql` 由本地 migration 安裝後執行，測試資料在交易內回復。`scripts/verify-background-reminders-integration.mjs` 只允許 GitHub Actions 臨時 loopback Supabase；使用真實 Auth/REST、加密及 worker，但 Apple fetch 為測試替身。Vault/pg_net 使用虛構隨機秘密在同一 transaction 建立並驗證待送標頭，最後 rollback（HTTP 請求只在 commit 後開始）。比對 SQL 與 Node 簽章及到期。不得連接正式資料庫或印出秘密、訂閱及授權標頭。
 
 目前：尚未合併、尚未套用正式 migration、未設定正式環境秘密、未啟用正式排程。
+
+## 管理員預覽實機驗收
+預覽限定原有震動開關（同一 PersonalPreferencesCards、useBackgroundReminders、正式 worker 與 aes128gcm 發送器）。僅指定 PR 分支、VERCEL_ENV=preview、ENABLE_BACKGROUND_REMINDER_PREVIEW=true、獨立 BACKGROUND_PREVIEW_VAPID_* 金鑰且伺服器驗證 admin 才開放；正式 API 不放行。手機端授權後可手動啟動 +15/+30/+45 秒三則標記為模擬的加密通知，不需報到，不寫入任何正式提醒資料，不啟用 Cron。每次發送重新確認管理員角色；關閉震動開關透過實際瀏覽器 unsubscribe 停止接收，404/410 停止本輪。已送出通知不能撤回；這是有界 after 測試而非可持久化/跨執行程序撤銷的正式排程，限流只在單一程序。真實排程與 DB 撤銷仍依正式 CI 及後續核准驗收。不得把此測試通過視為正式 Cron 已上線。

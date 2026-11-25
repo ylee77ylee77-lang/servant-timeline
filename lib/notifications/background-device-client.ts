@@ -1,6 +1,7 @@
 // Browser-only helpers. Never store the subscription endpoint, keys, or
 // authentication token in localStorage. Only the account's explicit consent.
 const ROUTE = "/api/background-reminders/device";
+const PREVIEW_ROUTE = "/api/background-reminders/preview";
 const WORKER = "/background-reminder-sw.js";
 const CONSENT_KEY = "shekinah_background_reminder_consent_v1";
 type Consent = { userId: string; enabled: boolean };
@@ -105,6 +106,30 @@ export async function getBackgroundDeviceConfig(accessToken: string): Promise<st
   return data.enabled === true && typeof data.publicKey === "string" ? data.publicKey : null;
 }
 
+export async function getBackgroundPreviewConfig(accessToken: string): Promise<string | null> {
+  const response = await fetch(PREVIEW_ROUTE, {
+    headers: { Authorization: "Bearer " + accessToken },
+    cache: "no-store", signal: AbortSignal.timeout(8_000),
+  });
+  if (response.status === 404 || response.status === 403) return null;
+  if (!response.ok) throw new Error("Preview configuration unavailable");
+  const data = await response.json();
+  return data.enabled === true && typeof data.publicKey === "string" ? data.publicKey : null;
+}
+
+export async function startBackgroundPreviewTest(prepared: PreparedReminder, accessToken: string, userId: string) {
+  if (!hasReminderConsent(userId) || Notification.permission !== "granted") throw new Error("請先允許通知。");
+  const sub = await prepared.registration.pushManager.getSubscription();
+  if (!sub || !hasReminderConsent(userId)) throw new Error("請先開啟震動提醒及允許通知。");
+  const response = await fetch(PREVIEW_ROUTE, {
+    method: "POST", headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" },
+    body: JSON.stringify({ vibrationEnabled: true, subscription: sub.toJSON() }),
+    cache: "no-store", signal: AbortSignal.timeout(8_000),
+  });
+  if (response.status === 429) throw new Error("本輪測試尚未結束，請稍後再試。");
+  if (response.status !== 202) throw new Error("尚未確認測試啟動，請重新檢查。");
+}
+
 async function unsubscribe(subscription: PushSubscription) {
   try { return await subscription.unsubscribe(); } catch { return false; }
 }
@@ -176,6 +201,7 @@ export async function stopBackgroundRemindersOnSignOut(accessToken: string | und
 export async function syncBackgroundDevice(input: {
   prepared: PreparedReminder; accessToken: string; userId: string;
   enabled: boolean; serviceType: string; checkInId: string; isCurrent?: () => boolean;
+  previewMode?: boolean;
 }): Promise<DeviceSyncStatus> {
   if (!input.enabled) {
     const stopped = await revokeBackgroundDevice(input.accessToken);
@@ -195,6 +221,7 @@ export async function syncBackgroundDevice(input: {
     if (!sub || Notification.permission !== "granted") {
       return { message: "請重新啟用背景通知。", action: "authorize" };
     }
+    if (input.previewMode) return { message: "測試模式｜已允許通知，可開始三個模擬任務。" };
     if (!input.serviceType || !input.checkInId) {
       return { message: "已允許通知，完成報到後啟用背景提醒。" };
     }
