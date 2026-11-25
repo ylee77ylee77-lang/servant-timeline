@@ -64,7 +64,7 @@ export function AvatarRenderer({
     ? `圖示：${iconLabel}・${AVATAR_ICON_TONES[avatar.iconTone].label}`
     : nameMark
       ? `姓名識別：${nameMark}`
-      : `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，陪伴動物：${companion.name}` : ""}`;
+      : `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，動物：${companion.name}` : ""}`;
 
   return (
     <svg

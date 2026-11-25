@@ -226,9 +226,9 @@ async function verifySharedRenderer(output, loadComponent) {
     const avatar=normalizeAvatarConfig({style:"feminine",glasses:true,lens:{transparency:65}});
     const editor=render(AvatarEditor,{value:avatar,onChange:()=>{},showPreview:false});
     assert.equal((editor.match(/aria-expanded="true"/g)||[]).length,0);
-    for(const title of ["角色","臉型","髮型","眼鏡","服裝","髮色","膚色","鏡框色","鏡片色","背景","陪伴動物"])assert.ok(editor.includes(title),title);
+    for(const title of ["角色","臉型","髮型","眼鏡","服裝","髮色","膚色","鏡框色","鏡片色","背景","動物"])assert.ok(editor.includes(title),title);
     assert.ok(editor.includes("65% 透明"));
-    assert.doesNotMatch(editor,/<(?:svg|img|canvas|image)\b|基礎角色|陪伴動物（選填）/);
+    assert.doesNotMatch(editor,/<(?:svg|img|canvas|image)\b|基礎角色|陪伴動物/);
     assert.doesNotMatch(editor,/type="range"/);
     const neutral=render(AvatarEditor,{value:normalizeAvatarConfig({style:"neutral"}),onChange:()=>{},showPreview:false});
     assert.equal((neutral.match(/aria-expanded="true"/g)||[]).length,1);

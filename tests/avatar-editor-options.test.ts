@@ -20,7 +20,7 @@ test("role, face and hair descriptions match their registered assets without cha
     const base=normalizeAvatarConfig({style,glasses:true,lens:{color:"#ABCDEF",transparency:65},background:"mint",pet:"eagle"});
     const groups=getAvatarEditorGroups(base,getAvatarMaterialChannels(base).length>0);
     assert.equal(groups[0].title,"角色");
-    assert.equal(groups.at(-1)?.title,"陪伴動物");
+    assert.equal(groups.at(-1)?.title,"動物");
     assert.equal(new Set(groups.map(g=>g.id)).size,groups.length);
     const face=groups.find(g=>g.id==="face")!;
     assert.deepEqual(face.choices.map(c=>c.label),["活潑型","自然型"]);
