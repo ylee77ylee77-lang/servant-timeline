@@ -34,6 +34,8 @@ export type AvatarConfig = {
   portraitVersion?: "v2-tone" | "v3";
   /** Separate from the existing on/off flag for backwards compatibility. */
   glassesStyle?: AvatarGlassesStyle;
+  /** Explicit opt-in for source-aligned legacy round/square frames. */
+  eyewearVersion?: "v1";
   /** Only explicit color choices override source artwork; absent keeps the original. */
   materialColors?: AvatarMaterialColors;
   accessory: AvatarAccessory;
@@ -167,6 +169,9 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
         : {}),
     ...(glassesStyles.has(input.glassesStyle as AvatarGlassesStyle)
       ? { glassesStyle: input.glassesStyle as AvatarGlassesStyle } : {}),
+    ...(style !== "neutral" && input.portraitVersion !== "v3" && Object.hasOwn(input, "eyewearVersion")
+        && input.eyewearVersion === "v1" && (input.glassesStyle === "round" || input.glassesStyle === "square")
+      ? { eyewearVersion: "v1" as const } : {}),
     ...(materialColors ? { materialColors } : {}),
     accessory: accessories.has(input.accessory as AvatarAccessory)
       ? (input.accessory as AvatarAccessory)

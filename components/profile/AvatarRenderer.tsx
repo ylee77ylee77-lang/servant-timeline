@@ -4,6 +4,8 @@ import { useId } from "react";
 import { getAvatarNameMark, type AvatarConfig } from "@/lib/profile/avatar";
 import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "@/lib/profile/avatar-icon";
 import { SystemIconArtwork } from "@/components/profile/SystemIconArtwork";
+import { AvatarEyewear } from "@/components/profile/AvatarEyewear";
+import { getAvatarEyewearPlan } from "@/lib/profile/avatar-eyewear";
 import { AvatarMaterialFilter } from "@/components/profile/AvatarMaterialFilter";
 import { getAvatarMaterialPlan } from "@/lib/profile/avatar-materials";
 import {
@@ -39,6 +41,7 @@ export function AvatarRenderer({
   const id = useId().replace(/:/g, "");
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
+  const eyewear = getAvatarEyewearPlan(avatar);
   const materials = portraitLayers.map((layer) => getAvatarMaterialPlan(layer.src, avatar.materialColors));
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
   const iconLabel = AVATAR_ICON_OPTIONS.find((option) => option.value === avatar.iconType)?.label || "十字架";
@@ -111,6 +114,7 @@ export function AvatarRenderer({
             <path d="M98 485 C103 370 165 333 256 333 C347 333 409 370 414 485 Z" opacity="0.84" />
           </g>
         )}
+        {portrait && eyewear ? <AvatarEyewear plan={eyewear} id={`avatar-eyewear-${id}`} /> : null}
         {companion && (
           <image href={companion.behind} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
         )}

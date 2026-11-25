@@ -3,6 +3,7 @@
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import { AvatarLivePreview } from "@/components/profile/AvatarControls";
 import { AvatarColorControls } from "@/components/profile/AvatarColorControls";
+import { AVATAR_EYEWEAR_CHOICES, getAvatarLegacyEyewearChoice, selectAvatarLegacyEyewear } from "@/lib/profile/avatar-eyewear";
 import { getAvatarMaterialChannels, setAvatarMaterialColor } from "@/lib/profile/avatar-materials";
 import {
   AVATAR_CLASSIC_HAIR_TONES,
@@ -60,6 +61,7 @@ export function AvatarEditor({
       background: avatar.background,
       pet: avatar.pet,
       glasses: avatar.glasses,
+      ...(avatar.eyewearVersion === "v1" ? { eyewearVersion: avatar.eyewearVersion, glassesStyle: avatar.glassesStyle } : {}),
       displayMode: avatar.displayMode,
       iconType: avatar.iconType,
       iconTone: avatar.iconTone,
@@ -205,20 +207,25 @@ export function AvatarEditor({
               );
             })}
           </div>
+        ) : avatar.style !== "neutral" ? (
+          <div className="grid grid-cols-2 gap-2">
+            {AVATAR_EYEWEAR_CHOICES.map((option) => {
+              const selected = getAvatarLegacyEyewearChoice(avatar) === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onChange(selectAvatarLegacyEyewear(avatar, option.value))}
+                  className={`min-h-11 rounded-2xl border px-3 py-2 text-sm font-black ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
+                >
+                  {selected ? "✓ " : ""}{option.label}
+                </button>
+              );
+            })}
+          </div>
         ) : (
-        <div className="grid grid-cols-2 gap-2">
-          {[false, true].map((value) => (
-            <button
-              key={String(value)}
-              type="button"
-              aria-pressed={avatar.glasses === value}
-              onClick={() => onChange({ ...avatar, glasses: value })}
-              className={`rounded-2xl border px-3 py-3 text-sm font-black ${avatar.glasses === value ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
-            >
-              {avatar.glasses === value ? "✓ " : ""}{value ? "有眼鏡" : "無眼鏡"}
-            </button>
-          ))}
-        </div>
+          <div className="text-xs font-medium text-[#7B7B74]">請先選擇基礎角色。</div>
         )}
       </section>
 

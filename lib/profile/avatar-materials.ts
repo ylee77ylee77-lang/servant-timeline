@@ -1,6 +1,7 @@
 import type { AvatarConfig, AvatarMaterialColors } from "./avatar.ts";
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
 import { AVATAR_PORTRAITS, AVATAR_CLASSIC_DARK_PORTRAITS, getAvatarPortraitPlan, getClassicHairTone } from "./avatar-portrait.ts";
+import { getAvatarEyewearPlan } from "./avatar-eyewear.ts";
 import { AVATAR_FRAME_PATHS } from "./avatar-frame-paths.ts";
 import { AVATAR_FEATURE_PATHS } from "./avatar-feature-paths.ts";
 
@@ -66,10 +67,12 @@ export function getAvatarMaterialChannels(avatar: AvatarConfig): MaterialChannel
   const { portrait } = getAvatarPortraitPlan({ ...avatar, displayMode: "custom" });
   const source = portrait && getAvatarMaterialSource(portrait);
   if (!source) return [];
-  return AVATAR_MATERIAL_PARTS.filter((part) => part !== "frame" || avatar.glasses).map((part) => ({
+  const eyewear = getAvatarEyewearPlan({ ...avatar, displayMode: "custom" });
+  return AVATAR_MATERIAL_PARTS.filter((part) => part !== "frame" || source.glasses || eyewear !== null).map((part) => ({
     part,
     // A reset restores the selected legacy original, including saved black hair.
-    original: part === "hair" && getClassicHairTone(avatar) === "dark" ? "#46403D" : source.originals[part],
+    original: part === "frame" && eyewear ? eyewear.original
+      : part === "hair" && getClassicHairTone(avatar) === "dark" ? "#46403D" : source.originals[part],
   }));
 }
 

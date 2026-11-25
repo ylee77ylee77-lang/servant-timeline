@@ -6,6 +6,8 @@ import type {
   AvatarStyle,
 } from "./avatar.ts";
 
+import { getAvatarLegacyEyewearChoice } from "./avatar-eyewear.ts";
+
 export const AVATAR_ART_DIR = "/avatar/scenes/v2";
 export const AVATAR_PORTRAITS = {
   masculine: {
@@ -155,7 +157,9 @@ export function getAvatarPortraitPlan(
   if (!options?.active) {
     const dark = getClassicHairTone(avatar) === "dark";
     const assets = dark ? AVATAR_CLASSIC_DARK_PORTRAITS[avatar.style] : AVATAR_PORTRAITS[avatar.style];
-    const portrait = avatar.glasses ? assets.glasses : assets.plain;
+    const eyewear = getAvatarLegacyEyewearChoice(avatar);
+    // Independent frames use the plain source; original settings retain exact art.
+    const portrait = eyewear === "classic" ? assets.glasses : assets.plain;
     return { portrait, layers: [{ kind: dark ? "tone-variant" : "legacy", src: portrait }] };
   }
   const { family, color, glassesStyle } = options;
