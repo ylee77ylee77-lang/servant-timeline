@@ -10,7 +10,7 @@ import {
 } from "../lib/profile/avatar-color-wheel.ts";
 
 test("hair and frame wheels use full HSV color with exact primary hues", () => {
-  for (const part of ["hair", "frame"] as const) {
+  for (const part of ["hair", "frame", "lens"] as const) {
     for (const [h, expected] of [[0, "#FF0000"], [60, "#FFFF00"], [120, "#00FF00"], [180, "#00FFFF"], [240, "#0000FF"], [300, "#FF00FF"]] as const) {
       const radians = h * Math.PI / 180;
       assert.equal(getAvatarColorHex(part, { x: Math.sin(radians), y: -Math.cos(radians), brightness: 1 }), expected);
@@ -31,7 +31,7 @@ test("wheel draft preserves hue and saturation when brightness changes to zero a
 
 test("arbitrary six-digit RGB colors round trip in the unrestricted wheel", () => {
   for (const hex of ["#000000", "#FFFFFF", "#ABCDEF", "#FF0066", "#201F1E", "#808080", "#B88E55"] as const) {
-    for (const part of ["hair", "frame"] as const) {
+    for (const part of ["hair", "frame", "lens"] as const) {
       assert.equal(getAvatarColorHex(part, avatarColorSelectionFromHex(part, hex)), hex);
     }
   }
@@ -68,7 +68,7 @@ test("pointer coordinates are clamped to the color disc; malformed numbers are b
 
 test("rendered wheel and chosen coordinates use identical RGB math", () => {
   const size = 32;
-  for (const part of ["hair", "skin", "frame"] as const) {
+  for (const part of ["hair", "skin", "frame", "lens"] as const) {
     for (const brightness of [0.35, 0.72, 1]) {
       const pixels = rasterizeAvatarColorWheel(part, brightness, size);
       assert.equal(pixels.length, size * size * 4);

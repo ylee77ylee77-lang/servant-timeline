@@ -195,10 +195,12 @@ export function AvatarColorControls({
   channels,
   values,
   onChange,
+  lensTransparency,
 }: {
   channels: readonly AvatarColorChannel[];
   values: ColorValues;
   onChange: (part: AvatarPickerPart, value: AvatarColorHex | null) => void;
+  lensTransparency?: {value:number;custom:boolean;onChange:(value:number)=>void;onReset:()=>void};
 }) {
   const [openPart, setOpenPart] = useState<AvatarPickerPart | null>(null);
   const [drafts, setDrafts] = useState<DraftCache>({});
@@ -254,6 +256,19 @@ export function AvatarColorControls({
                 />
               )}
             </div>
+            {part === "lens" && lensTransparency && (
+              <div className="space-y-1.5 border-t border-[#E6EAF0] px-3 pb-3 pt-2">
+                <label className="flex items-center justify-between gap-2 text-sm font-bold text-[#1F2937]" htmlFor={`${id}-lens-transparency`}>
+                  鏡片透明度 <span className="tabular-nums text-[#6D55A3]">{lensTransparency.value}%</span>
+                </label>
+                <input id={`${id}-lens-transparency`} type="range" min={0} max={100} step={5} value={lensTransparency.value}
+                  className="h-8 w-full accent-[#6D55A3]" onChange={event=>lensTransparency.onChange(Number(event.currentTarget.value))}/>
+                <div className="flex justify-between text-xs text-[#7B7B74]"><span>不透明</span><span>完全透明</span></div>
+                {lensTransparency.value===100 && <p className="text-xs text-[#7B7B74]">降低透明度即可顯示鏡片色。</p>}
+                <button type="button" disabled={!lensTransparency.custom} onClick={lensTransparency.onReset}
+                  className="min-h-11 rounded-xl border border-[#E6EAF0] px-3 text-xs font-bold text-[#6D55A3] disabled:opacity-50">還原透明鏡片</button>
+              </div>
+            )}
           </section>
         );
       })}

@@ -4,6 +4,7 @@ import { getAvatarHairstyle } from "./avatar-hairstyle.ts";
 import { AVATAR_FRAME_PATHS } from "./avatar-frame-paths.ts";
 import { getAvatarIndependent } from "./avatar-independent.ts";
 import { getCandidateEyewearPlan } from "./avatar-independent-eyewear.ts";
+import { getAvatarLensSettings } from "./avatar-lens.ts";
 
 export type AvatarEyewearChoice = "none" | AvatarGlassesStyle;
 type FrameStyle = Exclude<AvatarGlassesStyle, "classic">;
@@ -95,4 +96,25 @@ export function getAvatarEyewearShades(color: AvatarColorHex) {
   const mix = (target: number, amount: number) =>
     "#" + rgb.map(v => Math.round(v * (1 - amount) + target * amount).toString(16).padStart(2, "0")).join("").toUpperCase();
   return { shadow: mix(0, .56), lower: mix(0, .32), mid: mix(24, .07), upper: mix(255, .28), highlight: mix(255, .58) };
+}
+
+/** Registered vector lens interiors or the traced original raster lens holes. */
+export function getAvatarLensPlan(avatar: AvatarConfig, portrait: string | null) {
+  if (!portrait || !avatar.glasses || avatar.style === "neutral" || avatar.displayMode !== "custom") return null;
+  const character = avatar.style === "masculine" ? "male" : "female";
+  const plainSources = [`/avatar/scenes/v2/${character}.webp`,`/avatar/scenes/v2-tones/${character}-dark.webp`];
+  const bakedSources = [`/avatar/scenes/v2/${character}-glasses.webp`,`/avatar/scenes/v2-tones/${character}-dark-glasses.webp`];
+  const independent = getAvatarIndependent(avatar);
+  const hairstyle = getAvatarHairstyle(avatar);
+  const vector = getAvatarEyewearPlan(avatar);
+  const optical = getAvatarLensSettings(avatar);
+  if (vector && (independent ? portrait === independent.src : hairstyle ? portrait === hairstyle.src : plainSources.includes(portrait))) {
+    const paths = vector.artwork === "filled" ? vector.geometry.rings.map(ring=>ring.lens) : vector.geometry.rims;
+    return {...optical,paths,occlusionUri:vector.occlusionUri,baked:false};
+  }
+  if (!vector && !independent && !hairstyle && getAvatarLegacyEyewearChoice(avatar) === "classic" && bakedSources.includes(portrait)) {
+    return {...optical,paths:AVATAR_FRAME_PATHS[character].rings.map(ring=>ring.lens),
+      occlusionUri:`/avatar/materials/v1/${character}-glasses.png`,baked:true};
+  }
+  return null;
 }

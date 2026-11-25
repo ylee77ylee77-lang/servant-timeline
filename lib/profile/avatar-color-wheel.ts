@@ -5,7 +5,7 @@
  */
 export type AvatarColorPart = "hair" | "skin" | "frame";
 export type AvatarClothingColorPart = "clothing" | "lining" | "tie";
-export type AvatarPickerPart = AvatarColorPart | AvatarClothingColorPart;
+export type AvatarPickerPart = AvatarColorPart | AvatarClothingColorPart | "lens";
 export type AvatarColorHex = `#${string}`;
 export type AvatarColorSelection = Readonly<{
   x: number;
@@ -17,6 +17,7 @@ export const AVATAR_COLOR_LABELS: Record<AvatarPickerPart, string> = {
   hair: "髮色",
   skin: "膚色",
   frame: "鏡框色",
+  lens: "鏡片色",
   clothing: "服裝主色",
   lining: "內搭色",
   tie: "領帶色",
