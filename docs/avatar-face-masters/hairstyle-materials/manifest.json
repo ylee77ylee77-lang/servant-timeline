@@ -1,0 +1,30 @@
+{
+  "status": "candidate-only",
+  "method": "Per-source hairstyle and skin geometry with narrow color-aware boundary refinement; exact refined-master ownership within the verified facial lock. RGB coverage only, not runtime registration.",
+  "variants": {
+    "male-b-short": {
+      "base": "male-b",
+      "sourceSha256": "f5969c1199de6054d647f2a1ad80499c3728dfb9c48b3b574199ea1a99b41278",
+      "maskSha256": "9be943357773015364bf4989d3759394cb3d83d6953d953c9955c8d80d7ef23c",
+      "bytes": 12765
+    },
+    "male-b-side": {
+      "base": "male-b",
+      "sourceSha256": "1190d5815ed55a3b82d380f8107a77f43838af4507e62b9cef75d345538c5a56",
+      "maskSha256": "7bc7d34021142bd4ab37dfa4b1c92c46886676aa01b688819a03025f05097422",
+      "bytes": 11964
+    },
+    "female-b-bob": {
+      "base": "female-b",
+      "sourceSha256": "439e80963e7ff4a8af815d72cc34dbf52d386d62df8393570cfb3d871c569ba8",
+      "maskSha256": "95807b1bf4133ca06ba0a9f8042e4dd3c17ef375fbab784e0d11236818046e23",
+      "bytes": 13107
+    },
+    "female-b-bun": {
+      "base": "female-b",
+      "sourceSha256": "e16b0ec6078a5d316c5e0ec0034082ca1d5846032bc38f02695dc63dce3176d5",
+      "maskSha256": "ff1cc301962284662c98a7802828b5cd9cdcbbeb9079ecf8c61dd2cfa5f56e2c",
+      "bytes": 12097
+    }
+  }
+}

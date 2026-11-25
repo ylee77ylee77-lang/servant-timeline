@@ -88,7 +88,7 @@ test("all 3D portraits use one safe artboard with added headroom", () => {
   assert.ok(tx >= 0 && ty >= 0 && tx + tw <= AVATAR_CANVAS_SIZE && ty + th <= AVATAR_CANVAS_SIZE);
 });
 
-test("editor keeps only user-facing copy and animal thumbnails", () => {
+test("editor keeps only user-facing copy, text options and the live preview", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "components/profile/AvatarEditor.tsx"), "utf8");
   assert.ok(!source.includes("所有選項共用同一套 3D 頭像。動物只露頭部"));
   assert.ok(!source.includes("可以不選。動物僅露頭部與上半身"));
@@ -96,7 +96,7 @@ test("editor keeps only user-facing copy and animal thumbnails", () => {
   assert.match(sharedControls, /sticky top-0/);
   assert.match(sharedControls, /size=\{104\}/);
   assert.match(source, /AvatarLivePreview/);
-  assert.match(source, /AvatarCompanionThumbnail/);
+  assert.doesNotMatch(source, /AvatarCompanionThumbnail|AvatarRenderer/);
 });
 
 

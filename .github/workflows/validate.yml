@@ -84,6 +84,20 @@ jobs:
       - name: Run Node unit tests
         run: npm test
 
+      - name: Verify avatar material sources and rendering
+        run: |
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/build-avatar-material-masks.mjs --check
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/verify-avatar-material-rendering.mjs avatar-material-rendering-proof
+
+      - name: Upload avatar rendering review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatar-material-rendering
+          path: avatar-material-rendering-proof
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Run production build
         run: npm run build
 

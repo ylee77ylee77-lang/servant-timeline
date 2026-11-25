@@ -1,0 +1,287 @@
+{
+  "scope": "offline source-locked hairstyle trial, not production-ready artwork",
+  "proof_commit": "f36f44c72ce90c232d0f05cead6e3e4847b66701",
+  "run_id": 45522853544,
+  "job_id": 138898788998,
+  "artifact_id": 14981795457,
+  "visual_approval": false,
+  "protected_face_gate_passed": true,
+  "cases": [
+    {
+      "name": "male-short",
+      "source_sha256": "7f9899e7024c6090692585ba2fd26fd1430c2760b4d6b531d20ac5e1c7f36e59",
+      "donor_sha256": "1fa78384fb894bae89aa9c0f1d3659a42e81b1910da4c57cb939a5e83a945f2f",
+      "registration": {
+        "template_score": 0.9896,
+        "affine": [
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "refined": false,
+        "final_anchors": [
+          {
+            "anchor": [
+              210,
+              204
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9921
+          },
+          {
+            "anchor": [
+              308,
+              202
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9934
+          },
+          {
+            "anchor": [
+              258,
+              290
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9871
+          }
+        ]
+      },
+      "protected_pixels": 26192,
+      "protected_changed_pixels": 0,
+      "outside_core_changed_pixels": 143003,
+      "skin_seam_rgb_correction": [
+        0,
+        -1,
+        -2
+      ],
+      "webp_bytes": 178992,
+      "webp_sha256": "1f8d42a68cc366a7236fd7da2e42070e93e48cb98ef8c538595973ec438a7df0",
+      "mobile_budget_met": true,
+      "visual_approval": false,
+      "runtime_registered": false
+    },
+    {
+      "name": "male-side",
+      "source_sha256": "7f9899e7024c6090692585ba2fd26fd1430c2760b4d6b531d20ac5e1c7f36e59",
+      "donor_sha256": "88b499077e778f66a0dad38cf4cb11a7444c787e863b1ad37745ba852f1b522a",
+      "registration": {
+        "template_score": 0.9937,
+        "affine": [
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "refined": false,
+        "final_anchors": [
+          {
+            "anchor": [
+              210,
+              204
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9945
+          },
+          {
+            "anchor": [
+              308,
+              202
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9956
+          },
+          {
+            "anchor": [
+              258,
+              290
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9835
+          }
+        ]
+      },
+      "protected_pixels": 26192,
+      "protected_changed_pixels": 0,
+      "outside_core_changed_pixels": 142914,
+      "skin_seam_rgb_correction": [
+        -1,
+        -1,
+        -2
+      ],
+      "webp_bytes": 173534,
+      "webp_sha256": "1beba6a48486787c38bb874ca137818ec876829120529959a220ba844a19eda7",
+      "mobile_budget_met": true,
+      "visual_approval": false,
+      "runtime_registered": false
+    },
+    {
+      "name": "female-bob",
+      "source_sha256": "e95c91cfd17ebc4965c8acfc74d8d4d19d787a5b91a99c46c425221f17b126a2",
+      "donor_sha256": "3925f317c14b9b65ff26870f2a3661f7e04534a8542a83b498efe4f3775d0b3d",
+      "registration": {
+        "template_score": 0.9908,
+        "affine": [
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "refined": false,
+        "final_anchors": [
+          {
+            "anchor": [
+              213,
+              216
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9943
+          },
+          {
+            "anchor": [
+              312,
+              210
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9855
+          },
+          {
+            "anchor": [
+              263,
+              304
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9882
+          }
+        ]
+      },
+      "protected_pixels": 26596,
+      "protected_changed_pixels": 0,
+      "outside_core_changed_pixels": 191356,
+      "skin_seam_rgb_correction": [
+        -1,
+        -2,
+        -3
+      ],
+      "webp_bytes": 198406,
+      "webp_sha256": "45261dfafd22cbfb237948c24f7f9c9d67848e90c67bd7404e01ea873062d9db",
+      "mobile_budget_met": false,
+      "visual_approval": false,
+      "runtime_registered": false
+    },
+    {
+      "name": "female-bun",
+      "source_sha256": "e95c91cfd17ebc4965c8acfc74d8d4d19d787a5b91a99c46c425221f17b126a2",
+      "donor_sha256": "c93694b8051dce71d1d099dbdd56cacf11f4160e8de632271934cd04bbaf0a35",
+      "registration": {
+        "template_score": 0.9392,
+        "affine": [
+          [
+            1.1079893112182617,
+            0.0006690756999887526,
+            -26.73694610595703
+          ],
+          [
+            -0.0006690756999887526,
+            1.1079893112182617,
+            -29.38421630859375
+          ]
+        ],
+        "refined": true,
+        "final_anchors": [
+          {
+            "anchor": [
+              213,
+              216
+            ],
+            "offset": [
+              0,
+              0
+            ],
+            "score": 0.9603
+          },
+          {
+            "anchor": [
+              312,
+              210
+            ],
+            "offset": [
+              0,
+              1
+            ],
+            "score": 0.9682
+          },
+          {
+            "anchor": [
+              263,
+              304
+            ],
+            "offset": [
+              1,
+              -2
+            ],
+            "score": 0.9745
+          }
+        ]
+      },
+      "protected_pixels": 26596,
+      "protected_changed_pixels": 0,
+      "outside_core_changed_pixels": 192603,
+      "skin_seam_rgb_correction": [
+        0,
+        1,
+        1
+      ],
+      "webp_bytes": 171584,
+      "webp_sha256": "b3c01342911cf9476607f546a5fbafb36d1bfb6597feae48f40ae93012858436",
+      "mobile_budget_met": true,
+      "visual_approval": false,
+      "runtime_registered": false
+    }
+  ]
+}

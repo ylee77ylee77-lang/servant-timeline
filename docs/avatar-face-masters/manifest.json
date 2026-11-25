@@ -1,0 +1,23 @@
+{
+  "status": "candidate-only",
+  "source_sha256": "ac6118a7a5775b867a76ad6157cda1a9b03449718e24e0d6fed7a083763aa498",
+  "method": "Independent concept cutout, uniform scale and translation only; no face deformation.",
+  "masters": {
+    "male-b": {
+      "bytes": 46420,
+      "sha256": "be5add2bdbd710c850b2feeb3c6d3380ab7060a9d13af10d123afeb0d62a26f5",
+      "width": 512,
+      "height": 512,
+      "opaquePixels": 121955,
+      "transparentPixels": 134315
+    },
+    "female-b": {
+      "bytes": 50524,
+      "sha256": "a430def8598cf69c2087a1d203530f0e1b23bfa00538de513e5137c6f4741a0f",
+      "width": 512,
+      "height": 512,
+      "opaquePixels": 140958,
+      "transparentPixels": 115162
+    }
+  }
+}

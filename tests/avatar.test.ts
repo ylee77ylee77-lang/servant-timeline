@@ -194,3 +194,17 @@ test("six faith icons and six muted tones have allowlisted persisted values", ()
   assert.equal(restored.pet, "doe");
   assert.equal(restored.style, "feminine");
 });
+
+test("P2 portrait preference is explicit and safe for old JSON", () => {
+  const legacy = normalizeAvatarConfig({ style: "masculine", hair: "wave", hairColor: "brown", glasses: true });
+  assert.equal(Object.hasOwn(legacy, "portraitVersion"), false);
+  assert.equal(Object.hasOwn(legacy, "glassesStyle"), false);
+  const layered = normalizeAvatarConfig({ ...legacy, portraitVersion: "v3", glassesStyle: "round" });
+  assert.equal(layered.portraitVersion, "v3");
+  assert.equal(layered.glassesStyle, "round");
+  assert.deepEqual(normalizeAvatarConfig(JSON.parse(JSON.stringify(layered))), layered);
+  assert.equal(normalizeAvatarConfig({ ...layered, displayMode: "name" }).portraitVersion, "v3");
+  assert.equal(normalizeAvatarConfig({ ...layered, portraitVersion: "https://unsafe", glassesStyle: "<script>" }).portraitVersion, undefined);
+  assert.equal(normalizeAvatarConfig({ ...layered, glassesStyle: "<script>" }).glassesStyle, undefined);
+  assert.equal(normalizeAvatarConfig({ ...layered, style: "neutral" }).portraitVersion, undefined);
+});

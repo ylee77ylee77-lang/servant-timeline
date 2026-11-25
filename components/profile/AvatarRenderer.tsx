@@ -4,6 +4,14 @@ import { useId } from "react";
 import { getAvatarNameMark, type AvatarConfig } from "@/lib/profile/avatar";
 import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "@/lib/profile/avatar-icon";
 import { SystemIconArtwork } from "@/components/profile/SystemIconArtwork";
+import { AvatarFormalOutfitArtwork } from "@/components/profile/AvatarFormalOutfit";
+import { getAvatarFormalOutfitPlan } from "@/lib/profile/avatar-formal-outfit";
+import { getAvatarIndependent } from "@/lib/profile/avatar-independent";
+import { getAvatarCandidateOutfitFit } from "@/lib/profile/avatar-outfit-fit";
+import { AvatarEyewear, AvatarLensArtwork } from "@/components/profile/AvatarEyewear";
+import { getAvatarEyewearPlan, getAvatarLensPlan } from "@/lib/profile/avatar-eyewear";
+import { AvatarMaterialFilter } from "@/components/profile/AvatarMaterialFilter";
+import { getAvatarMaterialPlan } from "@/lib/profile/avatar-materials";
 import {
   AVATAR_CANVAS_SIZE,
   AVATAR_FRAME,
@@ -32,18 +40,31 @@ export function AvatarRenderer({
   className?: string;
   displayName?: string | null;
 }) {
-  const { avatar, portrait, companion, gradient } = getAvatarScene(config);
+  const { avatar, portrait, portraitLayers, companion, gradient } = getAvatarScene(config);
   const nameMark = avatar.displayMode === "name" ? getAvatarNameMark(displayName) : "";
   const id = useId().replace(/:/g, "");
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
+  const layeredPortrait = portraitLayers.some(layer=>layer.kind === "face-body");
+  const eyewear = layeredPortrait ? null : getAvatarEyewearPlan(avatar);
+  const lens = avatar.lens?.transparency !== undefined && !layeredPortrait ? getAvatarLensPlan(avatar,portrait) : null;
+  const outfit = getAvatarFormalOutfitPlan(avatar, portrait);
+  const outfitClipId = `avatar-outfit-head-${id}`;
+  const independent = getAvatarIndependent(avatar);
+  const independentScene = independent !== null && independent.src === portrait;
+  const sceneMaskId = `avatar-independent-scene-${id}`;
+  const fitted = outfit && independent?.src === portrait ? getAvatarCandidateOutfitFit(independent.id) : null;
+  const headMaskId = `avatar-fitted-head-${id}`;
+  const garmentMaskId = `avatar-fitted-garment-${id}`;
+  const maskBounds = {x:AVATAR_PORTRAIT_BOUNDS.x,y:AVATAR_PORTRAIT_BOUNDS.y,width:AVATAR_PORTRAIT_BOUNDS.size,height:AVATAR_PORTRAIT_BOUNDS.size};
+  const materials = portraitLayers.map((layer) => getAvatarMaterialPlan(layer.src, avatar.materialColors));
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
   const iconLabel = AVATAR_ICON_OPTIONS.find((option) => option.value === avatar.iconType)?.label || "十字架";
   const label = avatar.displayMode === "default"
     ? `圖示：${iconLabel}・${AVATAR_ICON_TONES[avatar.iconTone].label}`
     : nameMark
       ? `姓名識別：${nameMark}`
-      : `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，陪伴動物：${companion.name}` : ""}`;
+      : `${portrait ? "3D 頭像" : "系統預設頭像"}${companion ? `，動物：${companion.name}` : ""}`;
 
   return (
     <svg
@@ -57,7 +78,12 @@ export function AvatarRenderer({
       style={{ overflow: "visible", filter: "drop-shadow(0 3px 5px rgb(83 61 118 / 13%))" }}
     >
       <defs>
-        <radialGradient id={gradientId} cx="27%" cy="20%" r="85%">
+        <radialGradient id={gradientId} {...(independentScene ? {
+          gradientUnits: "userSpaceOnUse" as const,
+          cx: cx - radius + radius * 2 * .27,
+          cy: cy - radius + radius * 2 * .20,
+          r: radius * 2 * .85,
+        } : { cx: "27%", cy: "20%", r: "85%" })}>
           <stop offset="0%" stopColor={gradient.from} />
           <stop offset="58%" stopColor={gradient.middle} />
           <stop offset="100%" stopColor={gradient.to} />
@@ -65,23 +91,54 @@ export function AvatarRenderer({
         <clipPath id={clipId}>
           <circle cx={cx} cy={cy} r={radius} />
         </clipPath>
+        {/* Compose the opaque B1 scene before applying the circular alpha once.
+            Per-layer circle clipping changes antialiased rim pixels on small avatars. */}
+        {independentScene && (
+          <mask id={sceneMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={0} y={0} width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE}>
+            <circle cx={cx} cy={cy} r={radius} fill="white" />
+          </mask>
+        )}
+        {fitted && independent ? (
+          <>
+            <mask id={headMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" {...maskBounds}><image href={independent.headUri} {...maskBounds} /></mask>
+            <mask id={garmentMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" {...maskBounds}><image href={independent.garmentUri} {...maskBounds} /></mask>
+          </>
+        ) : outfit ? (
+          <clipPath id={outfitClipId} clipPathUnits="userSpaceOnUse">
+            {outfit.cutout.map(d => <path key={d} d={d} transform={`translate(${AVATAR_PORTRAIT_BOUNDS.x} ${AVATAR_PORTRAIT_BOUNDS.y}) scale(${AVATAR_PORTRAIT_BOUNDS.size / AVATAR_CANVAS_SIZE})`} />)}
+          </clipPath>
+        ) : null}
+        {materials.map((plan, index) => plan && (
+          <AvatarMaterialFilter key={portraitLayers[index].kind} id={`avatar-material-${id}-${index}`}
+            plan={plan} {...AVATAR_PORTRAIT_BOUNDS} />
+        ))}
       </defs>
 
       {/* 1. Changeable background, entirely separate from transparent artwork. */}
-      <circle cx={cx} cy={cy} r={radius} fill={`url(#${gradientId})`} />
+      {!independentScene && <circle cx={cx} cy={cy} r={radius} fill={`url(#${gradientId})`} />}
 
-      <g clipPath={`url(#${clipId})`}>
+      <g clipPath={independentScene ? undefined : `url(#${clipId})`} mask={independentScene ? `url(#${sceneMaskId})` : undefined}>
+        {independentScene && <rect width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} fill={`url(#${gradientId})`} />}
         {/* 2. Portrait and 3. animal head/upper body stay inside the frame. */}
         {avatar.displayMode === "default" ? (
           <SystemIconArtwork icon={avatar.iconType} tone={avatar.iconTone} x={82} y={82} size={348} />
         ) : portrait ? (
-          <image
-            href={portrait}
-            x={AVATAR_PORTRAIT_BOUNDS.x}
-            y={AVATAR_PORTRAIT_BOUNDS.y}
-            width={AVATAR_PORTRAIT_BOUNDS.size}
-            height={AVATAR_PORTRAIT_BOUNDS.size}
-          />
+          <>
+          {outfit ? (fitted ? <g mask={`url(#${garmentMaskId})`}><AvatarFormalOutfitArtwork plan={outfit} fit={fitted} id={`avatar-outfit-${id}`} /></g> : <AvatarFormalOutfitArtwork plan={outfit} id={`avatar-outfit-${id}`} />) : null}
+          {portraitLayers.map((layer, index) => (
+            <image
+              key={layer.kind}
+              href={layer.src}
+              x={AVATAR_PORTRAIT_BOUNDS.x}
+              y={AVATAR_PORTRAIT_BOUNDS.y}
+              width={AVATAR_PORTRAIT_BOUNDS.size}
+              height={AVATAR_PORTRAIT_BOUNDS.size}
+              filter={materials[index] ? `url(#avatar-material-${id}-${index})` : undefined}
+              clipPath={outfit && !fitted ? `url(#${outfitClipId})` : undefined}
+              mask={fitted ? `url(#${headMaskId})` : undefined}
+            />
+          ))}
+          </>
         ) : nameMark ? (
           <text
             x={cx}
@@ -100,6 +157,8 @@ export function AvatarRenderer({
             <path d="M98 485 C103 370 165 333 256 333 C347 333 409 370 414 485 Z" opacity="0.84" />
           </g>
         )}
+        {lens && lens.opacity > 0 ? <AvatarLensArtwork plan={lens} id={`avatar-lens-${id}`} /> : null}
+        {portrait && eyewear ? <AvatarEyewear plan={eyewear} id={`avatar-eyewear-${id}`} /> : null}
         {companion && (
           <image href={companion.behind} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />
         )}
