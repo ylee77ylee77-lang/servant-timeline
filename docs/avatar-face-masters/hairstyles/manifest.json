@@ -1,0 +1,42 @@
+{
+  "status": "candidate-only",
+  "method": "Generated hairstyle donors aligned to original master canvas. Original facial interior pixels copied exactly; lossless WebP. No runtime registration.",
+  "sources": {
+    "male-b": {
+      "sha256": "be5add2bdbd710c850b2feeb3c6d3380ab7060a9d13af10d123afeb0d62a26f5",
+      "lockSha256": "745b854513083ba07f88d804dbb4062a108e8272e7e28b1bacc69b2ab4581cee",
+      "protectedPixels": 34298
+    },
+    "female-b": {
+      "sha256": "a430def8598cf69c2087a1d203530f0e1b23bfa00538de513e5137c6f4741a0f",
+      "lockSha256": "4259ad6dd94c4db4e85385431819baba889ae60d700b1d1cbd105a231248bcd6",
+      "protectedPixels": 31972
+    }
+  },
+  "variants": {
+    "male-b-short": {
+      "base": "male-b",
+      "sha256": "f5969c1199de6054d647f2a1ad80499c3728dfb9c48b3b574199ea1a99b41278",
+      "bytes": 137034,
+      "changedPixels": 51383
+    },
+    "male-b-side": {
+      "base": "male-b",
+      "sha256": "1190d5815ed55a3b82d380f8107a77f43838af4507e62b9cef75d345538c5a56",
+      "bytes": 133844,
+      "changedPixels": 51504
+    },
+    "female-b-bob": {
+      "base": "female-b",
+      "sha256": "439e80963e7ff4a8af815d72cc34dbf52d386d62df8393570cfb3d871c569ba8",
+      "bytes": 151828,
+      "changedPixels": 83918
+    },
+    "female-b-bun": {
+      "base": "female-b",
+      "sha256": "e16b0ec6078a5d316c5e0ec0034082ca1d5846032bc38f02695dc63dce3176d5",
+      "bytes": 123630,
+      "changedPixels": 83674
+    }
+  }
+}

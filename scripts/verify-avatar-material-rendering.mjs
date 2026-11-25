@@ -24,6 +24,7 @@ import { AVATAR_FRAME_PATHS } from "../lib/profile/avatar-frame-paths.ts";
 import { AVATAR_FEATURE_PATHS } from "../lib/profile/avatar-feature-paths.ts";
 import { createAvatarMaterialMask } from "./build-avatar-material-masks.mjs";
 import { refineCandidateMaterial } from "./refine-avatar-candidate-materials.mjs";
+import { verifyIndependentHairstyles } from "./verify-independent-avatar-hairstyles.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SIZE = 512;
@@ -635,6 +636,7 @@ async function main() {
     const failedCandidate = report.independentCandidates.cases.find(item=>!item.passed);
     assert.ok(!failedCandidate, failedCandidate && failedCandidate.id + "/" + failedCandidate.variant + "/" + failedCandidate.name + ": " + failedCandidate.failures[0]);
     console.log("INDEPENDENT_MATERIAL_PROOF " + JSON.stringify({cases:24,source:"actual AvatarMaterialFilter, initial and refined candidates only",visualAcceptance:"NOT_APPROVED"}));
+    report.independentHairstyles = await verifyIndependentHairstyles(ROOT, output);
     report.status = "passed";
   } catch (error) {
     report.status = "failed";

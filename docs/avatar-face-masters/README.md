@@ -76,3 +76,26 @@ The CI verifier keeps the original 12 cases as controls and adds 12 cases
 for the deterministically refined masks. It saves both comparison sheets and
 regenerated masks as review artifacts. New CI is pending. Runtime remains
 unchanged; hairstyle, eyewear and garment alignment are not implemented.
+
+## Independent hairstyle candidates
+
+The preceding material refinement CI #276 passed (24 candidate SVG tint
+cases plus the existing application checks). Two additional generated donor
+hairstyles per identity have now been aligned to the original master artboard.
+The source interior face is copied losslessly; the transition is composited
+outside that locked region. Four new 512px transparent lossless WebP files
+are pinned under hairstyles/, with two binary face-lock masks and a manifest.
+Local decoded comparison proved 34,298 exact RGBA pixels per male candidate
+and 31,972 per female candidate (132,540 total). Each candidate is below the
+180 KiB source budget. The new CI proof checks these same exact pixels,
+source hashes, alpha, size and headroom and exports a circular contact sheet.
+
+These are complete shaded 2D portrait candidates, not interchangeable hair
+layers. The locked face interior excludes the hairline, outer contour and
+neck, so the test does not prove every facial pixel or clothing pixel is
+unchanged. The female bun neck/hair transition was refined; seams, silhouette,
+and distinctiveness of the side-part/bob styles still require visual review.
+Each new hairstyle needs its own source-specific tint mask; existing master
+masks must not be reused unchanged. Eyewear and garment alignment and actual
+UI integration remain pending. New CI is not yet confirmed. No changes to
+runtime registration, database, authorization, or production.
