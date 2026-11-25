@@ -17,17 +17,18 @@ export function AvatarMaterialFilter({ id, plan, x, y, size }: {
       <feImage href={plan.coverageUri} x={x} y={y} width={size} height={size}
         preserveAspectRatio="none" result="coverage" />
       <feColorMatrix in="SourceGraphic" type="saturate" values="0" result="shading" />
-      {plan.channels.some(({ part }) => part === "frame") && (
+      {plan.frameGuard !== false && plan.channels.some(({ part }) => part === "frame") && (
         <feColorMatrix in="SourceGraphic" type="matrix" result="frame-guard"
           values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 -0.708667 -2.384 -0.240667 0 1.833333" />
       )}
       {plan.channels.map(({ part }, index) => {
         const weights = part === "hair" ? "1 0 0" : part === "skin" ? "0 1 0" : "0 0 1";
+        const guardFrame = part === "frame" && plan.frameGuard !== false;
         return (
           <Fragment key={part}>
-            <feColorMatrix in="coverage" type="matrix" result={part === "frame" ? "frame-path" : `mask-${part}`}
+            <feColorMatrix in="coverage" type="matrix" result={guardFrame ? "frame-path" : `mask-${part}`}
               values={`0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 ${weights} 0 0`} />
-            {part === "frame" && <feComposite in="frame-path" in2="frame-guard" operator="in" result="mask-frame" />}
+            {guardFrame && <feComposite in="frame-path" in2="frame-guard" operator="in" result="mask-frame" />}
             <feComposite in={`mask-${part}`} in2={index === 0 ? `mask-${part}` : `selected-${index - 1}`}
               operator="arithmetic" k1={0} k2={1} k3={index === 0 ? 0 : 1} k4={0} result={`selected-${index}`} />
           </Fragment>

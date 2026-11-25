@@ -1,4 +1,5 @@
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
+import { normalizeAvatarHairstyle, type AvatarHairstyleId } from "./avatar-hairstyle.ts";
 
 export type AvatarStyle = "masculine" | "feminine" | "neutral";
 export type AvatarSkinTone = "light" | "warm" | "medium" | "deep";
@@ -14,6 +15,16 @@ export type AvatarDisplayMode = "custom" | "default" | "name";
 export type AvatarIconType = "cross" | "bible" | "prayer" | "angel" | "palm" | "church";
 export type AvatarIconTone = "warm" | "cool" | "charcoal" | "beige" | "blue" | "lavender";
 export type AvatarMaterialColors = Partial<Record<AvatarColorPart, AvatarColorHex>>;
+export const AVATAR_FAMILY_STYLES = {
+  "male-a": "masculine", "male-b": "masculine",
+  "female-a": "feminine", "female-b": "feminine",
+} as const;
+export type AvatarFamilyId = keyof typeof AVATAR_FAMILY_STYLES;
+export type AvatarFamilySelection = {
+  id: AvatarFamilyId;
+  hair: AvatarHair;
+  glassesStyle: AvatarGlassesStyle;
+};
 
 export const AVATAR_DISPLAY_LABELS: Record<AvatarDisplayMode, string> = {
   custom: "大頭貼",
@@ -32,6 +43,10 @@ export type AvatarConfig = {
   glasses: boolean;
   /** Optional, explicit opt-in; absent means the original v2 portrait. */
   portraitVersion?: "v2-tone" | "v3";
+  /** Explicit new family selection; original portrait preferences remain intact. */
+  portraitFamily?: AvatarFamilySelection;
+  /** Explicit choice of a source-locked complete hairstyle illustration. */
+  hairstyleVariant?: AvatarHairstyleId;
   /** Separate from the existing on/off flag for backwards compatibility. */
   glassesStyle?: AvatarGlassesStyle;
   /** Explicit opt-in for source-aligned legacy round/square frames. */
@@ -127,6 +142,22 @@ function normalizeMaterialColors(value: unknown): AvatarMaterialColors | undefin
   return Object.keys(colors).length ? colors : undefined;
 }
 
+function normalizePortraitFamily(value: unknown, style: AvatarStyle): AvatarFamilySelection | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  if (!Object.hasOwn(input, "id") || typeof input.id !== "string"
+      || !Object.hasOwn(AVATAR_FAMILY_STYLES, input.id)) return undefined;
+  const id = input.id as AvatarFamilyId;
+  if (AVATAR_FAMILY_STYLES[id] !== style) return undefined;
+  return {
+    id,
+    hair: Object.hasOwn(input, "hair") && hairs.has(input.hair as AvatarHair)
+      ? input.hair as AvatarHair : AVATAR_DEFAULTS[style].hair,
+    glassesStyle: Object.hasOwn(input, "glassesStyle") && glassesStyles.has(input.glassesStyle as AvatarGlassesStyle)
+      ? input.glassesStyle as AvatarGlassesStyle : "classic",
+  };
+}
+
 export function normalizeAvatarConfig(value: unknown): AvatarConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return getDefaultAvatarConfig();
@@ -141,8 +172,14 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
     ? normalizeMaterialColors(input.materialColors)
     : undefined;
 
+  const portraitFamily = Object.hasOwn(input, "portraitFamily")
+    ? normalizePortraitFamily(input.portraitFamily, style) : undefined;
+  const hairstyleVariant = Object.hasOwn(input, "hairstyleVariant")
+    ? normalizeAvatarHairstyle(input.hairstyleVariant, style) : undefined;
   return {
     style,
+    ...(portraitFamily ? { portraitFamily } : {}),
+    ...(hairstyleVariant ? { hairstyleVariant } : {}),
     skinTone: skins.has(input.skinTone as AvatarSkinTone)
       ? (input.skinTone as AvatarSkinTone)
       : base.skinTone,

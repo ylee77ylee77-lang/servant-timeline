@@ -1,0 +1,50 @@
+name: Avatar P4 hairstyle material authoring
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/author-avatar-hairstyle-materials.py'
+      - 'scripts/author-avatar-hairstyle-candidates.py'
+      - 'docs/avatar-art-direction/**'
+      - 'public/avatar/scenes/v2/**'
+      - 'public/avatar/materials/v1/**'
+      - '.github/workflows/avatar-hairstyle-materials.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avatar-hairstyle-materials-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  author:
+    name: Author ${{ matrix.hair }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        hair: [male-short, male-side, female-bob, female-bun]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline art dependencies
+        run: python -m pip install numpy==2.2.6 Pillow==12.3.0 opencv-python-headless==4.12.0.88
+      - name: Author source-specific portrait and material map
+        run: python scripts/author-avatar-hairstyle-materials.py --name ${{ matrix.hair }} --emit
+      - name: Upload visual review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatar-p4-material-${{ matrix.hair }}
+          path: .avatar-hairstyle-material-review/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
