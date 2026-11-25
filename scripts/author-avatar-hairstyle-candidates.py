@@ -152,10 +152,20 @@ def face_lock(original, coverage, donor, spec):
     cv2.fillPoly(polygon, [np.asarray(spec["core"], dtype=np.int32)], 255)
     # The pinned v2 coverage is a material map, not a complete image alpha.
     # Preserve the original expression, but exclude source hair from the core.
-    eligible = (original[:, :, 3] == 255) & (coverage[:, :, 0] <= 8)
-    core = (polygon > 0) & eligible
+    # A v2 material map is designed for recoloring, not geometric ownership.
+    # Lock the actual source landmark footprints explicitly, including dark
+    # lashes/lips, rather than inferring them from a hair tint classification.
+    landmarks = np.zeros((SIZE, SIZE), dtype=np.uint8)
+    for x, y, hw, hh in spec["points"]:
+        cv2.ellipse(landmarks, (x, y), (hw, hh), 0, 0, 360, 255, -1)
+    # Source rasters can have near-opaque alpha (e.g. 254) within the face.
+    # Preserve those RGBA values exactly too; only genuinely transparent
+    # source pixels are ineligible for a locked facial expression.
+    visible = original[:, :, 3] >= 245
+    eligible = visible & (coverage[:, :, 0] <= 8)
+    core = ((polygon > 0) & eligible) | ((landmarks > 0) & visible)
     for x, y, _, _ in spec["points"]:
-        assert core[y, x], "face lock missed a protected landmark"
+        assert core[y, x], f"protected landmark {(x,y)} not on source face: alpha={original[y,x,3]} material={coverage[y,x].tolist()}"
     distance = cv2.distanceTransform((~core).astype(np.uint8), cv2.DIST_L2, 5)
     fade = np.clip(1 - distance / 17, 0, 1)
     fade = fade * fade * (3 - 2 * fade)
@@ -170,7 +180,7 @@ def face_lock(original, coverage, donor, spec):
     # no global recolor of hair or clothing.
     source_rgb = original[:, :, :3].astype(np.float32)
     donor_rgb = donor[:, :, :3].astype(np.float32)
-    skin = core & (coverage[:, :, 1] >= 240) & (donor[:, :, 3] == 255)
+    skin = core & (coverage[:, :, 1] >= 240) & (donor[:, :, 3] >= 245)
     skin &= (donor_rgb[:, :, 0] - donor_rgb[:, :, 2] > 28) & (donor_rgb[:, :, 0] > 145)
     assert np.count_nonzero(skin) > 500, "insufficient comparable skin samples"
     delta = np.clip(np.median(source_rgb[skin] - donor_rgb[skin], axis=0), -26, 26)
