@@ -233,6 +233,82 @@ async function verifySharedRenderer(output, loadComponent) {
     for (const match of svg.matchAll(/url\(([^)]+)\)/g)) assert.match(match[1], /^#[A-Za-z0-9_:-]+$/, "SVG resource references must stay inside the document");
     return Buffer.from(svg);
   }
+  const lensCases = [];
+  {
+    const { getAvatarLensPlan, selectAvatarLegacyEyewear } = loadComponent(path.join(ROOT,"lib/profile/avatar-eyewear.ts"));
+    const { getAvatarScene } = loadComponent(path.join(ROOT,"lib/profile/avatar-scene.ts"));
+    const { getAvatarHairstyleOptions, selectAvatarHairstyle } = loadComponent(path.join(ROOT,"lib/profile/avatar-hairstyle.ts"));
+    const { getAvatarIndependentOptions, selectAvatarIndependent } = loadComponent(path.join(ROOT,"lib/profile/avatar-independent.ts"));
+    const { selectClassicHairTone } = loadComponent(path.join(ROOT,"lib/profile/avatar-portrait.ts"));
+    const { selectAvatarFormalOutfit } = loadComponent(path.join(ROOT,"lib/profile/avatar-formal-outfit.ts"));
+    const render = async(config,size) => {
+      const svg = await embedAssets(renderToStaticMarkup(React.createElement(AvatarRenderer,{config,size})));
+      const png = await sharp(svg).png().toBuffer();
+      const data = await sharp(png).ensureAlpha().raw().toBuffer();
+      return {png,data};
+    };
+    const tiles = [];
+    const tileSize = 160;
+    let reviewRow = 0;
+    for (const style of ["masculine","feminine"]) {
+      const base = normalizeAvatarConfig({style,background:"sky",materialColors:{hair:"#654539",skin:"#BC855E",frame:"#B88E55"}});
+      const sources = [
+        {id:"original",config:base,review:true},
+        {id:"dark",config:normalizeAvatarConfig(selectClassicHairTone(base,"dark"))},
+        ...getAvatarHairstyleOptions(style).map(v=>({id:v.id,config:selectAvatarHairstyle(base,v.id)})),
+        ...getAvatarIndependentOptions(style).map((v,i)=>({id:v.id,config:selectAvatarIndependent(base,v.id),review:i===0})),
+      ];
+      for(const source of sources){
+        for(const [frameIndex,choice] of ["classic","round","square"].entries()){
+          const framed = selectAvatarLegacyEyewear(source.config,choice);
+          const portrait = getAvatarScene(framed).portrait;
+          const plan = getAvatarLensPlan(framed,portrait);
+          assert.ok(plan);
+          for(const size of [48,256]){
+            const baseline = await render(framed,size);
+            const clear = await render({...framed,lens:{color:"#EE2277",transparency:100}},size);
+            assert.deepEqual(clear.data,baseline.data,source.id+"/"+choice+": clear setting changed original pixels");
+            const tinted = await render({...framed,lens:{color:"#354D63",transparency:75}},size);
+            const opaque = await render({...framed,lens:{color:"#354D63",transparency:0}},size);
+            const other = size===256 ? await render({...framed,lens:{color:"#B54A75",transparency:75}},size) : null;
+            const {x,y,size:portraitSize}=AVATAR_PORTRAIT_BOUNDS;
+            const paths = plan.paths.map(d=>'<path d="'+d+'" fill="white" stroke="white" stroke-width="'+(4+2*512/size)+'"/>').join("");
+            const maskSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+size+'" height="'+size+'" viewBox="0 0 512 512"><g transform="translate('+x+' '+y+') scale('+portraitSize/512+')">'+paths+'</g></svg>';
+            const mask=await sharp(Buffer.from(maskSvg)).ensureAlpha().raw().toBuffer();
+            let tintPixels=0,tintSum=0,opaqueSum=0,huePixels=0;
+            for(let i=0;i<baseline.data.length;i+=4){
+              const delta=pixelDelta(baseline.data,tinted.data,i);
+              const solidDelta=pixelDelta(baseline.data,opaque.data,i);
+              assert.ok(Math.abs(baseline.data[i+3]-tinted.data[i+3])<=1 && Math.abs(baseline.data[i+3]-opaque.data[i+3])<=1,source.id+"/"+choice+": lens changed alpha");
+              if(mask[i+3]===0) assert.ok(delta<=1 && solidDelta<=1,source.id+"/"+choice+"/"+size+": tint escaped lens geometry");
+              if(delta>5)tintPixels++;
+              tintSum+=delta;opaqueSum+=solidDelta;
+              if(other && pixelDelta(tinted.data,other.data,i)>4)huePixels++;
+            }
+            assert.ok(tintPixels>0 && opaqueSum>tintSum*2,source.id+"/"+choice+"/"+size+": transparency not visible");
+            if(other) assert.ok(huePixels>0,source.id+"/"+choice+": lens hue not visible");
+            if(size===256 && source.review){
+              for(const [column,art] of [baseline,tinted,opaque].entries())tiles.push({input:await sharp(art.png).resize(tileSize,tileSize).png().toBuffer(),left:(frameIndex*3+column)*tileSize,top:reviewRow*tileSize});
+            }
+            lensCases.push({source:source.id,style,choice,size,baked:plan.baked,tintPixels,tintSum,opaqueSum,huePixels});
+          }
+          if(source.review&&choice==="round"){
+            const dressed=selectAvatarFormalOutfit(framed,style==="masculine"?"blazer":"tailored-suit");
+            const combined=normalizeAvatarConfig(JSON.parse(JSON.stringify({...dressed,pet:"eagle",lens:{color:"#354D63",transparency:75}})));
+            assert.equal(combined.lens?.transparency,75);
+            const img=await render(combined,256);
+            await fs.writeFile(path.join(output,"lens-outfit-"+style+"-"+source.id+".png"),img.png);
+          }
+        }
+        if(source.review)reviewRow++;
+      }
+    }
+    assert.equal(lensCases.length,84);
+    await sharp({create:{width:tileSize*9,height:tileSize*4,channels:3,background:"#F4F1F8"}}).composite(tiles).png().toFile(path.join(output,"lens-tint-review.png"));
+    const review=(await sharp(path.join(output,"lens-tint-review.png")).resize({width:1080}).jpeg({quality:82}).toBuffer()).toString("base64");
+    for(let i=0;i<review.length;i+=2000)console.log("LENS_REVIEW "+String(i/2000).padStart(5,"0")+" "+review.slice(i,i+2000));
+    console.log("LENS_TINT_PROOF "+JSON.stringify({cases:lensCases.length,bakedCases:lensCases.filter(v=>v.baked).length,clearPixelExact:true,isolatedGeometry:true,visualAcceptance:"NOT_APPROVED"}));
+  }
   const independentSceneCases = [];
   let independentOutfitCases = [];
   {
@@ -556,7 +632,7 @@ async function verifySharedRenderer(output, loadComponent) {
   const casualEncoded=(await sharp(path.join(output,"casual-outfit-review.png")).resize({width:600}).jpeg({quality:83}).toBuffer()).toString("base64");
   for(let i=0;i<casualEncoded.length;i+=2000) console.log("CASUAL_REVIEW "+String(i/2000).padStart(5,"0")+" "+casualEncoded.slice(i,i+2000));
   console.log("CASUAL_OUTFIT_PROOF "+JSON.stringify({cases:casualCases.length,faceProtected:true,source:"actual shared renderer"}));
-  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases, casualCases, independentOutfitCases, independentSceneCases };
+  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases, casualCases, independentOutfitCases, independentSceneCases, lensCases };
 }
 
 async function main() {

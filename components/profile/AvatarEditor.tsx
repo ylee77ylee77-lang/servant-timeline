@@ -6,12 +6,14 @@ import { getAvatarIndependent, getAvatarIndependentOptions, selectAvatarIndepend
 import { getAvatarHairstyleOptions, getAvatarHairstyle, selectAvatarHairstyle } from "@/lib/profile/avatar-hairstyle";
 import { getAvatarOutfitOptions, getAvatarOutfitChannels, selectAvatarFormalOutfit, setAvatarOutfitColor } from "@/lib/profile/avatar-formal-outfit";
 import { AvatarColorControls } from "@/components/profile/AvatarColorControls";
-import { AVATAR_EYEWEAR_CHOICES, getAvatarLegacyEyewearChoice, selectAvatarLegacyEyewear } from "@/lib/profile/avatar-eyewear";
+import { AVATAR_EYEWEAR_CHOICES, getAvatarLegacyEyewearChoice, getAvatarLensPlan, selectAvatarLegacyEyewear } from "@/lib/profile/avatar-eyewear";
 import { getAvatarMaterialChannels, setAvatarMaterialColor } from "@/lib/profile/avatar-materials";
+import { AVATAR_LENS_DEFAULT_COLOR, getAvatarLensSettings, setAvatarLensColor, setAvatarLensTransparency, resetAvatarLens } from "@/lib/profile/avatar-lens";
 import {
   AVATAR_CLASSIC_HAIR_TONES,
   AVATAR_GLASSES_LABELS,
   getAvatarPortraitOptions,
+  getAvatarPortraitPlan,
   getClassicHairTone,
   selectAvatarPortraitVersion,
   selectAvatarPortraitFamily,
@@ -66,7 +68,11 @@ export function AvatarEditor({
   const selectedHairstyle = getAvatarHairstyle(avatar);
   const outfitOptions = portraitOptions?.active && !independent ? [] : getAvatarOutfitOptions(avatar.style);
   const outfitChannels = outfitOptions.length ? getAvatarOutfitChannels(avatar) : [];
-  const colorChannels = [...materialChannels, ...outfitChannels];
+  const previewAvatar = {...avatar,displayMode:"custom" as const};
+  const portraitPlan = getAvatarPortraitPlan(previewAvatar);
+  const supportsLens = !portraitPlan.layers.some(layer=>layer.kind==="face-body") && !!getAvatarLensPlan(previewAvatar,portraitPlan.portrait);
+  const lensSettings = getAvatarLensSettings(avatar);
+  const colorChannels = [...materialChannels,...(supportsLens?[{part:"lens" as const,original:AVATAR_LENS_DEFAULT_COLOR}]:[]),...outfitChannels];
 
   const setStyle = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
     if (avatar.style === style) return;
@@ -80,6 +86,7 @@ export function AvatarEditor({
       iconType: avatar.iconType,
       iconTone: avatar.iconTone,
       ...(avatar.materialColors ? { materialColors: avatar.materialColors } : {}),
+      ...(avatar.lens ? { lens: avatar.lens } : {}),
     };
     onChange(getClassicHairTone(avatar) === "dark" ? selectClassicHairTone(next, "dark") : next);
   };
@@ -289,9 +296,10 @@ export function AvatarEditor({
       {colorChannels.length > 0 && (
         <section>
           <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">人物色彩</div>
-          <AvatarColorControls channels={colorChannels} values={{ ...avatar.materialColors, ...avatar.formalOutfit?.colors }}
-            onChange={(part, color) => onChange(part === "clothing" || part === "lining" || part === "tie"
-              ? setAvatarOutfitColor(avatar, part, color) : setAvatarMaterialColor(avatar, part, color))} />
+          <AvatarColorControls channels={colorChannels} values={{...avatar.materialColors,...avatar.formalOutfit?.colors,lens:avatar.lens?.color}}
+            lensTransparency={supportsLens ? {value:lensSettings.transparency,custom:!!avatar.lens,onChange:value=>onChange(setAvatarLensTransparency(avatar,value)),onReset:()=>onChange(resetAvatarLens(avatar))} : undefined}
+            onChange={(part,color)=>onChange(part==="lens" ? setAvatarLensColor(avatar,color) : part==="clothing" || part==="lining" || part==="tie"
+              ? setAvatarOutfitColor(avatar,part,color) : setAvatarMaterialColor(avatar,part,color))} />
         </section>
       )}
 

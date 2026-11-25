@@ -8,8 +8,8 @@ import { AvatarFormalOutfitArtwork } from "@/components/profile/AvatarFormalOutf
 import { getAvatarFormalOutfitPlan } from "@/lib/profile/avatar-formal-outfit";
 import { getAvatarIndependent } from "@/lib/profile/avatar-independent";
 import { getAvatarCandidateOutfitFit } from "@/lib/profile/avatar-outfit-fit";
-import { AvatarEyewear } from "@/components/profile/AvatarEyewear";
-import { getAvatarEyewearPlan } from "@/lib/profile/avatar-eyewear";
+import { AvatarEyewear, AvatarLensArtwork } from "@/components/profile/AvatarEyewear";
+import { getAvatarEyewearPlan, getAvatarLensPlan } from "@/lib/profile/avatar-eyewear";
 import { AvatarMaterialFilter } from "@/components/profile/AvatarMaterialFilter";
 import { getAvatarMaterialPlan } from "@/lib/profile/avatar-materials";
 import {
@@ -45,7 +45,9 @@ export function AvatarRenderer({
   const id = useId().replace(/:/g, "");
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
-  const eyewear = portraitLayers.some(layer => layer.kind === "face-body") ? null : getAvatarEyewearPlan(avatar);
+  const layeredPortrait = portraitLayers.some(layer=>layer.kind === "face-body");
+  const eyewear = layeredPortrait ? null : getAvatarEyewearPlan(avatar);
+  const lens = avatar.lens?.transparency !== undefined && !layeredPortrait ? getAvatarLensPlan(avatar,portrait) : null;
   const outfit = getAvatarFormalOutfitPlan(avatar, portrait);
   const outfitClipId = `avatar-outfit-head-${id}`;
   const independent = getAvatarIndependent(avatar);
@@ -155,6 +157,7 @@ export function AvatarRenderer({
             <path d="M98 485 C103 370 165 333 256 333 C347 333 409 370 414 485 Z" opacity="0.84" />
           </g>
         )}
+        {lens && lens.opacity > 0 ? <AvatarLensArtwork plan={lens} id={`avatar-lens-${id}`} /> : null}
         {portrait && eyewear ? <AvatarEyewear plan={eyewear} id={`avatar-eyewear-${id}`} /> : null}
         {companion && (
           <image href={companion.behind} x="0" y="0" width={AVATAR_CANVAS_SIZE} height={AVATAR_CANVAS_SIZE} />

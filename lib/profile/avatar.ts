@@ -2,6 +2,7 @@ import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
 import { normalizeAvatarHairstyle, type AvatarHairstyleId } from "./avatar-hairstyle.ts";
 import { normalizeAvatarFormalOutfit, type AvatarFormalOutfit } from "./avatar-formal-outfit.ts";
 import { normalizeAvatarIndependent, type AvatarIndependentSelection } from "./avatar-independent.ts";
+import { normalizeAvatarLens, type AvatarLens } from "./avatar-lens.ts";
 
 export type AvatarStyle = "masculine" | "feminine" | "neutral";
 export type AvatarSkinTone = "light" | "warm" | "medium" | "deep";
@@ -45,6 +46,8 @@ export type AvatarConfig = {
   background: AvatarBackground;
   eyeStyle: AvatarEyeStyle;
   glasses: boolean;
+  /** Independent optical tint; absent keeps the original clear lenses. */
+  lens?: AvatarLens;
   /** Optional, explicit opt-in; absent means the original v2 portrait. */
   portraitVersion?: "v2-tone" | "v3";
   /** Explicit new family selection; original portrait preferences remain intact. */
@@ -184,8 +187,10 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
   const hairstyleVariant = Object.hasOwn(input, "hairstyleVariant")
     ? normalizeAvatarHairstyle(input.hairstyleVariant, style) : undefined;
   const formalOutfit = Object.hasOwn(input, "formalOutfit") ? normalizeAvatarFormalOutfit(input.formalOutfit, style) : undefined;
+  const lens = style !== "neutral" && Object.hasOwn(input,"lens") ? normalizeAvatarLens(input.lens) : undefined;
   return {
     style,
+    ...(lens ? { lens } : {}),
     ...(formalOutfit ? { formalOutfit } : {}),
     ...(portraitFamily ? { portraitFamily } : {}),
     ...(independentPortrait ? { independentPortrait } : {}),
