@@ -3,6 +3,7 @@
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import { AvatarLivePreview } from "@/components/profile/AvatarControls";
 import { getAvatarHairstyleOptions, getAvatarHairstyle, selectAvatarHairstyle } from "@/lib/profile/avatar-hairstyle";
+import { getAvatarFormalOptions, getAvatarOutfitChannels, selectAvatarFormalOutfit, setAvatarOutfitColor } from "@/lib/profile/avatar-formal-outfit";
 import { AvatarColorControls } from "@/components/profile/AvatarColorControls";
 import { AVATAR_EYEWEAR_CHOICES, getAvatarLegacyEyewearChoice, selectAvatarLegacyEyewear } from "@/lib/profile/avatar-eyewear";
 import { getAvatarMaterialChannels, setAvatarMaterialColor } from "@/lib/profile/avatar-materials";
@@ -59,6 +60,9 @@ export function AvatarEditor({
   const materialChannels = getAvatarMaterialChannels(avatar);
   const hairstyleOptions = getAvatarHairstyleOptions(avatar.style);
   const selectedHairstyle = getAvatarHairstyle(avatar);
+  const outfitOptions = portraitOptions?.active ? [] : getAvatarFormalOptions(avatar.style);
+  const outfitChannels = outfitOptions.length ? getAvatarOutfitChannels(avatar) : [];
+  const colorChannels = [...materialChannels, ...outfitChannels];
 
   const setStyle = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
     if (avatar.style === style) return;
@@ -232,11 +236,31 @@ export function AvatarEditor({
         )}
       </section>
 
-      {materialChannels.length > 0 && (
+      {outfitOptions.length > 0 && (
+        <section>
+          <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">服裝</div>
+          <div className="grid grid-cols-2 gap-2">
+            {[{ id: "original" as const, label: "原版休閒服" }, ...outfitOptions].map(option => {
+              const selected = (avatar.formalOutfit?.id ?? "original") === option.id;
+              const next = selectAvatarFormalOutfit(avatar, option.id);
+              return (
+                <button key={option.id} type="button" aria-pressed={selected} onClick={() => onChange(next)}
+                  className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-xs font-bold ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}>
+                  <AvatarRenderer config={{ ...next, displayMode: "custom", pet: "none" }} size={72} />
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {colorChannels.length > 0 && (
         <section>
           <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">人物色彩</div>
-          <AvatarColorControls channels={materialChannels} values={avatar.materialColors ?? {}}
-            onChange={(part, color) => onChange(setAvatarMaterialColor(avatar, part, color))} />
+          <AvatarColorControls channels={colorChannels} values={{ ...avatar.materialColors, ...avatar.formalOutfit?.colors }}
+            onChange={(part, color) => onChange(part === "clothing" || part === "lining" || part === "tie"
+              ? setAvatarOutfitColor(avatar, part, color) : setAvatarMaterialColor(avatar, part, color))} />
         </section>
       )}
 

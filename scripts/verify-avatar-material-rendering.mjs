@@ -382,7 +382,67 @@ async function verifySharedRenderer(output, loadComponent) {
   }
   await sharp({ create: { width: 7*256, height: 4*256, channels: 3, background: "#F4F1F8" } }).composite(hairstyleSheet).png().toFile(path.join(output, "hairstyle-shared-renderer.png"));
   console.log("P4 shared hairstyle renderer: " + hairstyleCases.length + " frame/size cases passed");
-  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases };
+  const { getAvatarFormalOptions, selectAvatarFormalOutfit, setAvatarOutfitColor } = loadComponent(path.join(ROOT,"lib/profile/avatar-formal-outfit.ts"));
+  const outfitFixtures = [
+    ...fixtures.map(f => ({ style:f.style, id:f.name+"-original" })),
+    ...AVATAR_HAIRSTYLES.map(f => ({ style:f.style, id:f.id, hairstyle:f.id })),
+    ...fixtures.flatMap(f => [
+      {style:f.style,id:f.name+"-classic-glasses", glasses:true, materialColors:f.materialColors},
+      {style:f.style,id:f.name+"-dark", dark:true, materialColors:f.materialColors},
+      {style:f.style,id:f.name+"-dark-glasses", dark:true, glasses:true, materialColors:f.materialColors},
+    ]),
+  ];
+  const { selectClassicHairTone } = loadComponent(path.join(ROOT,"lib/profile/avatar-portrait.ts"));
+  const outfitCases=[], outfitSheet=[];
+  for (const [row,fixture] of outfitFixtures.entries()) {
+    let original=normalizeAvatarConfig({style:fixture.style,glasses:fixture.glasses??false,background:"sky",materialColors:fixture.materialColors});
+    if(fixture.hairstyle) original=selectAvatarHairstyle(original,fixture.hairstyle);
+    if(fixture.dark) original=selectClassicHairTone(original,"dark");
+    for(const size of [48,256]) {
+      const before=await renderEyewear(original,size);
+      if(size===256&&row<6) outfitSheet.push({input:before.png,left:0,top:row*size});
+      for(const [column,choice] of getAvatarFormalOptions(fixture.style).entries()) {
+        const selected=selectAvatarFormalOutfit(original,choice.id);
+        const after=await renderEyewear(selected,size);
+        const recolored=await renderEyewear(setAvatarOutfitColor(selected,"clothing","#886785"),size);
+        let changed=0, tint=0;
+        for(let y=0;y<size;y++) for(let x=0;x<size;x++) {
+          const i=(y*size+x)*4;
+          const sy=(y*SIZE/size-AVATAR_PORTRAIT_BOUNDS.y)*SIZE/AVATAR_PORTRAIT_BOUNDS.size;
+          // Above the neckline the original face must remain identical.
+          if(sy<305) assert.ok(pixelDelta(before.data,after.data,i)<=1&&Math.abs(before.data[i+3]-after.data[i+3])<=1,fixture.id+"/"+choice.id+"/"+size+": face pixels changed at "+x+","+y);
+          if(pixelDelta(before.data,after.data,i)>8) changed++;
+          if(pixelDelta(after.data,recolored.data,i)>8) tint++;
+          if(sy<360) assert.ok(pixelDelta(after.data,recolored.data,i)<=1,fixture.id+": clothing color entered the head");
+          assert.ok(Math.abs(after.data[i+3]-recolored.data[i+3])<=1,fixture.id+": clothing color changed alpha");
+        }
+        assert.ok(changed>size*size*.01&&tint>size*size*.004,fixture.id+"/"+choice.id+": clothing not visible");
+        // Prove each optional color channel is visible and changes no head pixels.
+        for(const part of ["lining","tie"]) if(Object.hasOwn(choice.originals,part)) {
+          const extra=await renderEyewear(setAvatarOutfitColor(selected,part,"#F4AF50"),size);
+          let affected=0;
+          for(let i=0;i<after.data.length;i+=4){
+            if(pixelDelta(after.data,extra.data,i)>8) affected++;
+            const y=Math.floor(i/4/size);
+            const sy=(y*SIZE/size-AVATAR_PORTRAIT_BOUNDS.y)*SIZE/AVATAR_PORTRAIT_BOUNDS.size;
+            if(sy<360) assert.ok(pixelDelta(after.data,extra.data,i)<=1);
+          }
+          assert.ok(affected>0,fixture.id+"/"+choice.id+"/"+part+": color channel not visible");
+        }
+        if(size===256) {
+          if(row<6) outfitSheet.push({input:after.png,left:(column+1)*size,top:row*size});
+          await fs.writeFile(path.join(output,fixture.id+"-"+choice.id+".png"),after.png);
+        }
+        outfitCases.push({fixture:fixture.id,outfit:choice.id,size,changed,tint,passed:true});
+      }
+    }
+  }
+  await sharp({create:{width:4*256,height:6*256,channels:3,background:"#F4F1F8"}}).composite(outfitSheet).png().toFile(path.join(output,"formal-outfit-review.png"));
+  const outfitReview=await sharp(path.join(output,"formal-outfit-review.png")).resize({width:768}).jpeg({quality:83}).toBuffer();
+  const outfitEncoded=outfitReview.toString("base64");
+  for(let i=0;i<outfitEncoded.length;i+=2000) console.log("FORMAL_REVIEW "+String(i/2000).padStart(5,"0")+" "+outfitEncoded.slice(i,i+2000));
+  console.log("FORMAL_OUTFIT_PROOF "+JSON.stringify({cases:outfitCases.length,faceProtected:true,source:"actual shared renderer"}));
+  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases };
 }
 
 async function main() {

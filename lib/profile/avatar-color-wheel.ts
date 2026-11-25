@@ -4,6 +4,8 @@
  * Its provisional gamut must be visually approved with the source art.
  */
 export type AvatarColorPart = "hair" | "skin" | "frame";
+export type AvatarClothingColorPart = "clothing" | "lining" | "tie";
+export type AvatarPickerPart = AvatarColorPart | AvatarClothingColorPart;
 export type AvatarColorHex = `#${string}`;
 export type AvatarColorSelection = Readonly<{
   x: number;
@@ -11,10 +13,13 @@ export type AvatarColorSelection = Readonly<{
   brightness: number;
 }>;
 
-export const AVATAR_COLOR_LABELS: Record<AvatarColorPart, string> = {
+export const AVATAR_COLOR_LABELS: Record<AvatarPickerPart, string> = {
   hair: "髮色",
   skin: "膚色",
   frame: "鏡框色",
+  clothing: "服裝主色",
+  lining: "內搭色",
+  tie: "領帶色",
 };
 
 export const AVATAR_COLOR_WHEEL_SIZE = 192;
@@ -23,11 +28,11 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 const finite = (value: number, fallback: number) => Number.isFinite(value) ? value : fallback;
 const interpolate = (min: number, max: number, fraction: number) => min + (max - min) * fraction;
 
-export function minAvatarBrightness(part: AvatarColorPart) {
+export function minAvatarBrightness(part: AvatarPickerPart) {
   return part === "skin" ? SKIN.brightnessMin : 0;
 }
 
-export function normalizeAvatarColorSelection(part: AvatarColorPart, value: AvatarColorSelection): AvatarColorSelection {
+export function normalizeAvatarColorSelection(part: AvatarPickerPart, value: AvatarColorSelection): AvatarColorSelection {
   let x = finite(value.x, 0);
   let y = finite(value.y, 0);
   // Bound components before hypot to avoid overflow for malformed inputs.
@@ -45,7 +50,7 @@ export function normalizeAvatarColorSelection(part: AvatarColorPart, value: Avat
   };
 }
 
-function hsvForSelection(part: AvatarColorPart, selection: AvatarColorSelection) {
+function hsvForSelection(part: AvatarPickerPart, selection: AvatarColorSelection) {
   const { x, y, brightness } = normalizeAvatarColorSelection(part, selection);
   if (part === "skin") {
     return {
@@ -61,7 +66,7 @@ function hsvForSelection(part: AvatarColorPart, selection: AvatarColorSelection)
   };
 }
 
-function rgbForSelection(part: AvatarColorPart, selection: AvatarColorSelection): [number, number, number] {
+function rgbForSelection(part: AvatarPickerPart, selection: AvatarColorSelection): [number, number, number] {
   const { h, s, v } = hsvForSelection(part, selection);
   const f = (n: number) => {
     const k = (n + h / 60) % 6;
@@ -70,12 +75,12 @@ function rgbForSelection(part: AvatarColorPart, selection: AvatarColorSelection)
   return [f(5), f(3), f(1)];
 }
 
-export function getAvatarColorHex(part: AvatarColorPart, selection: AvatarColorSelection): AvatarColorHex {
+export function getAvatarColorHex(part: AvatarPickerPart, selection: AvatarColorSelection): AvatarColorHex {
   return `#${rgbForSelection(part, selection).map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }
 
 /** For opening a picker with its source color; does not apply an override. */
-export function avatarColorSelectionFromHex(part: AvatarColorPart, hex: AvatarColorHex): AvatarColorSelection {
+export function avatarColorSelectionFromHex(part: AvatarPickerPart, hex: AvatarColorHex): AvatarColorSelection {
   if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error("Invalid avatar color");
   const [r, g, b] = [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
   const v = Math.max(r, g, b);
@@ -98,7 +103,7 @@ export function avatarColorSelectionFromHex(part: AvatarColorPart, hex: AvatarCo
 }
 
 /** One math path for both display and pointer selection, no CSS hue mismatch. */
-export function rasterizeAvatarColorWheel(part: AvatarColorPart, brightness: number, size = AVATAR_COLOR_WHEEL_SIZE): Uint8ClampedArray {
+export function rasterizeAvatarColorWheel(part: AvatarPickerPart, brightness: number, size = AVATAR_COLOR_WHEEL_SIZE): Uint8ClampedArray {
   if (!Number.isInteger(size) || size < 2 || size > 256) throw new Error("Invalid color wheel size");
   const pixels = new Uint8ClampedArray(size * size * 4);
   for (let row = 0; row < size; row++) {
