@@ -44,3 +44,6 @@ PR #54 原生開關觸覺回饋、PR #55 主畫面 PWA 通知、PR #56 伺服器
 
 ## 端到端隔離驗證（CI）
 新增 `scripts/verify-background-reminders-integration.mjs`，僅 GitHub Actions 臨時 Supabase（固定 loopback 54321/54322）可執行。建立本機 Auth 測試帳號、實際登入及驗證 Token，透過 PostgREST 服務角色註冊裝置、驗證匿名／已登入使用者不能直接呼叫特權 RPC 或讀取訂閱，並用兩個 dispatchers 同時認領任務。實際加密後以測試裝置的 ECDH 金鑰解密，交由正式 worker 產生通知，驗證開關撤銷及真實 Auth 登出阻止已認領任務發送。Apple transport 僅為測試替身，沒有真實推播。另於交易內驗證 pg_cron 接受 10 seconds 間隔，不建立持久排程。CI 停止後清除臨時資料庫；不使用任何正式密鑰。此測試不能取代 iPhone 正式 PWA 或真實秒級延遲驗收。
+
+## Migration 候選與登入測試修正
+本地 Supabase CLI 將 auth.email.enable_signup 同時視為登入 provider 開關，造成臨時整合測試出現 email_provider_disabled；只在 CI checkout 內啟用此 provider，保留 auth.enable_signup=false，並實際驗證匿名自行註冊仍被拒絕。正式 config.toml 與正式 Auth 設定不變。CI 使用 supabase migration new 產生候選 migration、套用至隔離資料庫、驗證本地 migration 歷史、執行 SQL 和端到端測試及本地 security advisors，並保留候選檔案供審閱。候選檔未直接提交正式 migrations 或部署；待整合通過及審查後才採用。排程定義仍不會建立 Cron、發送通知或啟用服務。

@@ -116,8 +116,50 @@ jobs:
           version: 2.101.0
           github-token: ${{ github.token }}
 
-      - name: Normalize local Supabase config for stable CLI
-        run: sed -i 's/^\[local_smtp\]$/[inbucket]/' supabase/config.toml
+      - name: Normalize disposable local Supabase config for stable CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/^\[local_smtp\]$/[inbucket]/' supabase/config.toml
+          # In this CLI version auth.email.enable_signup also toggles the
+          # provider itself. Enable password login in the disposable runner,
+          # while retaining the global prohibition on self-service signup.
+          # Never push this config to a remote project.
+          sed -i '/^\[auth\.email\]$/,/^\[/s/^enable_signup = false$/enable_signup = true/' supabase/config.toml
+          python3 -c 'import tomllib; a=tomllib.load(open("supabase/config.toml","rb"))["auth"]; assert a["enable_signup"] is False and a["email"]["enable_signup"] is True'
+
+      - name: Generate and verify the candidate migration locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version
+          supabase migration new --help
+          # This step creates a migration ONLY in the temporary CI checkout.
+          # It exercises the real migration path instead of applying staged
+          # SQL after the stack has already started.
+          if ! compgen -G 'supabase/migrations/*_background_task_reminders.sql' >/dev/null; then
+            supabase migration new background_task_reminders
+            mapfile -t candidates < <(find supabase/migrations -maxdepth 1 -name '*_background_task_reminders.sql' -type f)
+            test "${#candidates[@]}" -eq 1
+            candidate="${candidates[0]}"
+            {
+              printf '%s\n\n' '-- Review candidate: schema only; no scheduler or push is enabled.'
+              cat supabase/staged/background_task_reminders.sql
+              printf '\n'
+              cat supabase/staged/background_task_reminder_cron.sql
+            } > "$candidate"
+            echo "Generated migration candidate: $(basename "$candidate")"
+            echo "REMINDER_MIGRATION_CANDIDATE=$candidate" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload migration candidate for review
+        if: env.REMINDER_MIGRATION_CANDIDATE != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: background-reminder-migration-candidate
+          path: ${{ env.REMINDER_MIGRATION_CANDIDATE }}
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Start isolated local Supabase and apply migrations
         id: supabase_start
@@ -149,6 +191,9 @@ jobs:
           set -euo pipefail
           eval "$(supabase status -o env)"
           echo "DATABASE_URL=${DB_URL}" >> "$GITHUB_ENV"
+
+      - name: Verify migration history in local database
+        run: supabase migration list --local
 
       - name: Run database verification scripts
         id: database_tests
@@ -207,6 +252,15 @@ jobs:
           export LOCAL_SUPABASE_ANON_KEY="$ANON_KEY"
           export BACKGROUND_REMINDER_LOCAL_TEST=1
           node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/verify-background-reminders-integration.mjs
+
+      - name: Review local database security advisors
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db advisors --help
+          # Existing unrelated advisory findings do not alter release policy.
+          # Review findings for the new reminder objects before approval.
+          supabase db advisors --local --type security --fail-on none
 
       - name: Stop local Supabase
         if: always()

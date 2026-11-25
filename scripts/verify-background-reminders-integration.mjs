@@ -67,11 +67,10 @@ const subscription = {
 const keys = { ...webpush.generateVAPIDKeys(), subject: "https://example.invalid" };
 
 try {
-  // These definitions are deliberately not migrations yet; only the isolated
-  // local database receives them, and the runner destroys it after tests.
-  sql(fs.readFileSync("supabase/staged/background_task_reminders.sql", "utf8")
-    + "\n" + fs.readFileSync("supabase/staged/background_task_reminder_cron.sql", "utf8")
-    + "\nnotify pgrst, 'reload schema';");
+  // The CI runner must have applied the actual CLI-generated candidate as
+  // a migration. Never silently apply it here or mask migration failure.
+  equal(sql("select to_regclass('public.background_reminder_devices') is not null and to_regprocedure('background_reminder_private.queue_due_dispatch()') is not null;"), "t", "Migrated reminder schema");
+  stages.push("CLI migration installed");
   const password = randomBytes(24).toString("base64url");
   const email = "reminder-ci-" + randomUUID() + "@example.invalid";
   const created = check(await admin.auth.admin.createUser({
@@ -85,6 +84,12 @@ try {
   assert.ok(sessionId && /^[0-9a-f-]{36}$/i.test(sessionId), "Verified local session");
   equal(userId, verified.user.id, "Auth user");
   const other = makeUserClient();
+  const signup = await other.auth.signUp({
+    email: "reminder-denied-" + randomUUID() + "@example.invalid",
+    password: randomBytes(24).toString("base64url"),
+  });
+  equal(signup.error?.code, "signup_disabled", "Public self-registration must remain disabled");
+  stages.push("existing users can sign in; public signup denied");
   // The local fixture uses the same insert-time authorization triggers as the
   // SQL regression test, then retimestamps the isolated hall to a fixed Sunday.
   sql("begin;\n" +

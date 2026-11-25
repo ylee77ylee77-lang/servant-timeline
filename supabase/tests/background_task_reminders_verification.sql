@@ -1,7 +1,13 @@
--- All rows and the staged schema exist only in this isolated transaction.
+-- All fixtures exist only in this isolated transaction. CI validates the
+-- installed CLI migration candidate; standalone local staging tests may load
+-- the definitions when they are not installed.
 begin;
-\ir ../staged/background_task_reminders.sql
-\ir ../staged/background_task_reminder_cron.sql
+select to_regclass('public.background_reminder_devices') is not null as reminder_schema_installed \gset
+\if :reminder_schema_installed
+\else
+  \ir ../staged/background_task_reminders.sql
+  \ir ../staged/background_task_reminder_cron.sql
+\endif
 
 do $$
 declare
