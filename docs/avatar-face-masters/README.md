@@ -99,3 +99,26 @@ Each new hairstyle needs its own source-specific tint mask; existing master
 masks must not be reused unchanged. Eyewear and garment alignment and actual
 UI integration remain pending. New CI is not yet confirmed. No changes to
 runtime registration, database, authorization, or production.
+
+## Per-hairstyle material ownership
+
+CI #277 passed the existing 24 candidate tint cases, four locked hairstyle
+cases, application checks and database authorization. Each of the four
+new hairstyles now has its own pinned RGB mask under hairstyle-materials/.
+The source-specific traced hair and skin shapes are refined only in a narrow
+boundary band. The exact refined master ownership is retained within the
+binary facial lock and blended outside it; no color ownership is assigned
+to fully transparent source pixels. The reproducible candidate builder is
+scripts/build-avatar-hairstyle-candidate-masks.mjs. Local decoding and color
+simulation verified all four masks, 132,540 locked ownership pixels and 32
+protected 3x3 patches, independent tinting and unchanged source alpha. Each
+mask is below 24 KiB. The CI proof regenerates the masks, compares decoded
+ownership against the pinned PNGs and adds 24 actual AvatarMaterialFilter
+cases, leaving all previous checks in place. It produces
+independent-hairstyle-material-review.png. The new CI has not yet completed.
+
+Local contact-sheet review still shows some residual original color at fine
+bun hair strands and other edges at extreme light hair tones. This is a
+candidate stage, not visual approval or an actual interactive avatar. The
+sources still need eyewear and garment alignment, runtime registration,
+shared-renderer tests and device acceptance. No production or database change.

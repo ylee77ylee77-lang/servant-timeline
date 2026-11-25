@@ -25,6 +25,7 @@ import { AVATAR_FEATURE_PATHS } from "../lib/profile/avatar-feature-paths.ts";
 import { createAvatarMaterialMask } from "./build-avatar-material-masks.mjs";
 import { refineCandidateMaterial } from "./refine-avatar-candidate-materials.mjs";
 import { verifyIndependentHairstyles } from "./verify-independent-avatar-hairstyles.mjs";
+import { makeVariantMask } from "./build-avatar-hairstyle-candidate-masks.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SIZE = 512;
@@ -637,6 +638,80 @@ async function main() {
     assert.ok(!failedCandidate, failedCandidate && failedCandidate.id + "/" + failedCandidate.variant + "/" + failedCandidate.name + ": " + failedCandidate.failures[0]);
     console.log("INDEPENDENT_MATERIAL_PROOF " + JSON.stringify({cases:24,source:"actual AvatarMaterialFilter, initial and refined candidates only",visualAcceptance:"NOT_APPROVED"}));
     report.independentHairstyles = await verifyIndependentHairstyles(ROOT, output);
+    // Variant masks are candidate assets, not registered runtime sources.
+    const variantManifest = JSON.parse(await fs.readFile(path.join(candidateRoot,"hairstyle-materials","manifest.json"),"utf8"));
+    const hairstyleManifest = JSON.parse(await fs.readFile(path.join(candidateRoot,"hairstyles","manifest.json"),"utf8"));
+    assert.equal(variantManifest.status,"candidate-only");
+    assert.deepEqual(Object.keys(variantManifest.variants).sort(),Object.keys(hairstyleManifest.variants).sort());
+    report.independentHairstyleMaterials = {sources:[],cases:[],visualAcceptance:"NOT_APPROVED",runtimeRegistration:false};
+    const hairstyleMaterialTiles = [];
+    for (const [row,[id,item]] of Object.entries(variantManifest.variants).entries()) {
+      const spec = manifest.sources[item.base];
+      assert.ok(spec && hairstyleManifest.variants[id].base === item.base);
+      const art = await fs.readFile(path.join(candidateRoot,"hairstyles",id+".webp"));
+      const mask = await fs.readFile(path.join(candidateRoot,"hairstyle-materials",id+".png"));
+      assert.equal(sha256(art),item.sourceSha256);
+      assert.equal(item.sourceSha256,hairstyleManifest.variants[id].sha256);
+      assert.equal(sha256(mask),item.maskSha256);
+      assert.equal(mask.length,item.bytes);
+      assert.ok(mask.length <= 24*1024);
+      const masterArt = await fs.readFile(path.join(candidateRoot,item.base+".webp"));
+      const initialMask = await fs.readFile(path.join(candidateRoot,"materials",item.base+".png"));
+      const lock = await fs.readFile(path.join(candidateRoot,"hairstyles",item.base+"-locked.png"));
+      assert.equal(sha256(masterArt),spec.sourceSha256);
+      assert.equal(sha256(initialMask),spec.maskSha256);
+      assert.equal(sha256(lock),hairstyleManifest.sources[item.base].lockSha256);
+      const refined = await refineCandidateMaterial(item.base,masterArt,initialMask);
+      const generated = await makeVariantMask(id,art,refined.png,lock);
+      const coverage = await rgba(mask);
+      assert.deepEqual(await rgba(generated.png),coverage,id+": committed ownership differs from generated mask");
+      assert.equal(generated.locked,hairstyleManifest.sources[item.base].protectedPixels);
+      const sourceUri = dataUri(await sharp(art).png().toBuffer());
+      const baselinePng = await sharp(svgFor(sourceUri,null)).png().toBuffer();
+      const baseline = await rgba(baselinePng);
+      const rawSource = await rgba(art);
+      const coverageCount=[0,0];
+      for(let i=0;i<coverage.length;i+=4) {
+        assert.equal(coverage[i+3],255,id+": coverage must be opaque");
+        assert.equal(coverage[i+2],0,id+": no eyewear channel");
+        assert.ok(coverage[i]+coverage[i+1]<=255,id+": overlapping ownership");
+        if(rawSource[i+3]===0) assert.equal(coverage[i]+coverage[i+1],0,id+": ownership outside portrait");
+        for(let c=0;c<2;c++) if(coverage[i+c]>128 && baseline[i+3]>200) coverageCount[c]++;
+      }
+      for(let c=0;c<2;c++) {
+        const [x,y]=c===0?spec.hairPoint:spec.skinPoint;
+        const i=imageIndex(x,y);
+        assert.ok(baseline[i+3]>200 && coverage[i+c]>200 && coverageCount[c]>10000,id+": missing visible channel");
+      }
+      report.independentHairstyleMaterials.sources.push({id,maskSha256:item.maskSha256,lockedOwnershipPixels:generated.locked,coverageCount});
+      const addTile=async(png,col,label)=>{
+        const thumb=await sharp(png).resize(tile,tile).flatten({background:"#E9E1F3"}).png().toBuffer();
+        hairstyleMaterialTiles.push({input:thumb,left:col*tile,top:row*rowHeight+26});
+        hairstyleMaterialTiles.push({input:Buffer.from(`<svg width="${tile}" height="26"><text x="6" y="17" font-size="11" font-family="sans-serif" fill="#484151">${id} / ${label}</text></svg>`),left:col*tile,top:row*rowHeight});
+      };
+      await addTile(baselinePng,0,"original");
+      for(const [col,entry] of candidateCases.entries()) {
+        const parts=Object.keys(entry.colors);
+        const plan={coverageUri:dataUri(mask),frameGuard:false,channels:parts.map(part=>({part,tables:avatarMaterialTransfer(spec.originals[part],entry.colors[part],part)}))};
+        const png=await sharp(svgFor(sourceUri,plan)).png().toBuffer();
+        const pixels=await rgba(png);
+        const stats=rasterStats(baseline,pixels,coverage,parts);
+        const failures=[];
+        if(stats.maxAlphaDelta>1)failures.push("alpha changed");
+        if(stats.opaqueOutsideChanged!==0)failures.push("opaque RGB outside mask changed");
+        if(stats.maxOutsidePremultipliedDelta>1)failures.push("premultiplied RGB outside mask changed");
+        for(const part of parts)if(stats.targetChangedPixels[part]<100)failures.push(part+": insufficient target change");
+        const protectedPixelsChecked=checkProtectedPatches(baseline,pixels,coverage,parts,spec.protected.map(([x,y])=>({x,y})),id,failures);
+        report.independentHairstyleMaterials.cases.push({id,name:entry.name,stats,protectedPixelsChecked,passed:failures.length===0,failures});
+        await addTile(png,col+1,entry.name);
+      }
+    }
+    await sharp({create:{width:tile*(candidateCases.length+1),height:rowHeight*4,channels:3,background:"#F4F1F8"}})
+      .composite(hairstyleMaterialTiles).png().toFile(path.join(output,"independent-hairstyle-material-review.png"));
+    assert.equal(report.independentHairstyleMaterials.cases.length,24);
+    const failedHairstyleMaterial=report.independentHairstyleMaterials.cases.find(item=>!item.passed);
+    assert.ok(!failedHairstyleMaterial,failedHairstyleMaterial && failedHairstyleMaterial.id+"/"+failedHairstyleMaterial.name+": "+failedHairstyleMaterial.failures[0]);
+    console.log("INDEPENDENT_HAIRSTYLE_MATERIAL_PROOF "+JSON.stringify({cases:24,lockedOwnershipPixels:report.independentHairstyleMaterials.sources.reduce((n,item)=>n+item.lockedOwnershipPixels,0),visualAcceptance:"NOT_APPROVED"}));
     report.status = "passed";
   } catch (error) {
     report.status = "failed";
