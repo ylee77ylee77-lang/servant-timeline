@@ -218,3 +218,7 @@ The existing strict renderer thresholds remain. A new 150-case mobile matrix
 covers six B1 sources, five backgrounds, and four animals plus none, with
 fitted clothing, glasses, and JSON normalization. Latest full CI and
 actual browser/device/visual review are still required.
+
+## Female original medium-length refinement
+
+The CI #284 candidate was rendered in the 256px and 48px comparison, with clearly longer hair on both shoulders. The original `female-b` selection now points to separate `female-b-medium` runtime assets, retaining the existing ID, facial geometry, and eyewear placement. The historical mother artwork and candidate manifests stay unchanged as the reproducible input. The new lossless WebP and three matching masks are pinned; the build script checks their decoded pixels against the reviewed candidate. Candidate proof: 31,972 locked face pixels, 9,812 extended hair pixels, theoretical alpha complement max error 0.48, 150,300-byte WebP. CI #284 passed generation and the earlier shared renderer before registration; the new commit still requires the full shared renderer, actual outfit/color inspection and iPhone save/reopen. No production merge.

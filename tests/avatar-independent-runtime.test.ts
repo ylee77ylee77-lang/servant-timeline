@@ -68,3 +68,37 @@ test("public b1 source and masks are pinned; clothing composition preserves alph
   }
  }
 });
+
+test("female-b original now has medium-length hair without changing the face or persisted selection ID", async()=>{
+  const base=normalizeAvatarConfig({style:"feminine"});
+  const selected=selectAvatarIndependent(base,"female-b");
+  const reopened=normalizeAvatarConfig(JSON.parse(JSON.stringify(selected)));
+  assert.deepEqual(reopened,selected);
+  assert.equal(reopened.independentPortrait?.id,"female-b");
+  assert.equal(getAvatarScene(reopened).portrait,"/avatar/scenes/b1/female-b-medium.webp");
+  const load=async(relative:string)=>sharp(readFileSync(path.join(process.cwd(),relative))).ensureAlpha().raw().toBuffer();
+  const [oldArt,newArt,oldMaterial,newMaterial,head]=await Promise.all([
+    "public/avatar/scenes/b1/female-b.webp",
+    "public/avatar/scenes/b1/female-b-medium.webp",
+    "public/avatar/materials/b1/female-b.png",
+    "public/avatar/materials/b1/female-b-medium.png",
+    "public/avatar/fits/b1/female-b-medium-head.png",
+  ].map(load));
+  let left=0,right=0;
+  for(let y=0;y<512;y++)for(let x=0;x<512;x++){
+    const i=(y*512+x)*4;
+    if(y<355){
+      assert.equal(oldArt[i+3],newArt[i+3]);
+      if(oldArt[i+3]) assert.deepEqual(newArt.subarray(i,i+4),oldArt.subarray(i,i+4));
+      assert.deepEqual(newMaterial.subarray(i,i+4),oldMaterial.subarray(i,i+4));
+    }
+    if(y>=436&&newArt[i+3]>240&&newMaterial[i]>240&&oldMaterial[i]<100){
+      assert.ok(head[i+3]>230,"Extended hair must survive outfit selection");
+      if(x<256)left++;else right++;
+    }
+  }
+  assert.ok(left>500&&right>500,"Visible recolorable length on both shoulders");
+  assert.deepEqual(getAvatarIndependentOptions("feminine").map(s=>s.id),["female-b","female-b-bob","female-b-bun"]);
+  assert.equal(getAvatarScene(selectAvatarIndependent(base,"female-b-bob")).portrait,"/avatar/scenes/b1/female-b-bob.webp");
+  assert.equal(getAvatarScene(selectAvatarIndependent(base,"female-b-bun")).portrait,"/avatar/scenes/b1/female-b-bun.webp");
+});

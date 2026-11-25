@@ -131,9 +131,17 @@ export async function buildFemaleMediumCandidate(root,output) {
   await fs.writeFile(path.join(dir,"comparison.jpg"),review);
   await fs.writeFile(path.join(dir,"proof.json"),JSON.stringify(proof,null,2)+"\n");
   console.log("FEMALE_MEDIUM_PROOF "+JSON.stringify(proof));
-  for(const [name,bytes] of Object.entries({...files,"comparison.jpg":review})){
-    const encoded=bytes.toString("base64");
-    for(let i=0;i<encoded.length;i+=2000)console.log("FEMALE_MEDIUM_ASSET "+name+" "+String(i/2000).padStart(5,"0")+" "+encoded.slice(i,i+2000));
+  // Verify the registered assets reproduce the reviewed candidate.
+  // Compare decoded pixels rather than encoded bytes across encoder versions.
+  const registered = {
+    "female-b-medium.webp":"public/avatar/scenes/b1/female-b-medium.webp",
+    "female-b-medium-material.png":"public/avatar/materials/b1/female-b-medium.png",
+    "female-b-medium-head.png":"public/avatar/fits/b1/female-b-medium-head.png",
+    "female-b-medium-garment.png":"public/avatar/fits/b1/female-b-medium-garment.png",
+  };
+  for(const [name,relative] of Object.entries(registered)){
+    const committed=await read(relative);
+    assert.deepEqual(await rgba(committed),await rgba(files[name]),name+": registered artwork differs from reviewed candidate");
   }
   return proof;
 }
