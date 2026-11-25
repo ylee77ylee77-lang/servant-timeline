@@ -168,6 +168,39 @@ def connected(seed, allowed):
     return np.isin(labels,labels_used)
 
 
+# Source-specific feature contours reviewed against the rendered candidates.
+# Protect newly exposed brows even where the original hairstyle hid them.
+BROWS = {
+    "male": [
+        [(165,180),(171,167),(184,156),(201,150),(219,149),(234,151),(240,155),(240,164),(218,166),(193,168),(176,175)],
+        [(276,155),(283,148),(302,146),(320,148),(335,155),(346,166),(349,175),(332,168),(308,163),(280,165)],
+    ],
+    "female": [
+        [(204,174),(208,167),(219,162),(229,162),(235,165),(238,174),(226,174),(214,175)],
+        [(282,164),(292,157),(307,154),(324,154),(336,158),(346,165),(350,175),(332,169),(308,166),(283,171)],
+    ],
+}
+# The neck boundary follows each new garment, not the old v2 mask.
+NECK = {
+    "male-short": [(194,326),(328,326),(330,367),(341,394),(329,403),(312,415),(291,425),(270,432),(251,430),(229,422),(206,409),(185,394),(193,371)],
+    "male-side": [(194,326),(328,326),(330,367),(342,394),(329,403),(311,416),(291,426),(268,432),(250,431),(228,422),(206,408),(185,394),(193,370)],
+    "female-bob": [(217,340),(320,340),(320,378),(326,399),(341,414),(326,425),(305,434),(277,438),(252,436),(230,432),(210,424),(203,418),(215,398),(219,378)],
+    "female-bun": [(218,340),(319,340),(320,378),(327,398),(344,416),(325,430),(305,437),(276,441),(248,438),(226,433),(207,423),(218,399),(220,377)],
+}
+EAR_INTERIORS = {
+    "male-short": [[(118,210),(132,204),(145,221),(151,250),(143,273),(130,274),(118,264),(113,239)],[(370,213),(384,206),(394,218),(396,242),(388,263),(375,273),(362,262),(363,239)]],
+    "male-side": [[(118,210),(132,204),(145,221),(151,250),(143,273),(130,274),(118,264),(113,239)],[(370,213),(384,206),(394,218),(396,242),(388,263),(375,273),(362,262),(363,239)]],
+    "female-bob": [[(143,245),(155,241),(166,256),(170,272),(164,282),(153,276),(144,263)],[(377,219),(389,218),(398,234),(396,253),(387,267),(375,270),(368,255)]],
+    "female-bun": [[(128,232),(139,221),(151,230),(155,254),(147,268),(136,265),(129,251)],[(377,216),(390,213),(398,231),(394,254),(384,267),(373,264),(367,245)]],
+}
+
+
+def soft_interior(points, feather=3):
+    region=poly(points)
+    distance=cv2.distanceTransform((region>0).astype(np.uint8),cv2.DIST_L2,5)
+    return smooth(0,feather,distance)
+
+
 def make_coverage(name, image, core, old):
     gender=name.split("-")[0]
     rgb=image[:,:,:3].astype(np.float32)
@@ -204,6 +237,30 @@ def make_coverage(name, image, core, old):
     # outside the locked identity; newly exposed skin is independently traced.
     hair[core]=0
     skin[core]=old[:,:,1][core].astype(np.float32)/255
+    # Carry skin color into its shadows while protecting garment eyelets
+    # and knit fibers. Apply a narrow feather only inside the traced neck.
+    neck=soft_interior(NECK[name],3)
+    lower=Y>=376
+    skin[lower]=neck[lower]*alpha[lower]
+    hair[lower]*=(1-neck[lower])
+    for points in EAR_INTERIORS[name]:
+        interior=soft_interior(points,3)*alpha
+        ear=interior*smooth(95,151,r)*smooth(8,23,r-b)
+        skin=np.maximum(skin,ear)
+        hair*=1-ear
+    if name=="female-bun":
+        wisp=poly([(378,249),(395,251),(396,278),(392,303),(383,319),
+                   (370,335),(365,348),(367,365),(356,365),(354,348),
+                   (360,332),(373,313),(380,292),(379,270)])>0
+        weight=wisp*alpha*(1-smooth(152,205,luma))*smooth(-4,12,r-b)
+        hair=np.maximum(hair,weight*(1-skin))
+    # Preserve dark brow hairs, tint their bright antialiased skin edges.
+    for points in BROWS[gender]:
+        envelope=cv2.GaussianBlur(poly(points).astype(np.float32)/255,(5,5),.85)
+        dark=(1-smooth(77,145,luma))*envelope
+        hair*=1-envelope
+        skin*=1-dark
+        skin=np.maximum(skin,envelope*smooth(142,188,luma)*alpha)
     # Protect the exact original feature pixels and their antialiased holes
     # on the same facial artboard, including lashes and lips.
     for x,y in PROTECTED[gender]:
@@ -225,6 +282,11 @@ def make_coverage(name, image, core, old):
         assert coverage[y,x].max()==0
     assert np.count_nonzero(coverage[:,:,0]>180)>6000,"insufficient hair ownership"
     assert np.count_nonzero(coverage[:,:,1]>180)>14000,"insufficient skin ownership"
+    # Both visible brow centers must be protected on the new source.
+    brow_centers=[(208,158),(306,156)] if gender=="male" else [(225,169),(310,162)]
+    for x,y in brow_centers:
+        assert coverage[y,x,0]<=3,"hair color entered an eyebrow"
+        assert coverage[y,x,1]<=12,"skin color entered an eyebrow"
     assert np.max(coverage.astype(np.int16).sum(axis=2))<=255
     assert not np.any(coverage[~alpha])
     return coverage
