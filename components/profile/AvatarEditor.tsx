@@ -11,6 +11,9 @@ import {
   getAvatarPortraitOptions,
   getClassicHairTone,
   selectAvatarPortraitVersion,
+  selectAvatarPortraitFamily,
+  selectAvatarFamilyHair,
+  selectAvatarFamilyGlasses,
   selectClassicHairTone,
 } from "@/lib/profile/avatar-portrait";
 import {
@@ -101,65 +104,40 @@ export function AvatarEditor({
       {portraitOptions && (
         <>
           <section>
-            <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">人物造型</div>
-            <div className="grid grid-cols-2 gap-2">
-              {[false, true].map((layered) => (
-                <button
-                  key={String(layered)}
-                  type="button"
-                  aria-pressed={portraitOptions.active === layered}
-                  onClick={() => onChange(selectAvatarPortraitVersion(avatar, layered))}
-                  className={`min-h-11 rounded-2xl border px-3 py-2 text-sm font-black ${portraitOptions.active === layered ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
-                >
-                  {layered ? "多款造型" : "經典"}
+            <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">臉型</div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: "original", label: "原版", next: selectAvatarPortraitVersion(avatar, false), selected: !portraitOptions.active },
+                ...portraitOptions.families.map(family => ({
+                  id: family.id, label: family.label, next: selectAvatarPortraitFamily(avatar, family.id),
+                  selected: portraitOptions.active && portraitOptions.family.id === family.id,
+                })),
+              ].map(option => (
+                <button key={option.id} type="button" aria-pressed={option.selected} onClick={() => onChange(option.next)}
+                  className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-xs font-bold ${option.selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}>
+                  <AvatarRenderer config={{ ...option.next, displayMode: "custom", pet: "none" }} size={56} />
+                  {option.label}
                 </button>
               ))}
             </div>
           </section>
           {portraitOptions.active && (
-            <>
-              <section>
-                <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮型</div>
-                <div className="grid grid-cols-3 gap-2">
-                  {portraitOptions.family.hairStyles.map((hair) => {
-                    const selected = portraitOptions.hair.value === hair.value;
-                    const color = hair.colors.find((item) => item.value === portraitOptions.color.value) ?? hair.colors[0];
-                    const next = { ...avatar, hair: hair.value, hairColor: color.value };
-                    return (
-                      <button
-                        key={hair.value}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => onChange(next)}
-                        className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-xs font-bold ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
-                      >
-                        <AvatarRenderer config={{ ...next, displayMode: "custom", pet: "none" }} size={56} />
-                        {hair.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-              <section>
-                <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮色</div>
-                <div className="flex flex-wrap gap-2">
-                  {portraitOptions.hair.colors.map((color) => {
-                    const selected = portraitOptions.color.value === color.value;
-                    return (
-                      <button
-                        key={color.value}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => onChange({ ...avatar, hair: portraitOptions.hair.value, hairColor: color.value })}
-                        className={`min-h-11 rounded-xl border px-3 py-2 text-sm font-bold ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
-                      >
-                        {color.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            </>
+            <section>
+              <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮型</div>
+              <div className="grid grid-cols-3 gap-2">
+                {portraitOptions.family.hairStyles.map(hair => {
+                  const selected = portraitOptions.hair.value === hair.value;
+                  const next = selectAvatarFamilyHair(avatar, hair.value);
+                  return (
+                    <button key={hair.value} type="button" aria-pressed={selected} onClick={() => onChange(next)}
+                      className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-xs font-bold ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}>
+                      <AvatarRenderer config={{ ...next, displayMode: "custom", pet: "none" }} size={56} />
+                      {hair.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
           )}
         </>
       )}
@@ -199,7 +177,7 @@ export function AvatarEditor({
                   key={style}
                   type="button"
                   aria-pressed={selected}
-                  onClick={() => onChange(style === "none" ? { ...avatar, glasses: false } : { ...avatar, glasses: true, glassesStyle: style })}
+                  onClick={() => onChange(selectAvatarFamilyGlasses(avatar, style))}
                   className={`min-h-11 rounded-2xl border px-3 py-2 text-sm font-black ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}
                 >
                   {style === "none" ? "無眼鏡" : AVATAR_GLASSES_LABELS[style]}

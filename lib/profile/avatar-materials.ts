@@ -1,6 +1,6 @@
 import type { AvatarConfig, AvatarMaterialColors } from "./avatar.ts";
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
-import { AVATAR_PORTRAITS, AVATAR_CLASSIC_DARK_PORTRAITS, getAvatarPortraitPlan, getClassicHairTone } from "./avatar-portrait.ts";
+import { AVATAR_PORTRAITS, AVATAR_CLASSIC_DARK_PORTRAITS, AVATAR_LAYERED_PORTRAITS, getAvatarLayerMaterial, getAvatarPortraitPlan, getClassicHairTone, type AvatarPortraitFamily } from "./avatar-portrait.ts";
 import { getAvatarEyewearPlan } from "./avatar-eyewear.ts";
 import { AVATAR_FRAME_PATHS } from "./avatar-frame-paths.ts";
 import { AVATAR_FEATURE_PATHS } from "./avatar-feature-paths.ts";
@@ -62,9 +62,15 @@ export function getAvatarMaterialSource(src: string) {
   return null;
 }
 
-export function getAvatarMaterialChannels(avatar: AvatarConfig): MaterialChannel[] {
-  // Ask the same resolver used by the renderer; unknown future art is not colorable.
-  const { portrait } = getAvatarPortraitPlan({ ...avatar, displayMode: "custom" });
+export function getAvatarMaterialChannels(avatar: AvatarConfig, catalog: readonly AvatarPortraitFamily[] = AVATAR_LAYERED_PORTRAITS): MaterialChannel[] {
+  const { portrait, layers } = getAvatarPortraitPlan({ ...avatar, displayMode: "custom" }, catalog);
+  if (layers.some(layer => layer.kind === "face-body")) {
+    const layerMaterials = layers.map(item => getAvatarLayerMaterial(item.src, catalog));
+    return AVATAR_MATERIAL_PARTS.flatMap(part => {
+      const layer = layerMaterials.find(item => item?.part === part);
+      return layer ? [{ part, original: layer.original }] : [];
+    });
+  }
   const source = portrait && getAvatarMaterialSource(portrait);
   if (!source) return [];
   const eyewear = getAvatarEyewearPlan({ ...avatar, displayMode: "custom" });
@@ -114,7 +120,16 @@ export function avatarMaterialTransfer(original: AvatarColorHex, color: AvatarCo
   }) as [string, string, string];
 }
 
-export function getAvatarMaterialPlan(src: string, colors?: AvatarMaterialColors) {
+export function getAvatarMaterialPlan(src: string, colors?: AvatarMaterialColors, catalog: readonly AvatarPortraitFamily[] = AVATAR_LAYERED_PORTRAITS) {
+  const layer = getAvatarLayerMaterial(src, catalog);
+  if (layer) {
+    const color = colors?.[layer.part];
+    return color ? {
+      coverageUri: layer.coverageUri,
+      channels: [{ part: layer.part, tables: avatarMaterialTransfer(layer.original, color, layer.part) }],
+      frameGuard: false as const,
+    } : null;
+  }
   const source = getAvatarMaterialSource(src);
   if (!source || !colors) return null;
   const channels = AVATAR_MATERIAL_PARTS.flatMap((part) => {

@@ -41,7 +41,7 @@ export function AvatarRenderer({
   const id = useId().replace(/:/g, "");
   const clipId = `avatar-circle-${id}`;
   const gradientId = `avatar-bg-${id}`;
-  const eyewear = getAvatarEyewearPlan(avatar);
+  const eyewear = portraitLayers.some(layer => layer.kind === "face-body") ? null : getAvatarEyewearPlan(avatar);
   const materials = portraitLayers.map((layer) => getAvatarMaterialPlan(layer.src, avatar.materialColors));
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
   const iconLabel = AVATAR_ICON_OPTIONS.find((option) => option.value === avatar.iconType)?.label || "十字架";
