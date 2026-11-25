@@ -6,6 +6,8 @@ import { AVATAR_ICON_OPTIONS, AVATAR_ICON_TONES } from "@/lib/profile/avatar-ico
 import { SystemIconArtwork } from "@/components/profile/SystemIconArtwork";
 import { AvatarFormalOutfitArtwork } from "@/components/profile/AvatarFormalOutfit";
 import { getAvatarFormalOutfitPlan } from "@/lib/profile/avatar-formal-outfit";
+import { getAvatarIndependent } from "@/lib/profile/avatar-independent";
+import { getAvatarCandidateOutfitFit } from "@/lib/profile/avatar-outfit-fit";
 import { AvatarEyewear } from "@/components/profile/AvatarEyewear";
 import { getAvatarEyewearPlan } from "@/lib/profile/avatar-eyewear";
 import { AvatarMaterialFilter } from "@/components/profile/AvatarMaterialFilter";
@@ -46,6 +48,11 @@ export function AvatarRenderer({
   const eyewear = portraitLayers.some(layer => layer.kind === "face-body") ? null : getAvatarEyewearPlan(avatar);
   const outfit = getAvatarFormalOutfitPlan(avatar, portrait);
   const outfitClipId = `avatar-outfit-head-${id}`;
+  const independent = getAvatarIndependent(avatar);
+  const fitted = outfit && independent?.src === portrait ? getAvatarCandidateOutfitFit(independent.id) : null;
+  const headMaskId = `avatar-fitted-head-${id}`;
+  const garmentMaskId = `avatar-fitted-garment-${id}`;
+  const maskBounds = {x:AVATAR_PORTRAIT_BOUNDS.x,y:AVATAR_PORTRAIT_BOUNDS.y,width:AVATAR_PORTRAIT_BOUNDS.size,height:AVATAR_PORTRAIT_BOUNDS.size};
   const materials = portraitLayers.map((layer) => getAvatarMaterialPlan(layer.src, avatar.materialColors));
   const { cx, cy, radius, stroke } = AVATAR_FRAME;
   const iconLabel = AVATAR_ICON_OPTIONS.find((option) => option.value === avatar.iconType)?.label || "十字架";
@@ -75,7 +82,12 @@ export function AvatarRenderer({
         <clipPath id={clipId}>
           <circle cx={cx} cy={cy} r={radius} />
         </clipPath>
-        {outfit ? (
+        {fitted && independent ? (
+          <>
+            <mask id={headMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" {...maskBounds}><image href={independent.headUri} {...maskBounds} /></mask>
+            <mask id={garmentMaskId} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" {...maskBounds}><image href={independent.garmentUri} {...maskBounds} /></mask>
+          </>
+        ) : outfit ? (
           <clipPath id={outfitClipId} clipPathUnits="userSpaceOnUse">
             {outfit.cutout.map(d => <path key={d} d={d} transform={`translate(${AVATAR_PORTRAIT_BOUNDS.x} ${AVATAR_PORTRAIT_BOUNDS.y}) scale(${AVATAR_PORTRAIT_BOUNDS.size / AVATAR_CANVAS_SIZE})`} />)}
           </clipPath>
@@ -95,7 +107,7 @@ export function AvatarRenderer({
           <SystemIconArtwork icon={avatar.iconType} tone={avatar.iconTone} x={82} y={82} size={348} />
         ) : portrait ? (
           <>
-          {outfit ? <AvatarFormalOutfitArtwork plan={outfit} id={`avatar-outfit-${id}`} /> : null}
+          {outfit ? (fitted ? <g mask={`url(#${garmentMaskId})`}><AvatarFormalOutfitArtwork plan={outfit} fit={fitted} id={`avatar-outfit-${id}`} /></g> : <AvatarFormalOutfitArtwork plan={outfit} id={`avatar-outfit-${id}`} />) : null}
           {portraitLayers.map((layer, index) => (
             <image
               key={layer.kind}
@@ -105,7 +117,8 @@ export function AvatarRenderer({
               width={AVATAR_PORTRAIT_BOUNDS.size}
               height={AVATAR_PORTRAIT_BOUNDS.size}
               filter={materials[index] ? `url(#avatar-material-${id}-${index})` : undefined}
-              clipPath={outfit ? `url(#${outfitClipId})` : undefined}
+              clipPath={outfit && !fitted ? `url(#${outfitClipId})` : undefined}
+              mask={fitted ? `url(#${headMaskId})` : undefined}
             />
           ))}
           </>

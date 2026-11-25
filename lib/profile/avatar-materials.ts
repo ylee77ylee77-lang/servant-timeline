@@ -2,6 +2,7 @@ import type { AvatarConfig, AvatarMaterialColors } from "./avatar.ts";
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
 import { AVATAR_PORTRAITS, AVATAR_CLASSIC_DARK_PORTRAITS, AVATAR_LAYERED_PORTRAITS, getAvatarLayerMaterial, getAvatarPortraitPlan, getClassicHairTone, type AvatarPortraitFamily } from "./avatar-portrait.ts";
 import { getAvatarHairstyleBySource } from "./avatar-hairstyle.ts";
+import { getAvatarIndependentBySource } from "./avatar-independent.ts";
 import { getAvatarEyewearPlan } from "./avatar-eyewear.ts";
 import { AVATAR_FRAME_PATHS } from "./avatar-frame-paths.ts";
 import { AVATAR_FEATURE_PATHS } from "./avatar-feature-paths.ts";
@@ -72,7 +73,7 @@ export function getAvatarMaterialChannels(avatar: AvatarConfig, catalog: readonl
       return layer ? [{ part, original: layer.original }] : [];
     });
   }
-  const hairstyle = portrait && getAvatarHairstyleBySource(portrait);
+  const hairstyle = portrait && (getAvatarIndependentBySource(portrait) ?? getAvatarHairstyleBySource(portrait));
   const eyewear = getAvatarEyewearPlan({ ...avatar, displayMode: "custom" });
   if (hairstyle) return [
     { part: "hair", original: hairstyle.originals.hair },
@@ -128,7 +129,7 @@ export function avatarMaterialTransfer(original: AvatarColorHex, color: AvatarCo
 }
 
 export function getAvatarMaterialPlan(src: string, colors?: AvatarMaterialColors, catalog: readonly AvatarPortraitFamily[] = AVATAR_LAYERED_PORTRAITS) {
-  const hairstyle = getAvatarHairstyleBySource(src);
+  const hairstyle = getAvatarIndependentBySource(src) ?? getAvatarHairstyleBySource(src);
   if (hairstyle) {
     const channels = (["hair", "skin"] as const).flatMap(part => {
       const color = colors?.[part];

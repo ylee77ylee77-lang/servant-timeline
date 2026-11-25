@@ -1,6 +1,7 @@
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
 import { normalizeAvatarHairstyle, type AvatarHairstyleId } from "./avatar-hairstyle.ts";
 import { normalizeAvatarFormalOutfit, type AvatarFormalOutfit } from "./avatar-formal-outfit.ts";
+import { normalizeAvatarIndependent, type AvatarIndependentSelection } from "./avatar-independent.ts";
 
 export type AvatarStyle = "masculine" | "feminine" | "neutral";
 export type AvatarSkinTone = "light" | "warm" | "medium" | "deep";
@@ -48,6 +49,8 @@ export type AvatarConfig = {
   portraitVersion?: "v2-tone" | "v3";
   /** Explicit new family selection; original portrait preferences remain intact. */
   portraitFamily?: AvatarFamilySelection;
+  /** Explicit independent 2D character opt-in; never inferred from legacy metadata. */
+  independentPortrait?: AvatarIndependentSelection;
   /** Explicit choice of a source-locked complete hairstyle illustration. */
   hairstyleVariant?: AvatarHairstyleId;
   /** Separate from the existing on/off flag for backwards compatibility. */
@@ -177,6 +180,7 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
 
   const portraitFamily = Object.hasOwn(input, "portraitFamily")
     ? normalizePortraitFamily(input.portraitFamily, style) : undefined;
+  const independentPortrait = Object.hasOwn(input, "independentPortrait") ? normalizeAvatarIndependent(input.independentPortrait, style) : undefined;
   const hairstyleVariant = Object.hasOwn(input, "hairstyleVariant")
     ? normalizeAvatarHairstyle(input.hairstyleVariant, style) : undefined;
   const formalOutfit = Object.hasOwn(input, "formalOutfit") ? normalizeAvatarFormalOutfit(input.formalOutfit, style) : undefined;
@@ -184,6 +188,7 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
     style,
     ...(formalOutfit ? { formalOutfit } : {}),
     ...(portraitFamily ? { portraitFamily } : {}),
+    ...(independentPortrait ? { independentPortrait } : {}),
     ...(hairstyleVariant ? { hairstyleVariant } : {}),
     skinTone: skins.has(input.skinTone as AvatarSkinTone)
       ? (input.skinTone as AvatarSkinTone)

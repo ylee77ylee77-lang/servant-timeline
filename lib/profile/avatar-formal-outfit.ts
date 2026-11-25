@@ -1,5 +1,7 @@
 import type { AvatarConfig, AvatarStyle } from "./avatar.ts";
 import type { AvatarColorHex, AvatarClothingColorPart } from "./avatar-color-wheel.ts";
+import { getAvatarIndependent } from "./avatar-independent.ts";
+import { getAvatarCandidateOutfitFit } from "./avatar-outfit-fit.ts";
 
 export type FormalOutfitId = "dress-shirt" | "suit-tie" | "blazer" | "blouse" | "tailored-suit" | "formal-dress";
 export type CasualOutfitId = "casual-polo" | "casual-crewneck" | "casual-knit" | "casual-cardigan";
@@ -112,10 +114,14 @@ const FITS: Record<string, readonly string[]> = Object.fromEntries([
   ["/avatar/scenes/v3/hairstyles/female-bun.webp", [FEMALE_HEAD]],
 ]);
 export function getAvatarFormalOutfitPlan(avatar: AvatarConfig, portrait: string | null) {
-  if (!portrait || avatar.displayMode !== "custom" || !Object.hasOwn(FITS, portrait)) return null;
+  if (!portrait || avatar.displayMode !== "custom") return null;
+  const independent = getAvatarIndependent(avatar);
+  const fitted = independent?.src === portrait ? getAvatarCandidateOutfitFit(independent.id) : null;
+  const cutout = fitted?.headCutout ?? (Object.hasOwn(FITS, portrait) ? FITS[portrait] : null);
+  if (!cutout) return null;
   const choice = getAvatarOutfitOptions(avatar.style).find(item => item.id === avatar.formalOutfit?.id);
   if (!choice) return null;
-  return { id: choice.id, style: choice.style, cutout: FITS[portrait], colors: { ...choice.originals, ...avatar.formalOutfit?.colors } };
+  return { id: choice.id, style: choice.style, cutout, colors: { ...choice.originals, ...avatar.formalOutfit?.colors } };
 }
 
 /** Same palette math for every material; preserve highlight/shadow at black and white. */

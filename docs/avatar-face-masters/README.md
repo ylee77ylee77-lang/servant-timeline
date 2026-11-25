@@ -176,3 +176,29 @@ Runtime registration and a shared renderer composition that matches this
 proof still need implementation and device testing. The existing garment
 artwork default is unchanged; no new portrait is enabled or persisted, and
 no database or main branch change is included.
+
+## Shared application integration (draft)
+
+CI #280 passed the preceding offline garment proof. An explicit versioned
+independentPortrait selection now resolves six allowlisted b1 assets. Dormant
+portraitFamily/portraitVersion/hair fields do not activate the new art. The
+same AvatarEditor and AvatarRenderer are used for registration, profile,
+roster and communication UI. Both existing profile API entry points already
+normalize and persist avatar_config; no migration or permission change is
+needed. The original face option removes only the b1 selection. The b1 frame
+style is stored independently so legacy frame style is not overwritten.
+
+The fitted garment is composited below the source portrait with two masks.
+For source alpha a and head retention k, garment alpha is a(1-k)/(1-ak)
+(with zero when k=1). The two white alpha masks preserve the source silhouette
+when composited, with at most half an alpha step of quantization error. The
+six portraits share four fit-mask pairs. Existing garment paths, layers and
+legacy renderer behavior are unchanged when the new selection is absent.
+
+The draft registers real public assets and exercises the actual shared
+renderer in 120 outfit/size combinations. The new Node tests pin hashes,
+validate the mask composition formula, check same-style selection, rejection
+of malformed data, and JSON round trips. New CI, actual browser rendering,
+visual approval, registration and authenticated save/reopen on a preview
+site, and iPhone acceptance remain required before merge. Known residual
+hair-strand and feature-edge tint issues remain subject to visual review.
