@@ -19,10 +19,15 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import sharp from "sharp";
-import { getAvatarMaterialPlan, getAvatarMaterialSource } from "../lib/profile/avatar-materials.ts";
+import { avatarMaterialTransfer, getAvatarMaterialPlan, getAvatarMaterialSource } from "../lib/profile/avatar-materials.ts";
 import { AVATAR_FRAME_PATHS } from "../lib/profile/avatar-frame-paths.ts";
 import { AVATAR_FEATURE_PATHS } from "../lib/profile/avatar-feature-paths.ts";
 import { createAvatarMaterialMask } from "./build-avatar-material-masks.mjs";
+import { refineCandidateMaterial } from "./refine-avatar-candidate-materials.mjs";
+import { verifyIndependentHairstyles } from "./verify-independent-avatar-hairstyles.mjs";
+import { makeVariantMask } from "./build-avatar-hairstyle-candidate-masks.mjs";
+import { verifyIndependentEyewear } from "./verify-independent-avatar-eyewear.mjs";
+import { verifyIndependentOutfits } from "./verify-independent-avatar-outfits.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SIZE = 512;
@@ -227,6 +232,103 @@ async function verifySharedRenderer(output, loadComponent) {
     for (const match of svg.matchAll(/\b(?:href|xlink:href)="([^"]+)"/g)) assert.match(match[1], /^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
     for (const match of svg.matchAll(/url\(([^)]+)\)/g)) assert.match(match[1], /^#[A-Za-z0-9_:-]+$/, "SVG resource references must stay inside the document");
     return Buffer.from(svg);
+  }
+  const independentSceneCases = [];
+  let independentOutfitCases = [];
+  {
+    // Exercise the actual shared renderer, not a separate candidate compositor.
+    const {getAvatarIndependentOptions,selectAvatarIndependent}=loadComponent(path.join(ROOT,"lib/profile/avatar-independent.ts"));
+    const {getAvatarOutfitOptions,selectAvatarFormalOutfit}=loadComponent(path.join(ROOT,"lib/profile/avatar-formal-outfit.ts"));
+    const {selectAvatarLegacyEyewear}=loadComponent(path.join(ROOT,"lib/profile/avatar-eyewear.ts"));
+    const b1Cases=[],b1Tiles=[];
+    async function renderB1(config,size){
+      const svg=await embedAssets(renderToStaticMarkup(React.createElement(AvatarRenderer,{config,size})));
+      const png=await sharp(svg).png().toBuffer();
+      const {data,info}=await sharp(png).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+      assert.deepEqual([info.width,info.height,info.channels],[size,size,4]);
+      return {png,data};
+    }
+    let b1Row=0;
+    for(const style of ["masculine","feminine"]){
+      for(const source of getAvatarIndependentOptions(style)){
+        const base=selectAvatarIndependent(normalizeAvatarConfig({style,background:"sky",materialColors:{hair:"#654539",skin:"#986448",frame:"#B88E55"}}),source.id);
+        const framed=selectAvatarLegacyEyewear(base,"round");
+        const choices=getAvatarOutfitOptions(style);
+        for(const size of sizes){
+          const reference=await renderB1(framed,size);
+          if(size===256)b1Tiles.push({input:reference.png,left:0,top:b1Row*256});
+          for(const [col,choice] of choices.entries()){
+            const selected=selectAvatarFormalOutfit(framed,choice.id);
+            const reopened=normalizeAvatarConfig(JSON.parse(JSON.stringify(selected)));
+            assert.deepEqual(reopened,selected);
+            const result=await renderB1(reopened,size);
+            let changed=0;
+            for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+              const i=(y*size+x)*4,sy=((y+.5)*512/size-AVATAR_PORTRAIT_BOUNDS.y)*512/AVATAR_PORTRAIT_BOUNDS.size;
+              const margin=3*512/size*512/AVATAR_PORTRAIT_BOUNDS.size;
+              assert.ok(Math.abs(reference.data[i+3]-result.data[i+3])<=1,source.id+"/"+choice.id+"/"+size+": alpha at "+x+","+y+" ("+reference.data[i+3]+" vs "+result.data[i+3]+")");
+              if(sy<390-margin)assert.ok(pixelDelta(reference.data,result.data,i)<=2,source.id+"/"+choice.id+"/"+size+": head changed");
+              if(pixelDelta(reference.data,result.data,i)>8)changed++;
+            }
+            assert.ok(changed>0,source.id+"/"+choice.id+"/"+size+": outfit not visible");
+            b1Cases.push({source:source.id,outfit:choice.id,size,changed});
+            if(size===256)b1Tiles.push({input:result.png,left:(col+1)*256,top:b1Row*256});
+          }
+        }
+        b1Row++;
+      }
+    }
+    assert.equal(b1Cases.length,120);
+    independentOutfitCases = b1Cases;
+    await sharp({create:{width:1536,height:1536,channels:3,background:"#F4F1F8"}}).composite(b1Tiles).png().toFile(path.join(output,"independent-shared-renderer-review.png"));
+    // Every B1 hairstyle, all five existing backgrounds, all four companions
+    // plus none. Exercise a fitted outfit and glasses in the same mobile scene.
+    const {AVATAR_BACKGROUNDS,AVATAR_COMPANIONS,getAvatarScene}=loadComponent(path.join(ROOT,"lib/profile/avatar-scene.ts"));
+    const backgrounds=Object.keys(AVATAR_BACKGROUNDS);
+    const pets=["none",...Object.keys(AVATAR_COMPANIONS)];
+    assert.equal(backgrounds.length,5);assert.equal(pets.length,5);
+    const sceneTiles=[];
+    let sceneRow=0;
+    const size=80;
+    for(const style of ["masculine","feminine"]){
+      for(const source of getAvatarIndependentOptions(style)){
+        const chosen=selectAvatarIndependent(normalizeAvatarConfig({style,background:"sky",materialColors:{hair:"#654539",skin:"#986448",frame:"#B88E55"}}),source.id);
+        const framed=selectAvatarLegacyEyewear(chosen,"round");
+        const dressed=selectAvatarFormalOutfit(framed,style==="masculine"?"blazer":"tailored-suit");
+        const reference=await renderB1(dressed,size);
+        for(const [bgIndex,background] of backgrounds.entries()){
+          const bare={...dressed,background,pet:"none"};
+          const bareImage=await renderB1(bare,size);
+          let backgroundChanges=0;
+          for(let i=0;i<reference.data.length;i+=4){
+            assert.ok(Math.abs(reference.data[i+3]-bareImage.data[i+3])<=1,source.id+"/"+background+": background alpha");
+            if(pixelDelta(reference.data,bareImage.data,i)>8)backgroundChanges++;
+          }
+          if(background!=="sky")assert.ok(backgroundChanges>0,source.id+"/"+background+": background not visible");
+          for(const [petIndex,pet] of pets.entries()){
+            const config=normalizeAvatarConfig(JSON.parse(JSON.stringify({...bare,pet})));
+            assert.equal(getAvatarScene(config).portrait,source.src);
+            assert.deepEqual(getAvatarScene(config).gradient,AVATAR_BACKGROUNDS[background]);
+            assert.deepEqual(getAvatarScene(config).companion,pet==="none"?null:AVATAR_COMPANIONS[pet]);
+            assert.deepEqual(normalizeAvatarConfig(JSON.parse(JSON.stringify(config))),config);
+            const rendered=pet==="none"?bareImage:await renderB1(config,size);
+            let petChanges=0;
+            for(let i=0;i<rendered.data.length;i+=4){
+              assert.ok(Math.abs(rendered.data[i+3]-bareImage.data[i+3])<=1,source.id+"/"+background+"/"+pet+": companion alpha");
+              if(pixelDelta(rendered.data,bareImage.data,i)>8)petChanges++;
+            }
+            if(pet!=="none")assert.ok(petChanges>0,source.id+"/"+background+"/"+pet+": companion not visible");
+            independentSceneCases.push({source:source.id,background,pet,size,backgroundChanges,petChanges});
+            sceneTiles.push({input:rendered.png,left:(bgIndex*5+petIndex)*size,top:sceneRow*size});
+          }
+        }
+        sceneRow++;
+      }
+    }
+    assert.equal(independentSceneCases.length,150);
+    await sharp({create:{width:2000,height:480,channels:3,background:"#F4F1F8"}}).composite(sceneTiles).png().toFile(path.join(output,"independent-background-companion-review.png"));
+    console.log("INDEPENDENT_SCENE_PROOF "+JSON.stringify({cases:independentSceneCases.length,size:80,visualAcceptance:"NOT_APPROVED"}));
+    console.log("INDEPENDENT_SHARED_RENDERER_PROOF "+JSON.stringify({cases:b1Cases.length,visualAcceptance:"NOT_APPROVED"}));
   }
   const results = [];
   const strip = [];
@@ -454,7 +556,7 @@ async function verifySharedRenderer(output, loadComponent) {
   const casualEncoded=(await sharp(path.join(output,"casual-outfit-review.png")).resize({width:600}).jpeg({quality:83}).toBuffer()).toString("base64");
   for(let i=0;i<casualEncoded.length;i+=2000) console.log("CASUAL_REVIEW "+String(i/2000).padStart(5,"0")+" "+casualEncoded.slice(i,i+2000));
   console.log("CASUAL_OUTFIT_PROOF "+JSON.stringify({cases:casualCases.length,faceProtected:true,source:"actual shared renderer"}));
-  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases, casualCases };
+  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases, outfitCases, casualCases, independentOutfitCases, independentSceneCases };
 }
 
 async function main() {
@@ -462,6 +564,8 @@ async function main() {
   const output = path.resolve(process.argv[2] ?? path.join(ROOT, ".avatar-material-rendering"));
   await fs.mkdir(output, { recursive: true });
   const canonicalOutput = await fs.realpath(output);
+  const { buildFemaleMediumCandidate } = await import("./build-avatar-female-medium-candidate.mjs");
+  await buildFemaleMediumCandidate(ROOT, output);
   const publicRoot = await fs.realpath(path.join(ROOT, "public"));
   const publicRelative = path.relative(publicRoot, canonicalOutput);
   assert.ok(publicRelative.startsWith(`..${path.sep}`) || path.isAbsolute(publicRelative), "QA output must stay outside public/");
@@ -558,6 +662,159 @@ async function main() {
     const failedCases = report.cases.filter((item) => !item.passed);
     assert.equal(failedCases.length, 0, `${failedCases.length} rendered cases failed; inspect report.json (${failedCases[0]?.source}/${failedCases[0]?.name}: ${failedCases[0]?.failures[0]})`);
     report.sharedRenderer = await verifySharedRenderer(output, loadComponent);
+    // Candidate-only assets are deliberately outside public/ and not registered in
+    // the runtime. Exercise the existing filter without weakening legacy gates.
+    const candidateRoot = path.join(ROOT, "docs/avatar-face-masters");
+    const manifest = JSON.parse(await fs.readFile(path.join(candidateRoot, "materials/manifest.json"), "utf8"));
+    assert.equal(manifest.status, "candidate-only");
+    const candidateCases = [
+      { name: "hair-black", colors: { hair: "#000000" } },
+      { name: "hair-white", colors: { hair: "#FFFFFF" } },
+      { name: "hair-violet", colors: { hair: "#9669C8" } },
+      { name: "skin-light", colors: { skin: "#F5D7BD" } },
+      { name: "skin-deep", colors: { skin: "#986448" } },
+      { name: "combined", colors: { hair: "#30343C", skin: "#E2B18A" } },
+    ];
+    report.independentCandidates = { visualAcceptance: "NOT_APPROVED", sources: [], cases: [] };
+    const candidateTiles = { initial: [], refined: [] };
+    const tile = 192, rowHeight = 218;
+    for (const [row, [id, spec]] of Object.entries(manifest.sources).entries()) {
+      assert.ok(["male-b", "female-b"].includes(id));
+      const art = await fs.readFile(path.join(candidateRoot, id + ".webp"));
+      const initialMask = await fs.readFile(path.join(candidateRoot, "materials", id + ".png"));
+      assert.equal(sha256(art), spec.sourceSha256);
+      assert.equal(sha256(initialMask), spec.maskSha256);
+      const refinement = await refineCandidateMaterial(id, art, initialMask);
+      await fs.writeFile(path.join(output, id + "-refined-mask.png"), refinement.png);
+      const sourceUri = dataUri(await sharp(art).png().toBuffer());
+      const baselinePng = await sharp(svgFor(sourceUri, null)).png().toBuffer();
+      const baseline = await rgba(baselinePng);
+      for (const [variant, mask] of [["initial", initialMask], ["refined", refinement.png]]) {
+        const coverage = await rgba(mask);
+        const coverageCount = [0,0];
+        for (let i = 0; i < coverage.length; i += 4) {
+          assert.equal(coverage[i + 3], 255, id + ": mask must be opaque");
+          assert.equal(coverage[i + 2], 0, id + ": no eyewear channel");
+          assert.ok(coverage[i] + coverage[i + 1] <= 256, id + ": overlapping ownership");
+          for (let c = 0; c < 2; c++) if (coverage[i+c] > 128 && baseline[i+3] > 200) coverageCount[c]++;
+        }
+        for (let c = 0; c < 2; c++) {
+          const [x,y] = c === 0 ? spec.hairPoint : spec.skinPoint;
+          const i = imageIndex(x,y);
+          assert.ok(baseline[i+3] > 200 && coverage[i+c] > 200 && coverageCount[c] > 10000, id + ": channel missing");
+        }
+        report.independentCandidates.sources.push({ id, variant, sourceSha256: spec.sourceSha256, maskSha256: sha256(mask), coverageCount, ...(variant === "refined" ? {restoredEye:refinement.restoredEye,restoredLip:refinement.restoredLip} : {}) });
+        const addTile = async (png, col, label) => {
+          const thumbnail = await sharp(png).resize(tile, tile).flatten({background:"#E9E1F3"}).png().toBuffer();
+          candidateTiles[variant].push({input:thumbnail,left:col*tile,top:row*rowHeight+26});
+          candidateTiles[variant].push({input:Buffer.from(`<svg width="${tile}" height="26"><text x="6" y="17" font-size="11" font-family="sans-serif" fill="#484151">${id} / ${label}</text></svg>`),left:col*tile,top:row*rowHeight});
+        };
+        await addTile(baselinePng, 0, "original");
+        for (const [col, item] of candidateCases.entries()) {
+          const parts = Object.keys(item.colors);
+          const plan = {
+            coverageUri: dataUri(mask), frameGuard: false,
+            channels: parts.map(part => ({part, tables:avatarMaterialTransfer(spec.originals[part], item.colors[part], part)})),
+          };
+          const png = await sharp(svgFor(sourceUri, plan)).png().toBuffer();
+          const pixels = await rgba(png);
+          const stats = rasterStats(baseline, pixels, coverage, parts);
+          const failures = [];
+          if (stats.maxAlphaDelta > 1) failures.push("alpha changed");
+          if (stats.opaqueOutsideChanged !== 0) failures.push("opaque RGB outside mask changed");
+          if (stats.maxOutsidePremultipliedDelta > 1) failures.push("premultiplied RGB outside mask changed");
+          for (const part of parts) if (stats.targetChangedPixels[part] < 100) failures.push(part + ": insufficient target change");
+          const protectedPixelsChecked = checkProtectedPatches(baseline, pixels, coverage, parts, spec.protected.map(([x,y])=>({x,y})), id, failures);
+          report.independentCandidates.cases.push({id, variant, name:item.name, stats, protectedPixelsChecked, passed:failures.length===0, failures});
+          await addTile(png, col+1, item.name);
+        }
+      }
+    }
+    for (const variant of ["initial","refined"]) {
+      await sharp({create:{width:tile*(candidateCases.length+1),height:rowHeight*2,channels:3,background:"#F4F1F8"}})
+        .composite(candidateTiles[variant]).png().toFile(path.join(output,variant === "initial" ? "independent-material-review.png" : "independent-material-refined-review.png"));
+    }
+    assert.equal(report.independentCandidates.cases.length,24);
+    const failedCandidate = report.independentCandidates.cases.find(item=>!item.passed);
+    assert.ok(!failedCandidate, failedCandidate && failedCandidate.id + "/" + failedCandidate.variant + "/" + failedCandidate.name + ": " + failedCandidate.failures[0]);
+    console.log("INDEPENDENT_MATERIAL_PROOF " + JSON.stringify({cases:24,source:"actual AvatarMaterialFilter, initial and refined candidates only",visualAcceptance:"NOT_APPROVED"}));
+    report.independentHairstyles = await verifyIndependentHairstyles(ROOT, output);
+    // Variant masks are candidate assets, not registered runtime sources.
+    const variantManifest = JSON.parse(await fs.readFile(path.join(candidateRoot,"hairstyle-materials","manifest.json"),"utf8"));
+    const hairstyleManifest = JSON.parse(await fs.readFile(path.join(candidateRoot,"hairstyles","manifest.json"),"utf8"));
+    assert.equal(variantManifest.status,"candidate-only");
+    assert.deepEqual(Object.keys(variantManifest.variants).sort(),Object.keys(hairstyleManifest.variants).sort());
+    report.independentHairstyleMaterials = {sources:[],cases:[],visualAcceptance:"NOT_APPROVED",runtimeRegistration:false};
+    const hairstyleMaterialTiles = [];
+    for (const [row,[id,item]] of Object.entries(variantManifest.variants).entries()) {
+      const spec = manifest.sources[item.base];
+      assert.ok(spec && hairstyleManifest.variants[id].base === item.base);
+      const art = await fs.readFile(path.join(candidateRoot,"hairstyles",id+".webp"));
+      const mask = await fs.readFile(path.join(candidateRoot,"hairstyle-materials",id+".png"));
+      assert.equal(sha256(art),item.sourceSha256);
+      assert.equal(item.sourceSha256,hairstyleManifest.variants[id].sha256);
+      assert.equal(sha256(mask),item.maskSha256);
+      assert.equal(mask.length,item.bytes);
+      assert.ok(mask.length <= 24*1024);
+      const masterArt = await fs.readFile(path.join(candidateRoot,item.base+".webp"));
+      const initialMask = await fs.readFile(path.join(candidateRoot,"materials",item.base+".png"));
+      const lock = await fs.readFile(path.join(candidateRoot,"hairstyles",item.base+"-locked.png"));
+      assert.equal(sha256(masterArt),spec.sourceSha256);
+      assert.equal(sha256(initialMask),spec.maskSha256);
+      assert.equal(sha256(lock),hairstyleManifest.sources[item.base].lockSha256);
+      const refined = await refineCandidateMaterial(item.base,masterArt,initialMask);
+      const generated = await makeVariantMask(id,art,refined.png,lock);
+      const coverage = await rgba(mask);
+      assert.deepEqual(await rgba(generated.png),coverage,id+": committed ownership differs from generated mask");
+      assert.equal(generated.locked,hairstyleManifest.sources[item.base].protectedPixels);
+      const sourceUri = dataUri(await sharp(art).png().toBuffer());
+      const baselinePng = await sharp(svgFor(sourceUri,null)).png().toBuffer();
+      const baseline = await rgba(baselinePng);
+      const rawSource = await rgba(art);
+      const coverageCount=[0,0];
+      for(let i=0;i<coverage.length;i+=4) {
+        assert.equal(coverage[i+3],255,id+": coverage must be opaque");
+        assert.equal(coverage[i+2],0,id+": no eyewear channel");
+        assert.ok(coverage[i]+coverage[i+1]<=255,id+": overlapping ownership");
+        if(rawSource[i+3]===0) assert.equal(coverage[i]+coverage[i+1],0,id+": ownership outside portrait");
+        for(let c=0;c<2;c++) if(coverage[i+c]>128 && baseline[i+3]>200) coverageCount[c]++;
+      }
+      for(let c=0;c<2;c++) {
+        const [x,y]=c===0?spec.hairPoint:spec.skinPoint;
+        const i=imageIndex(x,y);
+        assert.ok(baseline[i+3]>200 && coverage[i+c]>200 && coverageCount[c]>10000,id+": missing visible channel");
+      }
+      report.independentHairstyleMaterials.sources.push({id,maskSha256:item.maskSha256,lockedOwnershipPixels:generated.locked,coverageCount});
+      const addTile=async(png,col,label)=>{
+        const thumb=await sharp(png).resize(tile,tile).flatten({background:"#E9E1F3"}).png().toBuffer();
+        hairstyleMaterialTiles.push({input:thumb,left:col*tile,top:row*rowHeight+26});
+        hairstyleMaterialTiles.push({input:Buffer.from(`<svg width="${tile}" height="26"><text x="6" y="17" font-size="11" font-family="sans-serif" fill="#484151">${id} / ${label}</text></svg>`),left:col*tile,top:row*rowHeight});
+      };
+      await addTile(baselinePng,0,"original");
+      for(const [col,entry] of candidateCases.entries()) {
+        const parts=Object.keys(entry.colors);
+        const plan={coverageUri:dataUri(mask),frameGuard:false,channels:parts.map(part=>({part,tables:avatarMaterialTransfer(spec.originals[part],entry.colors[part],part)}))};
+        const png=await sharp(svgFor(sourceUri,plan)).png().toBuffer();
+        const pixels=await rgba(png);
+        const stats=rasterStats(baseline,pixels,coverage,parts);
+        const failures=[];
+        if(stats.maxAlphaDelta>1)failures.push("alpha changed");
+        if(stats.opaqueOutsideChanged!==0)failures.push("opaque RGB outside mask changed");
+        if(stats.maxOutsidePremultipliedDelta>1)failures.push("premultiplied RGB outside mask changed");
+        for(const part of parts)if(stats.targetChangedPixels[part]<100)failures.push(part+": insufficient target change");
+        const protectedPixelsChecked=checkProtectedPatches(baseline,pixels,coverage,parts,spec.protected.map(([x,y])=>({x,y})),id,failures);
+        report.independentHairstyleMaterials.cases.push({id,name:entry.name,stats,protectedPixelsChecked,passed:failures.length===0,failures});
+        await addTile(png,col+1,entry.name);
+      }
+    }
+    await sharp({create:{width:tile*(candidateCases.length+1),height:rowHeight*4,channels:3,background:"#F4F1F8"}})
+      .composite(hairstyleMaterialTiles).png().toFile(path.join(output,"independent-hairstyle-material-review.png"));
+    assert.equal(report.independentHairstyleMaterials.cases.length,24);
+    const failedHairstyleMaterial=report.independentHairstyleMaterials.cases.find(item=>!item.passed);
+    assert.ok(!failedHairstyleMaterial,failedHairstyleMaterial && failedHairstyleMaterial.id+"/"+failedHairstyleMaterial.name+": "+failedHairstyleMaterial.failures[0]);
+    console.log("INDEPENDENT_HAIRSTYLE_MATERIAL_PROOF "+JSON.stringify({cases:24,lockedOwnershipPixels:report.independentHairstyleMaterials.sources.reduce((n,item)=>n+item.lockedOwnershipPixels,0),visualAcceptance:"NOT_APPROVED"}));
+    report.independentEyewear = await verifyIndependentEyewear(ROOT, output, loadComponent, svgFor);
+    report.independentOutfits = await verifyIndependentOutfits(ROOT, output, loadComponent, svgFor);
     report.status = "passed";
   } catch (error) {
     report.status = "failed";

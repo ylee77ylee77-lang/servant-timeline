@@ -2,6 +2,7 @@
 
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import { AvatarLivePreview } from "@/components/profile/AvatarControls";
+import { getAvatarIndependent, getAvatarIndependentOptions, selectAvatarIndependent } from "@/lib/profile/avatar-independent";
 import { getAvatarHairstyleOptions, getAvatarHairstyle, selectAvatarHairstyle } from "@/lib/profile/avatar-hairstyle";
 import { getAvatarOutfitOptions, getAvatarOutfitChannels, selectAvatarFormalOutfit, setAvatarOutfitColor } from "@/lib/profile/avatar-formal-outfit";
 import { AvatarColorControls } from "@/components/profile/AvatarColorControls";
@@ -57,10 +58,13 @@ export function AvatarEditor({
 }) {
   const avatar = normalizeAvatarConfig(value);
   const portraitOptions = getAvatarPortraitOptions(avatar);
+  const independent = getAvatarIndependent(avatar);
+  const independentOptions = getAvatarIndependentOptions(avatar.style);
+  const independentDefault = independentOptions[0];
   const materialChannels = getAvatarMaterialChannels(avatar);
   const hairstyleOptions = getAvatarHairstyleOptions(avatar.style);
   const selectedHairstyle = getAvatarHairstyle(avatar);
-  const outfitOptions = portraitOptions?.active ? [] : getAvatarOutfitOptions(avatar.style);
+  const outfitOptions = portraitOptions?.active && !independent ? [] : getAvatarOutfitOptions(avatar.style);
   const outfitChannels = outfitOptions.length ? getAvatarOutfitChannels(avatar) : [];
   const colorChannels = [...materialChannels, ...outfitChannels];
 
@@ -108,7 +112,22 @@ export function AvatarEditor({
         </div>
       </section>
 
-      {portraitOptions && (
+      {independentDefault && !portraitOptions?.active && (
+        <section>
+          <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">臉型</div>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              {label:"原版",selected:!independent,next:selectAvatarIndependent(avatar,"original")},
+              {label:"新版",selected:!!independent,next:independent?avatar:selectAvatarIndependent(avatar,independentDefault.id)},
+            ].map(option => <button key={option.label} type="button" aria-pressed={option.selected} onClick={()=>onChange(option.next)}
+              className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-xs font-bold ${option.selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}>
+              <AvatarRenderer config={{...option.next,displayMode:"custom",pet:"none",glasses:false,materialColors:undefined,formalOutfit:undefined}} size={64} />
+              {option.label}
+            </button>)}
+          </div>
+        </section>
+      )}
+      {portraitOptions && !independent && (
         <>
           <section>
             <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">臉型</div>
@@ -149,7 +168,19 @@ export function AvatarEditor({
         </>
       )}
 
-      {!portraitOptions?.active && hairstyleOptions.length > 0 && (
+      {independent && (
+        <section>
+          <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮型</div>
+          <div className="grid grid-cols-3 gap-2">
+            {independentOptions.map(option => <button key={option.id} type="button" aria-pressed={independent.id===option.id} onClick={()=>onChange(selectAvatarIndependent(avatar,option.id))}
+              className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-xs font-bold ${independent.id===option.id ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}>
+              <AvatarRenderer config={{...selectAvatarIndependent(avatar,option.id),displayMode:"custom",pet:"none",glasses:false,materialColors:undefined,formalOutfit:undefined}} size={64} />
+              {option.label}
+            </button>)}
+          </div>
+        </section>
+      )}
+      {!independent && !portraitOptions?.active && hairstyleOptions.length > 0 && (
         <section>
           <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮型</div>
           <div className="grid grid-cols-3 gap-2">
@@ -197,7 +228,7 @@ export function AvatarEditor({
 
       <section>
         <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">眼鏡</div>
-        {portraitOptions?.active ? (
+        {portraitOptions?.active && !independent ? (
           <div className="grid grid-cols-2 gap-2">
             {(["none", ...portraitOptions.glassesStyles] as const).map((style) => {
               const selected = style === "none" ? !avatar.glasses : avatar.glasses && portraitOptions.glassesStyle === style;

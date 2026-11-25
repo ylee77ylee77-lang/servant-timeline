@@ -1,0 +1,106 @@
+{
+  "status": "candidate-only",
+  "method": "Source-specific traced RGB ownership, followed by local hairline/brow color refinement and feathered eye/lip protection. Red = hair; green = skin; blue reserved for eyewear. Masks are pinned review candidates, not production registrations.",
+  "sources": {
+    "male-b": {
+      "sourceSha256": "be5add2bdbd710c850b2feeb3c6d3380ab7060a9d13af10d123afeb0d62a26f5",
+      "maskSha256": "8e6e4a37a8bccb535f955f6416f0992f0b92d4f3cc070bf6db71349a79313210",
+      "originals": {
+        "hair": "#624536",
+        "skin": "#E8B18D"
+      },
+      "hairPoint": [
+        245,
+        61
+      ],
+      "skinPoint": [
+        255,
+        245
+      ],
+      "protected": [
+        [
+          210,
+          205
+        ],
+        [
+          306,
+          205
+        ],
+        [
+          205,
+          173
+        ],
+        [
+          309,
+          172
+        ],
+        [
+          255,
+          307
+        ],
+        [
+          256,
+          485
+        ],
+        [
+          110,
+          480
+        ],
+        [
+          404,
+          475
+        ]
+      ]
+    },
+    "female-b": {
+      "sourceSha256": "a430def8598cf69c2087a1d203530f0e1b23bfa00538de513e5137c6f4741a0f",
+      "maskSha256": "fa4af33766c1cd2a2d6147a7977e8b8b6cc12346d309ccc5bfcacc44eaf7ed64",
+      "originals": {
+        "hair": "#6A4632",
+        "skin": "#EFB998"
+      },
+      "hairPoint": [
+        250,
+        60
+      ],
+      "skinPoint": [
+        255,
+        248
+      ],
+      "protected": [
+        [
+          209,
+          216
+        ],
+        [
+          306,
+          216
+        ],
+        [
+          205,
+          177
+        ],
+        [
+          308,
+          177
+        ],
+        [
+          255,
+          310
+        ],
+        [
+          256,
+          487
+        ],
+        [
+          115,
+          480
+        ],
+        [
+          397,
+          480
+        ]
+      ]
+    }
+  }
+}

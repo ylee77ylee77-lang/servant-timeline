@@ -10,6 +10,7 @@ import type {
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
 import { AVATAR_FAMILY_STYLES } from "./avatar.ts";
 import { getAvatarHairstyle } from "./avatar-hairstyle.ts";
+import { getAvatarIndependent } from "./avatar-independent.ts";
 import { getAvatarLegacyEyewearChoice } from "./avatar-eyewear.ts";
 
 export const AVATAR_ART_DIR = "/avatar/scenes/v2";
@@ -146,6 +147,7 @@ export function selectAvatarPortraitFamily(avatar: AvatarConfig, id: AvatarFamil
   const glassesStyle = previous && family.eyewear[previous] ? previous : "classic";
   const next = { ...avatar, portraitFamily: { id, hair: hair.value, glassesStyle } };
   delete next.hairstyleVariant;
+  delete next.independentPortrait;
   return next;
 }
 
@@ -193,6 +195,8 @@ export function getAvatarPortraitPlan(
   if (avatar.displayMode !== "custom" || avatar.style === "neutral") {
     return { portrait: null, layers: [] };
   }
+  const independent = getAvatarIndependent(avatar);
+  if (independent) return { portrait: independent.src, layers: [{ kind: "hairstyle", src: independent.src }] };
   const options = getAvatarPortraitOptions(avatar, catalog);
   if (!options?.active) {
     const hairstyle = getAvatarHairstyle(avatar);

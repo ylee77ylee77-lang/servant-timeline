@@ -2,6 +2,8 @@ import type { AvatarConfig, AvatarGlassesStyle, AvatarStyle } from "./avatar.ts"
 import type { AvatarColorHex } from "./avatar-color-wheel.ts";
 import { getAvatarHairstyle } from "./avatar-hairstyle.ts";
 import { AVATAR_FRAME_PATHS } from "./avatar-frame-paths.ts";
+import { getAvatarIndependent } from "./avatar-independent.ts";
+import { getCandidateEyewearPlan } from "./avatar-independent-eyewear.ts";
 
 export type AvatarEyewearChoice = "none" | AvatarGlassesStyle;
 type FrameStyle = Exclude<AvatarGlassesStyle, "classic">;
@@ -53,6 +55,7 @@ const ORIGINAL: Record<Character, AvatarColorHex> = { masculine: "#3B3935", femi
 /** Dormant legacy glassesStyle values never change existing portraits. */
 export function getAvatarLegacyEyewearChoice(avatar: AvatarConfig): AvatarEyewearChoice {
   if (!avatar.glasses || avatar.style === "neutral") return "none";
+  if (getAvatarIndependent(avatar)) return avatar.independentPortrait?.glassesStyle ?? "classic";
   if (avatar.portraitVersion !== "v3" && avatar.eyewearVersion === "v1"
       && (avatar.glassesStyle === "round" || avatar.glassesStyle === "square")) return avatar.glassesStyle;
   return "classic";
@@ -61,6 +64,7 @@ export function selectAvatarLegacyEyewear(avatar: AvatarConfig, choice: AvatarEy
   if (avatar.style === "neutral" || !AVATAR_EYEWEAR_CHOICES.some(item => item.value === choice)) return avatar;
   if (getAvatarLegacyEyewearChoice(avatar) === choice) return avatar;
   if (choice === "none") return { ...avatar, glasses: false };
+  if (getAvatarIndependent(avatar) && avatar.independentPortrait) return { ...avatar, glasses: true, independentPortrait: { ...avatar.independentPortrait, glassesStyle: choice } };
   if (choice === "classic") {
     const next = { ...avatar, glasses: true, glassesStyle: "classic" as const };
     delete next.eyewearVersion;
@@ -71,6 +75,8 @@ export function selectAvatarLegacyEyewear(avatar: AvatarConfig, choice: AvatarEy
 export function getAvatarEyewearPlan(avatar: AvatarConfig) {
   if (avatar.style === "neutral" || avatar.displayMode !== "custom") return null;
   const choice = getAvatarLegacyEyewearChoice(avatar);
+  const independent = getAvatarIndependent(avatar);
+  if (independent) return choice === "none" ? null : getCandidateEyewearPlan(independent.base, choice, avatar.materialColors?.frame, independent.coverageUri);
   const hairstyle = getAvatarHairstyle(avatar);
   const original = ORIGINAL[avatar.style];
   const shared = { original, color: avatar.materialColors?.frame ?? original, occlusionUri: hairstyle?.coverageUri };

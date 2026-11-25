@@ -1,5 +1,6 @@
 import { outfitShades, type getAvatarFormalOutfitPlan } from "@/lib/profile/avatar-formal-outfit";
 import { AVATAR_CANVAS_SIZE, AVATAR_PORTRAIT_BOUNDS } from "@/lib/profile/avatar-scene";
+import type { AvatarOutfitArtworkFit } from "@/lib/profile/avatar-outfit-fit";
 
 type Plan = NonNullable<ReturnType<typeof getAvatarFormalOutfitPlan>>;
 type Shade = ReturnType<typeof outfitShades>;
@@ -115,7 +116,7 @@ function CasualDetails({ plan, mainId, innerId, primary, inner }: {
 /** Garment-only artwork aligned to the pinned 512px portrait sources.
  * The source head/hair/neck is composed independently above it. This is
  * dimensionally shaded 2D artwork, not a rigged 3D garment mesh. */
-export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string }) {
+export function AvatarFormalOutfitArtwork({ plan, id, fit }: { plan: Plan; id: string; fit?: AvatarOutfitArtworkFit }) {
   const { x, y, size } = AVATAR_PORTRAIT_BOUNDS;
   const primary = outfitShades(plan.colors.clothing ?? "#465B6E");
   const inner = outfitShades(plan.colors.lining ?? plan.colors.clothing ?? "#EEF1F4");
@@ -129,11 +130,11 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
   const weaveId = id + "-weave";
   const collar = jacket ? inner : primary;
   const collarId = jacket ? innerId : mainId;
-  const body = male
+  const body = fit?.bodyPath ?? (male
     ? "M0 512C7 471 27 448 63 435C112 415 159 408 189 388L259 424L338 388C372 411 420 415 460 439C488 457 505 480 512 512Z"
-    : "M18 512C28 474 50 453 83 441C133 423 177 419 210 408L276 436L344 407C388 422 424 432 457 450C482 466 494 488 500 512Z";
+    : "M18 512C28 474 50 453 83 441C133 423 177 419 210 408L276 436L344 407C388 422 424 432 457 450C482 466 494 488 500 512Z");
   return (
-    <g aria-hidden="true" transform={`translate(${x} ${y}) scale(${size / AVATAR_CANVAS_SIZE})`}>
+    <g aria-hidden="true" transform={`translate(${x} ${y}) scale(${size / AVATAR_CANVAS_SIZE})${fit ? ` ${fit.transform}` : ""}`}>
       <defs>
         <Fabric id={mainId} shades={primary} /><Fabric id={innerId} shades={inner} /><Fabric id={tieId} shades={tie} />
         <clipPath id={id + "-body"}><path d={body} /></clipPath>
