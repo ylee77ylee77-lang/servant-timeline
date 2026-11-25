@@ -2,11 +2,14 @@ import type { AvatarConfig, AvatarStyle } from "./avatar.ts";
 import type { AvatarColorHex, AvatarClothingColorPart } from "./avatar-color-wheel.ts";
 
 export type FormalOutfitId = "dress-shirt" | "suit-tie" | "blazer" | "blouse" | "tailored-suit" | "formal-dress";
+export type CasualOutfitId = "casual-polo" | "casual-crewneck" | "casual-knit" | "casual-cardigan";
+export type AvatarGarmentId = FormalOutfitId | CasualOutfitId;
 export type AvatarOutfitColors = Partial<Record<AvatarClothingColorPart, AvatarColorHex>>;
-export type AvatarFormalOutfit = { id: FormalOutfitId; colors?: AvatarOutfitColors };
+// Keep the historical persisted key and type for existing P5 profiles.
+export type AvatarFormalOutfit = { id: AvatarGarmentId; colors?: AvatarOutfitColors };
 type Character = Exclude<AvatarStyle, "neutral">;
 type OutfitOption = Readonly<{
-  id: FormalOutfitId;
+  id: AvatarGarmentId;
   style: Character;
   label: string;
   originals: Readonly<AvatarOutfitColors>;
@@ -20,6 +23,18 @@ export const AVATAR_FORMAL_OUTFITS: readonly OutfitOption[] = [
   { id: "formal-dress", style: "feminine", label: "典雅洋裝", originals: { clothing: "#576A88" } },
 ];
 
+export const AVATAR_CASUAL_OUTFITS: readonly OutfitOption[] = [
+  { id: "casual-polo", style: "masculine", label: "休閒 POLO 衫", originals: { clothing: "#617F78" } },
+  { id: "casual-crewneck", style: "masculine", label: "圓領針織衫", originals: { clothing: "#9B8471" } },
+  { id: "casual-knit", style: "feminine", label: "柔軟針織衫", originals: { clothing: "#C58B94" } },
+  { id: "casual-cardigan", style: "feminine", label: "休閒開襟衫", originals: { clothing: "#8C9B82", lining: "#F2E6D9" } },
+];
+export function getAvatarCasualOptions(style: AvatarStyle) {
+  return AVATAR_CASUAL_OUTFITS.filter(item => item.style === style);
+}
+export function getAvatarOutfitOptions(style: AvatarStyle) {
+  return [...getAvatarFormalOptions(style), ...getAvatarCasualOptions(style)];
+}
 const PARTS = ["clothing", "lining", "tie"] as const;
 export function getAvatarFormalOptions(style: AvatarStyle) {
   return AVATAR_FORMAL_OUTFITS.filter(item => item.style === style);
@@ -27,7 +42,7 @@ export function getAvatarFormalOptions(style: AvatarStyle) {
 export function normalizeAvatarFormalOutfit(input: unknown, style: AvatarStyle): AvatarFormalOutfit | undefined {
   if (!input || typeof input !== "object" || Array.isArray(input)) return;
   const value = input as Record<string, unknown>;
-  const choice = Object.hasOwn(value, "id") && getAvatarFormalOptions(style).find(item => item.id === value.id);
+  const choice = Object.hasOwn(value, "id") && getAvatarOutfitOptions(style).find(item => item.id === value.id);
   if (!choice) return;
   const colors: AvatarOutfitColors = {};
   if (Object.hasOwn(value, "colors") && value.colors && typeof value.colors === "object" && !Array.isArray(value.colors)) {
@@ -39,7 +54,7 @@ export function normalizeAvatarFormalOutfit(input: unknown, style: AvatarStyle):
   }
   return { id: choice.id, ...(Object.keys(colors).length ? { colors } : {}) };
 }
-export function selectAvatarFormalOutfit(avatar: AvatarConfig, id: FormalOutfitId | "original"): AvatarConfig {
+export function selectAvatarFormalOutfit(avatar: AvatarConfig, id: AvatarGarmentId | "original"): AvatarConfig {
   if (id === "original") {
     if (!avatar.formalOutfit) return avatar;
     const next = { ...avatar };
@@ -52,7 +67,7 @@ export function selectAvatarFormalOutfit(avatar: AvatarConfig, id: FormalOutfitI
 }
 export function setAvatarOutfitColor(avatar: AvatarConfig, part: AvatarClothingColorPart, color: AvatarColorHex | null): AvatarConfig {
   if (!avatar.formalOutfit) return avatar;
-  const choice = getAvatarFormalOptions(avatar.style).find(item => item.id === avatar.formalOutfit?.id);
+  const choice = getAvatarOutfitOptions(avatar.style).find(item => item.id === avatar.formalOutfit?.id);
   if (!choice || !Object.hasOwn(choice.originals, part)) return avatar;
   const colors = { ...avatar.formalOutfit.colors };
   if (color === null) delete colors[part]; else colors[part] = color;
@@ -60,7 +75,7 @@ export function setAvatarOutfitColor(avatar: AvatarConfig, part: AvatarClothingC
   return normalized ? { ...avatar, formalOutfit: normalized } : avatar;
 }
 export function getAvatarOutfitChannels(avatar: AvatarConfig) {
-  const choice = getAvatarFormalOptions(avatar.style).find(item => item.id === avatar.formalOutfit?.id);
+  const choice = getAvatarOutfitOptions(avatar.style).find(item => item.id === avatar.formalOutfit?.id);
   return choice ? PARTS.flatMap(part => {
     const original = choice.originals[part];
     return original ? [{ part, original }] : [];
@@ -98,7 +113,7 @@ const FITS: Record<string, readonly string[]> = Object.fromEntries([
 ]);
 export function getAvatarFormalOutfitPlan(avatar: AvatarConfig, portrait: string | null) {
   if (!portrait || avatar.displayMode !== "custom" || !Object.hasOwn(FITS, portrait)) return null;
-  const choice = getAvatarFormalOptions(avatar.style).find(item => item.id === avatar.formalOutfit?.id);
+  const choice = getAvatarOutfitOptions(avatar.style).find(item => item.id === avatar.formalOutfit?.id);
   if (!choice) return null;
   return { id: choice.id, style: choice.style, cutout: FITS[portrait], colors: { ...choice.originals, ...avatar.formalOutfit?.colors } };
 }
