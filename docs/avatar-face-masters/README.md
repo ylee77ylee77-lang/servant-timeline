@@ -36,3 +36,21 @@ No app runtime, database, permissions, or production change in this trial.
 The manifest pins the exact candidate files. The node tests verify file
 integrity, WebP alpha metadata and dimensions; local decoded-image and visual
 checks are separate, not an iPhone or browser-renderer test.
+
+## Independent material candidates
+
+Two RGB ownership masks are pinned under `materials/`. Each is traced for its
+own source (not reused from v2), with narrow source-aware edge refinement
+and explicit protected eye/brow/mouth and clothing landmarks. The old shared
+renderer and old test gates are unchanged. Local Python color simulation
+showed independent hair/skin tinting, exact preservation outside the active
+mask, and 16 protected 3×3 patches. This simulation is not actual React SVG
+rendering. The existing Node verification now additionally exercises the actual
+AvatarMaterialFilter on these two candidate sources in 12 cases and exports
+`independent-material-review.png`. CI result is pending at commit time.
+
+Visual blocker: deep-skin samples still show pale borders around some eyes
+and lips. Keep this candidate-only; do not register in runtime until refined
+and approved. The 2D masters still need identity-locked hairstyle assets,
+source-specific eyewear and outfit fitting, and browser/device validation.
+No profile fields, runtime UI, or production behavior change.
