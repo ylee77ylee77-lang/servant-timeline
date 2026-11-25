@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import sharp from "sharp";
 import { normalizeAvatarConfig, AVATAR_DEFAULTS } from "../lib/profile/avatar.ts";
 import { AVATAR_HAIRSTYLES, getAvatarHairstyleOptions, selectAvatarHairstyle, getAvatarHairstyle, type AvatarHairstyleId } from "../lib/profile/avatar-hairstyle.ts";
 import { getAvatarScene } from "../lib/profile/avatar-scene.ts";
@@ -10,17 +11,24 @@ import { getAvatarEyewearPlan, selectAvatarLegacyEyewear } from "../lib/profile/
 import { getAvatarMaterialChannels, getAvatarMaterialPlan, setAvatarMaterialColor } from "../lib/profile/avatar-materials.ts";
 import { AVATAR_CLASSIC_DARK_PORTRAITS, AVATAR_PORTRAITS, selectClassicHairTone } from "../lib/profile/avatar-portrait.ts";
 
-test("registered hairstyle artwork and its mask are pinned, transparent 512px and within budget", () => {
+test("registered hairstyle artwork and its mask are pinned, transparent 512px and within budget", async () => {
   assert.equal(AVATAR_HAIRSTYLES.length, 4);
   assert.equal(getAvatarHairstyleOptions("neutral").length, 0);
   for (const style of ["masculine", "feminine"] as const) assert.equal(getAvatarHairstyleOptions(style).length, 2);
   for (const source of AVATAR_HAIRSTYLES) {
     const bytes = fs.readFileSync(path.join(process.cwd(), "public", source.src.slice(1)));
     assert.equal(bytes.toString("ascii", 0, 4), "RIFF");
-    assert.equal(bytes.toString("ascii", 8, 16), "WEBPVP8X");
-    assert.ok((bytes[20] & 0x10) !== 0);
-    assert.equal(bytes.readUIntLE(24, 3) + 1, 512);
-    assert.equal(bytes.readUIntLE(27, 3) + 1, 512);
+    assert.equal(bytes.toString("ascii", 8, 12), "WEBP");
+    // VP8L (lossless) and VP8X (extended) are both valid WebP containers.
+    // Check the decoded art rather than assuming all files have VP8X headers.
+    const metadata = await sharp(bytes).metadata();
+    assert.equal(metadata.format, "webp");
+    assert.equal(metadata.width, 512);
+    assert.equal(metadata.height, 512);
+    assert.equal(metadata.hasAlpha, true);
+    const { channels } = await sharp(bytes).stats();
+    assert.equal(channels[3]?.min, 0, "source must have transparent pixels");
+    assert.equal(channels[3]?.max, 255, "source must have opaque pixels");
     assert.ok(bytes.length < 180 * 1024);
     assert.equal(createHash("sha256").update(bytes).digest("hex"), source.sourceSha256);
     const mask = fs.readFileSync(path.join(process.cwd(), "public", source.coverageUri.slice(1)));
