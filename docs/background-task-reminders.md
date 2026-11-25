@@ -12,14 +12,13 @@ PR #54 原生開關觸覺回饋、PR #55 主畫面 PWA 通知、PR #56 伺服器
 - 認領與開始傳送使用唯一約束及原子狀態更新。未開始的事件可在有效時間內恢復；已開始、結果不明的事件不自動重送，避免重複提醒。HTTP 2xx 代表推播服務接受，不等於手機收到。
 - 兩個資料表啟用 RLS，所有相關函式與資料僅 server service_role 可操作；端點與訂閱密鑰不得出現在客戶端查詢結果或日誌。送出的鎖屏資訊依最少資訊原則，不放電話、其他同工資料或敏感內容。
 
-## 尚未完成／不可上線
-1. 整合並審查 PR #53–56 的介面、PWA 安裝與真實推播傳送成果；不把測試用途空 payload 視為正式任務通知。
-2. 在隔離環境建立正式 migration（使用 Supabase CLI migration new）、執行 RLS / 授權 / advisors 測試。正式站不得使用尚未審核的 staged schema。
-3. 建立同源、登入驗證的裝置註冊、偏好同步與撤銷 API；以伺服器驗證的報到及分派綁定裝置，不信任前端提供的 user_id、role、task_id 或時間。開關切換、換堂及登出須處理同步失敗並提示，清理過期和失效訂閱。
-4. 以已審查並固定版本的 Web Push 加密傳輸實作發送器；使用獨立正式 VAPID 金鑰（私鑰僅伺服器），Apple 端點限制、短 TTL、禁止 redirect、逾時、狀態碼、限流與不洩密日誌。通知點擊只回到同源系統。
-5. Supabase Cron/受保護的 dispatcher 採足夠短的頻率（先驗證能否每 10 秒執行），實際延遲測試後再啟用。Vercel Hobby 的每日 cron 不能當作準點排程。目前此 PR 不新增或啟用 cron。
-6. 前景既有語音不改動。iOS 推播負責系統通知，不強制語音播報、不保證震動；需真機驗證是否會和前景提醒造成不必要的重複。
-7. 專屬測試裝置、測試堂次與假資料，依序驗證多任務切換、背景、鎖屏、開關、錯堂更正、任務刪除/變更、未授權及逾時。正式 rollout 前須使用者審閱與同意。
+## 上線前必須完成（未啟用）
+1. 審閱此 PR 的完整程式及測試結果。在獨立環境生成正式 migration（使用 Supabase CLI migration new），執行 migration、RLS／授權及 advisors 驗證。
+2. 預覽目前與正式共用資料庫，正式註冊與派送 API 僅允許 production 環境，且預設停用；不可為了實測而開放共用資料庫。應先使用獨立測試資料庫與專屬測試裝置完成實際整合測試。
+3. 設定獨立正式 VAPID 金鑰、排程授權秘密及 Vault。測試金鑰不得轉為正式金鑰。先部署停用旗標的程式及資料庫結構，再另行核准啟用。
+4. 檢查 pg_net 的 HTTP 佇列、回應及 Vault 權限，確保未授權角色不能讀取包含授權標頭的佇列，也不能呼叫派送函式。確認 Cron 的成本／額度、執行紀錄保留及過期訂閱清理政策。
+5. 在真機驗證原本主畫面圖示相容性、權限授予、開關、換堂、登出、結束堂次、任務取消、網路失效與前景／鎖屏重複提醒。已收到的通知無法撤回；HTTP 2xx 不等於裝置實際收到或震動。
+6. 完成實際延遲及負載驗證、回復方案和使用者審閱後才啟用正式排程。
 
 ## 部署狀態
 僅隔離測試。未改動 main、正式資料庫、正式 Cron、環境變數、語音與報到流程；此階段沒有新增可供手機操作的正式任務推播頁。
@@ -34,3 +33,11 @@ PR #54 原生開關觸覺回饋、PR #55 主畫面 PWA 通知、PR #56 伺服器
 - 目前預覽與正式共用資料庫，故兩支 API 的資料庫操作只允許正式環境；正式註冊／發送還需 ENABLE_BACKGROUND_TASK_REMINDERS=true、獨立正式 VAPID 金鑰及 BACKGROUND_REMINDER_DISPATCH_SECRET。沒有設定任何正式金鑰、Cron、migration 或啟用旗標。測試均使用虛構訂閱與 mocked fetch。
 
 - 登入工作階段綁定：僅在 Auth.getUser 驗證原 Bearer Token 後提取 session_id；資料庫以非公開 schema 的布林函式確認 auth.sessions 的所有權與有效期，不開放 Auth 表查詢。每次任務規劃及 take 均重新驗證，成功登出使舊訂閱失效。
+
+## 現有開關與裝置同步
+沿用原本震動設定，不增加震動長度／次數設定。只有支援的 Apple 主畫面 Web App 在功能旗標啟用後顯示背景通知授權提示。iOS 必須由實際點擊授權；本機預設 ON 不代表已同意系統通知。報到後以鎖定堂次同步，未正式報到不註冊；關閉同時撤銷訂閱，成功登出後伺服器重新驗證登入工作階段。保留原有語音助理、Android 震動及報到流程。正式 PWA manifest 使用現有名稱與 logo，主畫面安裝相容性仍須實測。
+
+## 秒級排程（未啟用）
+`supabase/staged/background_task_reminder_cron.sql` 只建立資料庫內部入口。判斷台北服事時段及 20 秒有效窗口、有待傳送任務才讀取 Vault，向固定正式網址呼叫派送 API；無任務不消耗 Vercel 請求。無任何自動 cron.schedule 或 extension 變更。測試包含入口的早／晚、非服事時段、已完成或取消事件、可恢復認領及未授權角色；不發送真實 HTTP。
+
+審閱與核准後的部署順序：使用獨立資料庫先測試 pg_cron、pg_net 與 Vault，確認 Cron 時區、HTTP queue ACL 及執行費用。建立正式 migration，設定同一組獨立 dispatcher secret 於 Vercel 的 BACKGROUND_REMINDER_DISPATCH_SECRET 和 Vault 名稱 background_reminder_dispatch_secret；值只在管理介面安全設定。部署正式程式，先保持 ENABLE_BACKGROUND_TASK_REMINDERS 未啟用。驗收後才建立名稱為 background-task-reminders 的 Cron job（間隔 10 seconds，執行 select background_reminder_private.queue_due_dispatch();），並啟用旗標。若需停用，先停用旗標及 job；不影響現有語音與報到。秒級 job 即使無任務仍有資料庫工作及記錄量，需監控；不承諾零成本。未啟用本檔任何命令。

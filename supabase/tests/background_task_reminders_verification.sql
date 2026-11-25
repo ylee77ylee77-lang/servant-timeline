@@ -1,6 +1,7 @@
 -- All rows and the staged schema exist only in this isolated transaction.
 begin;
 \ir ../staged/background_task_reminders.sql
+\ir ../staged/background_task_reminder_cron.sql
 
 do $$
 declare
@@ -191,6 +192,16 @@ begin
   if exists(select 1 from public.background_reminder_candidates('2030-01-06 09:30:21+08'))
     then raise exception 'Do not replay stale events'; end if;
 
+  if has_function_privilege('authenticated','background_reminder_private.queue_due_dispatch()','execute')
+    or has_function_privilege('service_role','background_reminder_private.queue_due_dispatch()','execute')
+    then raise exception 'Cron must be owner-only'; end if;
+  if background_reminder_private.should_dispatch('2030-01-06 09:29:59+08')
+    or background_reminder_private.should_dispatch('2030-01-06 09:30:21+08')
+    or background_reminder_private.should_dispatch('2030-01-07 09:30:05+08')
+    or background_reminder_private.should_dispatch('2030-01-06 12:45:00+08')
+    then raise exception 'Cron must avoid early, stale and out-of-service requests'; end if;
+  if not background_reminder_private.should_dispatch(due)
+    then raise exception 'Cron must detect a due eligible task'; end if;
   select count(*) into n from public.background_reminder_candidates(due);
   if n <> 4 then raise exception 'Expected 4 eligible devices, got %', n; end if;
   if not exists(select 1 from public.background_reminder_candidates(due) c
@@ -209,6 +220,8 @@ begin
   select count(*) into n from public.claim_background_task_reminders(due, 50);
   if n <> 4 or (select count(*) from public.background_task_reminder_deliveries) <> 4
     then raise exception 'Repeated claim should recover the same four unstarted events'; end if;
+  if not background_reminder_private.should_dispatch(due)
+    then raise exception 'Unstarted claims must remain recoverable'; end if;
 
   select id into event_id from public.background_task_reminder_deliveries where device_id = lead_device;
   select id into cancel_event from public.background_task_reminder_deliveries where device_id = second_device;
@@ -256,6 +269,8 @@ begin
   if exists(select 1 from public.register_background_reminder_device(lead_user,lead_session,'主一堂',
     registration_endpoint,repeat('A',87),repeat('B',22),due))
     then raise exception 'Signed-out session cannot re-register using an old token'; end if;
+  if background_reminder_private.should_dispatch(due)
+    then raise exception 'No cron request after all claims are terminal or ineligible'; end if;
   update public.worship_services set status = 'completed' where id = svc;
   if exists(select 1 from public.background_reminder_candidates(due))
     then raise exception 'Completed service must not generate reminders'; end if;

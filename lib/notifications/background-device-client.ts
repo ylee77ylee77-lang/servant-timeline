@@ -158,12 +158,19 @@ export async function stopBackgroundRemindersOnSignOut(accessToken: string | und
   clearReminderConsent();
   if (!consent && !isAppleMobile()) return true;
   if (!accessToken) return false;
-  return revokeBackgroundDevice(accessToken);
+  // Do not make the original sign-out flow wait indefinitely for a browser
+  // worker or Web Lock. Successful Auth sign-out separately invalidates the
+  // server-side session binding even when local revocation times out.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    revokeBackgroundDevice(accessToken),
+    new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 8_000); }),
+  ]).finally(() => { if (timer) clearTimeout(timer); });
 }
 
 export async function syncBackgroundDevice(input: {
   prepared: PreparedReminder; accessToken: string; userId: string;
-  enabled: boolean; serviceType: string; checkInId: string;
+  enabled: boolean; serviceType: string; checkInId: string; isCurrent?: () => boolean;
 }): Promise<DeviceSyncStatus> {
   if (!input.enabled) {
     const stopped = await revokeBackgroundDevice(input.accessToken);
@@ -172,6 +179,7 @@ export async function syncBackgroundDevice(input: {
   }
 
   return serial(async () => {
+    if (input.isCurrent && !input.isCurrent()) return { message: "背景提醒同步中…" };
     if (Notification.permission === "denied") {
       return { message: "請在 iPhone「設定 → 通知」允許招待服事系統的通知。", action: "retry" };
     }
@@ -187,6 +195,7 @@ export async function syncBackgroundDevice(input: {
     }
     // The server derives check-in and assignment; these IDs are only local
     // guards against previewing a hall or testing without a formal check-in.
+    if (input.isCurrent && !input.isCurrent()) return { message: "背景提醒同步中…" };
     if (!hasReminderConsent(input.userId)) return { message: "背景震動提醒已關閉。" };
     const response = await fetchDevice(input.accessToken, {
       action: "register", serviceType: input.serviceType, subscription: sub.toJSON(),

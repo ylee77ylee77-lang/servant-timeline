@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isAppleMobile, isStandaloneReminderApp, canUseBackgroundPush,
   getBackgroundDeviceConfig, prepareBackgroundDevice, subscribeFromGesture,
-  writeReminderConsent, nextReminderIntent, currentReminderIntent,
+  readReminderConsent, writeReminderConsent, nextReminderIntent, currentReminderIntent,
   revokeBackgroundDevice, syncBackgroundDevice,
   type PreparedReminder, type DeviceSyncStatus,
 } from "@/lib/notifications/background-device-client";
@@ -58,7 +58,7 @@ export function useBackgroundReminders({ accessToken, userId, loaded, enabled, s
   useEffect(() => {
     if (!featureEnabled || !prepared || !loaded) return;
     let disposed = false;
-    void syncBackgroundDevice({ prepared, accessToken, userId, enabled, serviceType, checkInId })
+    void syncBackgroundDevice({ prepared, accessToken, userId, enabled, serviceType, checkInId, isCurrent: () => !disposed })
       .then(result => { if (!disposed) setStatus(result); })
       .catch(() => { if (!disposed) setStatus({ message: enabled
         ? "尚未完成背景提醒同步，請重試。" : "尚未確認停止背景提醒，請重試。", action: "retry" }); });
@@ -103,16 +103,18 @@ export function useBackgroundReminders({ accessToken, userId, loaded, enabled, s
   }, [featureEnabled, prepared, userId, refresh]);
 
   const onPreferenceChange = useCallback((next: boolean) => {
-    if (!featureEnabled) return;
     if (next) {
-      // Keep the real switch gesture available for iOS's permission prompt.
-      authorize();
+      if (featureEnabled) authorize();
     } else {
-      nextReminderIntent();
+      const epoch = nextReminderIntent();
+      // Turning off must clear any prior consent even if the server is now
+      // temporarily unavailable or the feature flag has been disabled.
+      if (!featureEnabled && readReminderConsent()?.userId !== userId) return;
       writeReminderConsent(userId, false);
       setStatus({ message: "正在停止背景提醒…" });
       // The same device operation queue handles both registration and revoke.
       void revokeBackgroundDevice(accessToken).then(stopped => {
+        if (!currentReminderIntent(epoch)) return;
         setStatus(stopped ? { message: "背景震動提醒已關閉。" }
           : { message: "尚未確認停止背景提醒，請重新連線後重試。", action: "retry" });
       });
