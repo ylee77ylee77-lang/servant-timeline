@@ -9,6 +9,7 @@ import type {
 
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
 import { AVATAR_FAMILY_STYLES } from "./avatar.ts";
+import { getAvatarHairstyle } from "./avatar-hairstyle.ts";
 import { getAvatarLegacyEyewearChoice } from "./avatar-eyewear.ts";
 
 export const AVATAR_ART_DIR = "/avatar/scenes/v2";
@@ -114,7 +115,7 @@ export const AVATAR_GLASSES_LABELS: Record<AvatarGlassesStyle, string> = {
 };
 
 export type AvatarPortraitLayer = {
-  kind: "legacy" | "tone-variant" | "hair-back" | "face-body" | "eyewear" | "hair-front";
+  kind: "legacy" | "tone-variant" | "hairstyle" | "hair-back" | "face-body" | "eyewear" | "hair-front";
   src: string;
 };
 
@@ -143,7 +144,9 @@ export function selectAvatarPortraitFamily(avatar: AvatarConfig, id: AvatarFamil
   const hair = family.hairStyles.find(item => item.value === (avatar.portraitFamily?.hair ?? avatar.hair)) ?? family.hairStyles[0];
   const previous = avatar.portraitFamily?.glassesStyle ?? avatar.glassesStyle;
   const glassesStyle = previous && family.eyewear[previous] ? previous : "classic";
-  return { ...avatar, portraitFamily: { id, hair: hair.value, glassesStyle } };
+  const next = { ...avatar, portraitFamily: { id, hair: hair.value, glassesStyle } };
+  delete next.hairstyleVariant;
+  return next;
 }
 
 export function selectAvatarPortraitVersion(avatar: AvatarConfig, layered: boolean,
@@ -192,6 +195,8 @@ export function getAvatarPortraitPlan(
   }
   const options = getAvatarPortraitOptions(avatar, catalog);
   if (!options?.active) {
+    const hairstyle = getAvatarHairstyle(avatar);
+    if (hairstyle) return { portrait: hairstyle.src, layers: [{ kind: "hairstyle", src: hairstyle.src }] };
     const dark = getClassicHairTone(avatar) === "dark";
     const assets = dark ? AVATAR_CLASSIC_DARK_PORTRAITS[avatar.style] : AVATAR_PORTRAITS[avatar.style];
     const eyewear = getAvatarLegacyEyewearChoice(avatar);

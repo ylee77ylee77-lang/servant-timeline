@@ -1,4 +1,5 @@
 import type { AvatarColorHex, AvatarColorPart } from "./avatar-color-wheel.ts";
+import { normalizeAvatarHairstyle, type AvatarHairstyleId } from "./avatar-hairstyle.ts";
 
 export type AvatarStyle = "masculine" | "feminine" | "neutral";
 export type AvatarSkinTone = "light" | "warm" | "medium" | "deep";
@@ -44,6 +45,8 @@ export type AvatarConfig = {
   portraitVersion?: "v2-tone" | "v3";
   /** Explicit new family selection; original portrait preferences remain intact. */
   portraitFamily?: AvatarFamilySelection;
+  /** Explicit choice of a source-locked complete hairstyle illustration. */
+  hairstyleVariant?: AvatarHairstyleId;
   /** Separate from the existing on/off flag for backwards compatibility. */
   glassesStyle?: AvatarGlassesStyle;
   /** Explicit opt-in for source-aligned legacy round/square frames. */
@@ -171,9 +174,12 @@ export function normalizeAvatarConfig(value: unknown): AvatarConfig {
 
   const portraitFamily = Object.hasOwn(input, "portraitFamily")
     ? normalizePortraitFamily(input.portraitFamily, style) : undefined;
+  const hairstyleVariant = Object.hasOwn(input, "hairstyleVariant")
+    ? normalizeAvatarHairstyle(input.hairstyleVariant, style) : undefined;
   return {
     style,
     ...(portraitFamily ? { portraitFamily } : {}),
+    ...(hairstyleVariant ? { hairstyleVariant } : {}),
     skinTone: skins.has(input.skinTone as AvatarSkinTone)
       ? (input.skinTone as AvatarSkinTone)
       : base.skinTone,

@@ -1,5 +1,7 @@
 import type { AvatarConfig, AvatarGlassesStyle, AvatarStyle } from "./avatar.ts";
 import type { AvatarColorHex } from "./avatar-color-wheel.ts";
+import { getAvatarHairstyle } from "./avatar-hairstyle.ts";
+import { AVATAR_FRAME_PATHS } from "./avatar-frame-paths.ts";
 
 export type AvatarEyewearChoice = "none" | AvatarGlassesStyle;
 type FrameStyle = Exclude<AvatarGlassesStyle, "classic">;
@@ -69,9 +71,16 @@ export function selectAvatarLegacyEyewear(avatar: AvatarConfig, choice: AvatarEy
 export function getAvatarEyewearPlan(avatar: AvatarConfig) {
   if (avatar.style === "neutral" || avatar.displayMode !== "custom") return null;
   const choice = getAvatarLegacyEyewearChoice(avatar);
-  if (choice !== "round" && choice !== "square") return null;
+  const hairstyle = getAvatarHairstyle(avatar);
   const original = ORIGINAL[avatar.style];
-  return { choice, geometry: GEOMETRY[avatar.style][choice], original, color: avatar.materialColors?.frame ?? original };
+  const shared = { original, color: avatar.materialColors?.frame ?? original, occlusionUri: hairstyle?.coverageUri };
+  if (choice === "classic" && hairstyle) {
+    // Trace of the released classic rim geometry, used as a clear-lens
+    // independent accessory ONLY on the new complete hairstyle sources.
+    return { ...shared, choice, artwork: "filled" as const, geometry: AVATAR_FRAME_PATHS[avatar.style === "masculine" ? "male" : "female"] };
+  }
+  if (choice !== "round" && choice !== "square") return null;
+  return { ...shared, choice, artwork: "stroke" as const, geometry: GEOMETRY[avatar.style][choice] };
 }
 /** Strict RGB and distinct tonal values even at black and white. */
 export function getAvatarEyewearShades(color: AvatarColorHex) {

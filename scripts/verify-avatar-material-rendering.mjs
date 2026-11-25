@@ -328,7 +328,61 @@ async function verifySharedRenderer(output, loadComponent) {
     }
   }
   await sharp({ create: { width: 5 * 256, height: 2 * 256, channels: 3, background: "#F4F1F8" } }).composite(eyewearSheet).png().toFile(path.join(output, "eyewear-review.png"));
-  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases };
+  const { AVATAR_HAIRSTYLES, selectAvatarHairstyle } = loadComponent(path.join(ROOT, "lib/profile/avatar-hairstyle.ts"));
+  const hairstyleCases = [], hairstyleSheet = [];
+  for (const [row, source] of AVATAR_HAIRSTYLES.entries()) {
+    const avatar = selectAvatarHairstyle(normalizeAvatarConfig({ style: source.style, glasses: false, background: "sky" }), source.id);
+    for (const size of sizes) {
+      const original = await renderEyewear(avatar, size);
+      const hair = await renderEyewear({ ...avatar, materialColors: { hair: "#80618F" } }, size);
+      const skin = await renderEyewear({ ...avatar, materialColors: { skin: "#885139" } }, size);
+      const combined = { ...avatar, materialColors: { hair: "#80618F", skin: "#A96A48" } };
+      const color = await renderEyewear(combined, size);
+      for (const [label, rendered] of [["hair", hair], ["skin", skin], ["combined", color]]) {
+        let changed = 0;
+        for (let i = 0; i < original.data.length; i += 4) {
+          assert.ok(Math.abs(original.data[i+3] - rendered.data[i+3]) <= 1, source.id + ": alpha changed");
+          if (pixelDelta(original.data, rendered.data, i) > 8) changed++;
+        }
+        assert.ok(changed > size*size*.015, source.id + "/" + size + "/" + label + ": material not visible");
+      }
+      const points = source.style === "masculine" ? [{ x: 211, y: 204 }, { x: 307, y: 202 }, { x: 257, y: 292 }] : [{ x: 213, y: 216 }, { x: 312, y: 210 }, { x: 263, y: 304 }];
+      // At compact sizes the sampled pixels mix subpixel feature/skin edges.
+      if (size >= 256) for (const point of points) {
+        const x = Math.floor((AVATAR_PORTRAIT_BOUNDS.x + point.x / SIZE * AVATAR_PORTRAIT_BOUNDS.size) / SIZE * size);
+        const y = Math.floor((AVATAR_PORTRAIT_BOUNDS.y + point.y / SIZE * AVATAR_PORTRAIT_BOUNDS.size) / SIZE * size);
+        assert.ok(pixelDelta(original.data, color.data, (y * size + x)*4) <= 5, source.id + ": protected facial sample tinted");
+      }
+      if (size === 256) {
+        for (const [column, result] of [original, hair, skin, color].entries()) {
+          hairstyleSheet.push({ input: result.png, left: column * size, top: row * size });
+        }
+      }
+      for (const [col, choice] of ["classic", "round", "square"].entries()) {
+        const selected = selectAvatarLegacyEyewear(combined, choice);
+        const frame = await renderEyewear(selected, size);
+        const tinted = await renderEyewear({ ...selected, materialColors: { ...selected.materialColors, frame: "#B88E55" } }, size);
+        let visible = 0, recolored = 0;
+        for (let i=0; i<frame.data.length; i+=4) {
+          if (pixelDelta(color.data, frame.data, i)>8) visible++;
+          if (pixelDelta(frame.data, tinted.data, i)>8) recolored++;
+          assert.ok(Math.abs(frame.data[i+3]-tinted.data[i+3])<=1);
+        }
+        assert.ok(visible>0 && recolored>0, source.id + "/" + size + "/" + choice + ": frame or tint missing");
+        if (size >= 256) for (const point of points.slice(0,2)) {
+          const x = Math.floor((AVATAR_PORTRAIT_BOUNDS.x + point.x / SIZE * AVATAR_PORTRAIT_BOUNDS.size) / SIZE * size);
+          const y = Math.floor((AVATAR_PORTRAIT_BOUNDS.y + point.y / SIZE * AVATAR_PORTRAIT_BOUNDS.size) / SIZE * size);
+          assert.ok(pixelDelta(color.data, tinted.data, (y*size+x)*4)<=3, source.id + ": frame covers an eye center");
+        }
+        await fs.writeFile(path.join(output, source.id + "-" + choice + "-" + size + ".png"), tinted.png);
+        if (size === 256) hairstyleSheet.push({ input: tinted.png, left: (4+col)*size, top: row*size });
+        hairstyleCases.push({ hairstyle: source.id, size, frame: choice, visible, recolored, passed: true });
+      }
+    }
+  }
+  await sharp({ create: { width: 7*256, height: 4*256, channels: 3, background: "#F4F1F8" } }).composite(hairstyleSheet).png().toFile(path.join(output, "hairstyle-shared-renderer.png"));
+  console.log("P4 shared hairstyle renderer: " + hairstyleCases.length + " frame/size cases passed");
+  return { rendererComponentSha256: sha256(await fs.readFile(path.join(ROOT, "components/profile/AvatarRenderer.tsx"))), embeddedLocalAssets: [...assets.keys()], cases: results, eyewearCases, hairstyleCases };
 }
 
 async function main() {

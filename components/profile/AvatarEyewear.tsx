@@ -5,11 +5,11 @@ type EyewearPlan = NonNullable<ReturnType<typeof getAvatarEyewearPlan>>;
 
 /** One independent accessory on the existing portrait artboard. */
 export function AvatarEyewear({ plan, id }: { plan: EyewearPlan; id: string }) {
-  const { geometry, color } = plan;
   const { x, y, size } = AVATAR_PORTRAIT_BOUNDS;
-  const shades = getAvatarEyewearShades(color);
+  const shades = getAvatarEyewearShades(plan.color);
   const gradientId = `${id}-rim`;
-  const paths = [...geometry.temples, geometry.bridge, ...geometry.rims];
+  const occlusionId = `${id}-hair-occlusion`;
+  const paths = plan.artwork === "stroke" ? [...plan.geometry.temples, plan.geometry.bridge, ...plan.geometry.rims] : [];
   return (
     <g aria-hidden="true" transform={`translate(${x} ${y}) scale(${size / AVATAR_CANVAS_SIZE})`}>
       <defs>
@@ -19,20 +19,37 @@ export function AvatarEyewear({ plan, id }: { plan: EyewearPlan; id: string }) {
           <stop offset=".64" stopColor={shades.mid} />
           <stop offset="1" stopColor={shades.lower} />
         </linearGradient>
+        {plan.occlusionUri ? (
+          <filter id={occlusionId} filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"
+            x={0} y={0} width={512} height={512} colorInterpolationFilters="sRGB">
+            <feImage href={plan.occlusionUri} x={0} y={0} width={512} height={512} preserveAspectRatio="none" result="coverage" />
+            <feColorMatrix in="coverage" type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1 0 0 0 0" result="hair" />
+            <feComposite in="SourceGraphic" in2="hair" operator="out" />
+          </filter>
+        ) : null}
       </defs>
-      <g fill="none" strokeLinecap="round" strokeLinejoin="round">
-        <g stroke="#2C1D16" strokeWidth={geometry.width + 1.4} opacity=".19" transform="translate(0 1.5)">
-          {paths.map((d) => <path key={d} d={d} />)}
-        </g>
-        <g stroke={shades.shadow} strokeWidth={geometry.width + 0.8}>
-          {paths.map((d) => <path key={d} d={d} />)}
-        </g>
-        <g stroke={`url(#${gradientId})`} strokeWidth={geometry.width}>
-          {paths.map((d) => <path key={d} d={d} />)}
-        </g>
-        <g stroke={shades.highlight} strokeWidth="0.9" opacity=".35">
-          {geometry.rims.map((d) => <path key={d} d={d} />)}
-        </g>
+      <g filter={plan.occlusionUri ? `url(#${occlusionId})` : undefined}>
+        {plan.artwork === "filled" ? (
+          <g fill={`url(#${gradientId})`} stroke={shades.shadow} strokeWidth=".5" strokeLinejoin="round">
+            {[...plan.geometry.temples, plan.geometry.bridge].map(d => <path key={d} d={d} />)}
+            {plan.geometry.rings.map(ring => <path key={ring.outer} d={`${ring.outer} ${ring.lens}`} fillRule="evenodd" />)}
+          </g>
+        ) : (
+          <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+            <g stroke="#2C1D16" strokeWidth={plan.geometry.width + 1.4} opacity=".19" transform="translate(0 1.5)">
+              {paths.map((d) => <path key={d} d={d} />)}
+            </g>
+            <g stroke={shades.shadow} strokeWidth={plan.geometry.width + 0.8}>
+              {paths.map((d) => <path key={d} d={d} />)}
+            </g>
+            <g stroke={`url(#${gradientId})`} strokeWidth={plan.geometry.width}>
+              {paths.map((d) => <path key={d} d={d} />)}
+            </g>
+            <g stroke={shades.highlight} strokeWidth="0.9" opacity=".35">
+              {plan.geometry.rims.map((d) => <path key={d} d={d} />)}
+            </g>
+          </g>
+        )}
       </g>
     </g>
   );

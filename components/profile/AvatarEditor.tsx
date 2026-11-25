@@ -2,6 +2,7 @@
 
 import { AvatarRenderer, AvatarCompanionThumbnail } from "@/components/profile/AvatarRenderer";
 import { AvatarLivePreview } from "@/components/profile/AvatarControls";
+import { getAvatarHairstyleOptions, getAvatarHairstyle, selectAvatarHairstyle } from "@/lib/profile/avatar-hairstyle";
 import { AvatarColorControls } from "@/components/profile/AvatarColorControls";
 import { AVATAR_EYEWEAR_CHOICES, getAvatarLegacyEyewearChoice, selectAvatarLegacyEyewear } from "@/lib/profile/avatar-eyewear";
 import { getAvatarMaterialChannels, setAvatarMaterialColor } from "@/lib/profile/avatar-materials";
@@ -56,6 +57,8 @@ export function AvatarEditor({
   const avatar = normalizeAvatarConfig(value);
   const portraitOptions = getAvatarPortraitOptions(avatar);
   const materialChannels = getAvatarMaterialChannels(avatar);
+  const hairstyleOptions = getAvatarHairstyleOptions(avatar.style);
+  const selectedHairstyle = getAvatarHairstyle(avatar);
 
   const setStyle = (style: Extract<AvatarStyle, "masculine" | "feminine">) => {
     if (avatar.style === style) return;
@@ -140,6 +143,28 @@ export function AvatarEditor({
             </section>
           )}
         </>
+      )}
+
+      {!portraitOptions?.active && hairstyleOptions.length > 0 && (
+        <section>
+          <div className="mb-3 text-xs font-black tracking-widest text-[#7B7B74]">髮型</div>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: "original" as const, label: "原版" },
+              ...hairstyleOptions,
+            ].map(option => {
+              const selected = (selectedHairstyle?.id ?? "original") === option.id;
+              const next = selectAvatarHairstyle(avatar, option.id);
+              return (
+                <button key={option.id} type="button" aria-pressed={selected} onClick={() => onChange(next)}
+                  className={`flex min-h-11 flex-col items-center gap-1 rounded-xl border px-1 py-2 text-xs font-bold ${selected ? "border-[#6D55A3]/20 bg-[#F3EEFF] text-[#6D55A3]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}>
+                  <AvatarRenderer config={{ ...next, displayMode: "custom", pet: "none", glasses: false, materialColors: undefined }} size={64} />
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {avatar.style !== "neutral" && !portraitOptions?.active && !materialChannels.length && (
