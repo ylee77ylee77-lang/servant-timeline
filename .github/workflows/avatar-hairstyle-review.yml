@@ -1,0 +1,45 @@
+name: Avatar P4 hairstyle artwork review
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/author-avatar-hairstyle-candidates.py'
+      - 'docs/avatar-art-direction/**'
+      - 'public/avatar/scenes/v2/**'
+      - 'public/avatar/materials/v1/**'
+      - '.github/workflows/avatar-hairstyle-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avatar-hairstyle-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Produce face-locked hairstyle review artwork
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline authoring dependencies
+        run: python -m pip install numpy==2.2.6 Pillow==12.3.0 opencv-python-headless==4.12.0.88
+      - name: Produce aligned hairstyle review images
+        run: python scripts/author-avatar-hairstyle-candidates.py
+      - name: Upload review artwork and metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatar-p4-hairstyle-review
+          path: .avatar-hairstyle-review/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
