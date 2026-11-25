@@ -3,10 +3,10 @@ import type { AvatarColorHex } from "./avatar-color-wheel.ts";
 
 // Explicit b1 opt-in only. Never activate a dormant portraitFamily or legacy hair value.
 const SOURCES = [
-  { id: "male-b", style: "masculine", label: "原版髮型", sourceSha256: "be5add2bdbd710c850b2feeb3c6d3380ab7060a9d13af10d123afeb0d62a26f5", coverageSha256: "f44460513c5a6dad7348777f40cb673b759b08bdc6b375cf45adf8cefe79f8f5" },
+  { id: "male-b", style: "masculine", label: "立體蓬髮", sourceSha256: "be5add2bdbd710c850b2feeb3c6d3380ab7060a9d13af10d123afeb0d62a26f5", coverageSha256: "f44460513c5a6dad7348777f40cb673b759b08bdc6b375cf45adf8cefe79f8f5" },
   { id: "male-b-short", style: "masculine", label: "俐落短髮", sourceSha256: "f5969c1199de6054d647f2a1ad80499c3728dfb9c48b3b574199ea1a99b41278", coverageSha256: "9be943357773015364bf4989d3759394cb3d83d6953d953c9955c8d80d7ef23c" },
   { id: "male-b-side", style: "masculine", label: "經典側分", sourceSha256: "1190d5815ed55a3b82d380f8107a77f43838af4507e62b9cef75d345538c5a56", coverageSha256: "7bc7d34021142bd4ab37dfa4b1c92c46886676aa01b688819a03025f05097422" },
-  { id: "female-b", style: "feminine", label: "原版髮型", sourceSha256: "388e87652d03bae577a2a5b1af74ba3b21b92a11f67563a1490aa1bcee400060", coverageSha256: "d01f4c104591b48a856e5ed7071c9969054d8e87ddf7bd15bca94140d9f8f0bc" },
+  { id: "female-b", style: "feminine", label: "自然中長髮", sourceSha256: "388e87652d03bae577a2a5b1af74ba3b21b92a11f67563a1490aa1bcee400060", coverageSha256: "d01f4c104591b48a856e5ed7071c9969054d8e87ddf7bd15bca94140d9f8f0bc" },
   { id: "female-b-bob", style: "feminine", label: "鮑伯短髮", sourceSha256: "439e80963e7ff4a8af815d72cc34dbf52d386d62df8393570cfb3d871c569ba8", coverageSha256: "95807b1bf4133ca06ba0a9f8042e4dd3c17ef375fbab784e0d11236818046e23" },
   { id: "female-b-bun", style: "feminine", label: "自然盤髮", sourceSha256: "e16b0ec6078a5d316c5e0ec0034082ca1d5846032bc38f02695dc63dce3176d5", coverageSha256: "ff1cc301962284662c98a7802828b5cd9cdcbbeb9079ecf8c61dd2cfa5f56e2c" },
 ] as const;

@@ -15,7 +15,6 @@ import { SystemAvatar } from "@/components/profile/SystemAvatar";
 import { SettingsAccordionCard } from "@/components/profile/SettingsAccordionCard";
 import { useAuth } from "@/components/auth/AuthProvider";
 import {
-  AVATAR_DEFAULTS,
   getDefaultAvatarConfig,
   isAvatarPersonalized,
   normalizeAvatarConfig,
@@ -220,7 +219,7 @@ export function AvatarSettingsCard({
             <ChevronLeft className="h-4 w-4" />
             返回
           </button>
-          <h3 className="text-lg font-black text-[#1F2937]">選擇基礎角色</h3>
+          <h3 className="text-lg font-black text-[#1F2937]">選擇角色</h3>
           <p className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
             這只是起始模板，後面所有特徵都還能再修改。
           </p>
@@ -233,10 +232,9 @@ export function AvatarSettingsCard({
                 key={style}
                 type="button"
                 onClick={() => chooseManualBase(style)}
-                className="flex flex-col items-center rounded-[22px] border border-[#E6EAF0] bg-white p-4 text-center transition hover:border-[#6D55A3]/40 hover:bg-[#F8F5FF]"
+                className="min-h-11 rounded-xl border border-[#E6EAF0] bg-white px-3 py-2 text-center text-sm font-bold text-[#1F2937] transition hover:border-[#6D55A3]/40 hover:bg-[#F8F5FF]"
               >
-                <SystemAvatar config={AVATAR_DEFAULTS[style]} size={92} />
-                <div className="mt-3 text-sm font-black text-[#1F2937]">{label}</div>
+                {label}
               </button>
             ))}
           </div>
@@ -248,9 +246,6 @@ export function AvatarSettingsCard({
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-black text-[#1F2937]">特徵微調</h3>
-              <p className="mt-1 text-xs font-medium leading-5 text-[#7B7B74]">
-                陪伴動物選填：綿羊、母鹿、獅子、老鷹。
-              </p>
             </div>
             <button
               type="button"

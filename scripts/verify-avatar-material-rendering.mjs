@@ -215,6 +215,34 @@ async function verifySharedRenderer(output, loadComponent) {
   const { AvatarRenderer } = loadComponent(path.join(ROOT, "components/profile/AvatarRenderer.tsx"));
   const { normalizeAvatarConfig } = loadComponent(path.join(ROOT, "lib/profile/avatar.ts"));
   const { AVATAR_PORTRAIT_BOUNDS } = loadComponent(path.join(ROOT, "lib/profile/avatar-scene.ts"));
+  // Real server-rendered editor markup: all choices are collapsed except role
+  // for a first-time user. Only the single preview may render portrait art.
+  {
+    const {AvatarEditor}=loadComponent(path.join(ROOT,"components/profile/AvatarEditor.tsx"));
+    const {AvatarIconPicker}=loadComponent(path.join(ROOT,"components/profile/AvatarIconPicker.tsx"));
+    const {AvatarColorControls}=loadComponent(path.join(ROOT,"components/profile/AvatarColorControls.tsx"));
+    const {AvatarOptionCard}=loadComponent(path.join(ROOT,"components/profile/AvatarOptionCard.tsx"));
+    const render=(component,props)=>renderToStaticMarkup(React.createElement(component,props));
+    const avatar=normalizeAvatarConfig({style:"feminine",glasses:true,lens:{transparency:65}});
+    const editor=render(AvatarEditor,{value:avatar,onChange:()=>{},showPreview:false});
+    assert.equal((editor.match(/aria-expanded="true"/g)||[]).length,0);
+    for(const title of ["角色","臉型","髮型","眼鏡","服裝","髮色","膚色","鏡框色","鏡片色","背景","動物"])assert.ok(editor.includes(title),title);
+    assert.ok(editor.includes("65% 透明"));
+    assert.doesNotMatch(editor,/<(?:svg|img|canvas|image)\b|基礎角色|陪伴動物/);
+    assert.doesNotMatch(editor,/type="range"/);
+    const neutral=render(AvatarEditor,{value:normalizeAvatarConfig({style:"neutral"}),onChange:()=>{},showPreview:false});
+    assert.equal((neutral.match(/aria-expanded="true"/g)||[]).length,1);
+    assert.match(neutral,/男生/);assert.match(neutral,/女生/);
+    const icons=render(AvatarIconPicker,{value:avatar,onChange:()=>{}});
+    assert.equal((icons.match(/aria-expanded="true"/g)||[]).length,0);
+    assert.doesNotMatch(icons,/<(?:svg|img|canvas|image)\b/);
+    const color=render(AvatarColorControls,{channels:[{part:"hair",original:"#654539"},{part:"lens",original:"#627B91"}],values:{},openPart:"lens",onTogglePart:()=>{},onChange:()=>{},lensTransparency:{value:65,custom:true,onChange:()=>{},onReset:()=>{}}});
+    assert.equal((color.match(/aria-expanded="true"/g)||[]).length,1);
+    assert.match(color,/鏡片透明度/);assert.match(color,/step="5"/);
+    const closed=render(AvatarOptionCard,{title:"測試",summary:"摘要",expanded:false,onToggle:()=>{},children:"HIDDEN_OPTION"});
+    assert.doesNotMatch(closed,/HIDDEN_OPTION/);
+    console.log("AVATAR_TEXT_ACCORDION_PROOF "+JSON.stringify({closedCards:true,firstRoleOnly:true,textOnly:true,controlledColor:true,hiddenLensControls:true,visualAcceptance:"NOT_APPROVED"}));
+  }
   const sizes = [48, 80, 104, 256];
   const fixtures = [
     { name: "male", style: "masculine", materialColors: { hair: "#A06EE8", skin: "#BC855E", frame: "#B88E55" } },
