@@ -51,3 +51,12 @@ test("unsupported, inherited and malicious selections do not select an outfit",(
   assert.equal(getAvatarFormalOutfitPlan(a,"/avatar/scenes/v3/unknown.webp"),null);
   assert.equal(getAvatarFormalOptions("neutral").length,0);
 });
+
+// A dormant family ID (no registered family artwork) must not disable
+// outfits on the actually resolved legacy portrait.
+test("outfit availability follows the resolved source, not dormant family metadata",()=>{
+  const config=normalizeAvatarConfig({style:"feminine",portraitFamily:{id:"female-b",hair:"long",glassesStyle:"classic"},formalOutfit:{id:"tailored-suit"}});
+  const scene=getAvatarScene(config);
+  assert.ok(getAvatarFormalOutfitPlan(config,scene.portrait));
+  assert.equal(getAvatarFormalOutfitPlan(config,"/avatar/scenes/v3/future/face.webp"),null);
+});

@@ -386,14 +386,21 @@ async function verifySharedRenderer(output, loadComponent) {
   const outfitFixtures = [
     ...fixtures.map(f => ({ style:f.style, id:f.name+"-original" })),
     ...AVATAR_HAIRSTYLES.map(f => ({ style:f.style, id:f.id, hairstyle:f.id })),
+    ...fixtures.flatMap(f => [
+      {style:f.style,id:f.name+"-classic-glasses", glasses:true, materialColors:f.materialColors},
+      {style:f.style,id:f.name+"-dark", dark:true, materialColors:f.materialColors},
+      {style:f.style,id:f.name+"-dark-glasses", dark:true, glasses:true, materialColors:f.materialColors},
+    ]),
   ];
+  const { selectClassicHairTone } = loadComponent(path.join(ROOT,"lib/profile/avatar-portrait.ts"));
   const outfitCases=[], outfitSheet=[];
   for (const [row,fixture] of outfitFixtures.entries()) {
-    let original=normalizeAvatarConfig({style:fixture.style,glasses:false,background:"sky"});
+    let original=normalizeAvatarConfig({style:fixture.style,glasses:fixture.glasses??false,background:"sky",materialColors:fixture.materialColors});
     if(fixture.hairstyle) original=selectAvatarHairstyle(original,fixture.hairstyle);
+    if(fixture.dark) original=selectClassicHairTone(original,"dark");
     for(const size of [48,256]) {
       const before=await renderEyewear(original,size);
-      if(size===256) outfitSheet.push({input:before.png,left:0,top:row*size});
+      if(size===256&&row<6) outfitSheet.push({input:before.png,left:0,top:row*size});
       for(const [column,choice] of getAvatarFormalOptions(fixture.style).entries()) {
         const selected=selectAvatarFormalOutfit(original,choice.id);
         const after=await renderEyewear(selected,size);
@@ -403,7 +410,7 @@ async function verifySharedRenderer(output, loadComponent) {
           const i=(y*size+x)*4;
           const sy=(y*SIZE/size-AVATAR_PORTRAIT_BOUNDS.y)*SIZE/AVATAR_PORTRAIT_BOUNDS.size;
           // Above the neckline the original face must remain identical.
-          if(sy<305) assert.ok(pixelDelta(before.data,after.data,i)<=1&&Math.abs(before.data[i+3]-after.data[i+3])<=1,fixture.id+"/"+choice.id+"/"+size+": face pixels changed");
+          if(sy<305) assert.ok(pixelDelta(before.data,after.data,i)<=1&&Math.abs(before.data[i+3]-after.data[i+3])<=1,fixture.id+"/"+choice.id+"/"+size+": face pixels changed at "+x+","+y);
           if(pixelDelta(before.data,after.data,i)>8) changed++;
           if(pixelDelta(after.data,recolored.data,i)>8) tint++;
           if(sy<360) assert.ok(pixelDelta(after.data,recolored.data,i)<=1,fixture.id+": clothing color entered the head");
@@ -423,7 +430,7 @@ async function verifySharedRenderer(output, loadComponent) {
           assert.ok(affected>0,fixture.id+"/"+choice.id+"/"+part+": color channel not visible");
         }
         if(size===256) {
-          outfitSheet.push({input:after.png,left:(column+1)*size,top:row*size});
+          if(row<6) outfitSheet.push({input:after.png,left:(column+1)*size,top:row*size});
           await fs.writeFile(path.join(output,fixture.id+"-"+choice.id+".png"),after.png);
         }
         outfitCases.push({fixture:fixture.id,outfit:choice.id,size,changed,tint,passed:true});

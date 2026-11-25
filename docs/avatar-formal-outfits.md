@@ -26,3 +26,16 @@ vector garment may need further artistic refinement. Not iPhone approval.
 The additional casual garments and the second face identity per gender
 remain separate scope. Do not merge before the visual review and real
 registration/profile save/reopen. No change to production.
+
+## First actual render failure and correction
+
+The first CI run (45549424827) passed lint, all 220 unit tests and database
+authorization, but the renderer detected changed face pixels in the original
+female portrait with a blouse. The union of hair/skin material-coverage paths
+was not a valid garment cutout. Use a contiguous full-head clip with a traced
+lower sweater/hair/neck boundary instead. Preserve bob and bun wisps above the
+collar. Availability follows the exact resolved source, not dormant family
+metadata. Additional proof covers all 12 registered source rasters including
+dark-hair and baked glasses with active material colors (72 outfit/size cases).
+No existing numeric gate is loosened. Still requires the actual comparison
+sheet and manual review of the lower collar/long-hair boundary.

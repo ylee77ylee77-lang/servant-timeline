@@ -71,9 +71,15 @@ export function getAvatarOutfitChannels(avatar: AvatarConfig) {
  * hair and the visible neck. Paths are expressed in the pinned 512px source
  * artboard, not in CSS or device-dependent coordinates. */
 const MALE = "M0 0H512V318H351Q337 339 329 345L330 368Q331 380 338 391L269 425Q260 430 251 425L188 391Q196 380 195 365L195 344Q179 331 171 318H0Z";
-const FEMALE_LONG_HAIR = "M0 0H512V448L451 447C426 440 404 433 385 426C367 421 354 413 342 416C328 400 319 382 318 356L333 331L355 305L372 280C386 277 397 265 401 250C405 234 402 216 389 211L374 205C368 191 350 171 335 151C327 129 314 109 300 103C284 96 262 98 244 104L234 110C229 129 224 148 216 164C200 185 181 207 166 223L158 234C154 245 158 257 159 273C157 283 164 296 174 303C185 323 204 344 218 355C221 376 218 400 211 420C216 442 213 462 202 477C195 492 193 504 197 512H0Z";
-const FEMALE_HEAD = "M0 0H512V376H320Q321 398 343 414Q324 430 302 436Q275 443 249 436Q221 431 209 420Q220 399 219 376H0Z";
-const FEMALE_NECK = "M100 80H425V276L368 278Q348 331 319 349L319 381Q320 398 343 414Q324 430 302 436Q275 443 249 436Q221 431 209 420Q220 399 218 354Q191 335 175 307L123 313Z";
+// A garment cutout is not a color-ownership mask. Keep the ENTIRE
+// upper portrait in a single contiguous path, including the hairline,
+// eyebrows, ears, and all transparent antialiased silhouette pixels.
+// Trace only the original sweater's lower edge and the front long hair.
+// The earlier union of hair/skin color paths left gaps through the face.
+const FEMALE_LONG_HAIR = "M0 0H512V448L451 447C426 440 404 433 385 426C367 421 354 413 342 416C332 432 311 437 282 439C255 441 229 435 211 423C216 442 213 462 202 477C195 492 193 504 197 512H52C51 484 54 466 68 452Q75 446 82 442H0Z";
+// Bob and bun have no original sweater above y393. Preserve the full
+// fringe, the bob silhouette, and the loose bun wisps before the collar.
+const FEMALE_HEAD = "M0 0H512V393H329Q333 405 343 414Q324 430 302 436Q275 443 249 436Q221 431 209 420Q218 408 211 393H0Z";
 const FITS: Record<string, readonly string[]> = Object.fromEntries([
   ["/avatar/scenes/v2/male.webp", [MALE]],
   ["/avatar/scenes/v2/male-glasses.webp", [MALE]],
@@ -81,15 +87,15 @@ const FITS: Record<string, readonly string[]> = Object.fromEntries([
   ["/avatar/scenes/v2-tones/male-dark-glasses.webp", [MALE]],
   ["/avatar/scenes/v3/hairstyles/male-short.webp", [MALE]],
   ["/avatar/scenes/v3/hairstyles/male-side.webp", [MALE]],
-  ["/avatar/scenes/v2/female.webp", [FEMALE_LONG_HAIR, FEMALE_NECK]],
-  ["/avatar/scenes/v2/female-glasses.webp", [FEMALE_LONG_HAIR, FEMALE_NECK]],
-  ["/avatar/scenes/v2-tones/female-dark.webp", [FEMALE_LONG_HAIR, FEMALE_NECK]],
-  ["/avatar/scenes/v2-tones/female-dark-glasses.webp", [FEMALE_LONG_HAIR, FEMALE_NECK]],
+  ["/avatar/scenes/v2/female.webp", [FEMALE_LONG_HAIR]],
+  ["/avatar/scenes/v2/female-glasses.webp", [FEMALE_LONG_HAIR]],
+  ["/avatar/scenes/v2-tones/female-dark.webp", [FEMALE_LONG_HAIR]],
+  ["/avatar/scenes/v2-tones/female-dark-glasses.webp", [FEMALE_LONG_HAIR]],
   ["/avatar/scenes/v3/hairstyles/female-bob.webp", [FEMALE_HEAD]],
   ["/avatar/scenes/v3/hairstyles/female-bun.webp", [FEMALE_HEAD]],
 ]);
 export function getAvatarFormalOutfitPlan(avatar: AvatarConfig, portrait: string | null) {
-  if (!portrait || avatar.displayMode !== "custom" || avatar.portraitFamily || !Object.hasOwn(FITS, portrait)) return null;
+  if (!portrait || avatar.displayMode !== "custom" || !Object.hasOwn(FITS, portrait)) return null;
   const choice = getAvatarFormalOptions(avatar.style).find(item => item.id === avatar.formalOutfit?.id);
   if (!choice) return null;
   return { id: choice.id, style: choice.style, cutout: FITS[portrait], colors: { ...choice.originals, ...avatar.formalOutfit?.colors } };
