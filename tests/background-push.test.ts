@@ -7,7 +7,10 @@ import { dispatchBackgroundReminders, type Taken } from "../lib/notifications/di
 
 const pair = () => {
   const ec = createECDH("prime256v1"); ec.generateKeys();
-  return { publicKey: ec.getPublicKey(undefined, "uncompressed").toString("base64url"), privateKey: ec.getPrivateKey().toString("base64url") };
+  // Node's ECDH can return a minimal-length scalar. VAPID always needs 32 bytes.
+  const raw = ec.getPrivateKey();
+  const fixed = Buffer.concat([Buffer.alloc(32 - raw.length), raw]);
+  return { publicKey: ec.getPublicKey(undefined, "uncompressed").toString("base64url"), privateKey: fixed.toString("base64url") };
 };
 const subscription = {
   endpoint: "https://web.push.apple.com/fixture-test",
@@ -31,6 +34,16 @@ test("Apple subscription accepts only canonical endpoint and valid P-256/auth ke
   assert.equal(parseAppleSubscription({ ...subscription, keys: { ...subscription.keys, auth: "B".repeat(22) } }), null);
   assert.equal(validVapidKeys(keys), true);
   assert.equal(validVapidKeys({ ...keys, privateKey: pair().privateKey }), false);
+});
+
+test("VAPID accepts a canonical 32-byte scalar with leading zeroes", () => {
+  const ec = createECDH("prime256v1");
+  const scalar = Buffer.alloc(32);
+  scalar[31] = 1;
+  ec.setPrivateKey(scalar);
+  const fixed = { subject: "https://example.invalid", publicKey: ec.getPublicKey(undefined, "uncompressed").toString("base64url"), privateKey: scalar.toString("base64url") };
+  assert.equal(validVapidKeys(fixed), true);
+  assert.equal(validVapidKeys({ ...fixed, privateKey: Buffer.from([1]).toString("base64url") }), false);
 });
 
 test("encrypted payload is bounded to service/date/time and never sends clear text or redirects", async () => {

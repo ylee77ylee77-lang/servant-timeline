@@ -41,3 +41,6 @@ PR #54 原生開關觸覺回饋、PR #55 主畫面 PWA 通知、PR #56 伺服器
 `supabase/staged/background_task_reminder_cron.sql` 只建立資料庫內部入口。判斷台北服事時段及 20 秒有效窗口、有待傳送任務才讀取 Vault，向固定正式網址呼叫派送 API；無任務不消耗 Vercel 請求。無任何自動 cron.schedule 或 extension 變更。測試包含入口的早／晚、非服事時段、已完成或取消事件、可恢復認領及未授權角色；不發送真實 HTTP。
 
 審閱與核准後的部署順序：使用獨立資料庫先測試 pg_cron、pg_net 與 Vault，確認 Cron 時區、HTTP queue ACL 及執行費用。建立正式 migration，設定同一組獨立 dispatcher secret 於 Vercel 的 BACKGROUND_REMINDER_DISPATCH_SECRET 和 Vault 名稱 background_reminder_dispatch_secret；值只在管理介面安全設定。部署正式程式，先保持 ENABLE_BACKGROUND_TASK_REMINDERS 未啟用。驗收後才建立名稱為 background-task-reminders 的 Cron job（間隔 10 seconds，執行 select background_reminder_private.queue_due_dispatch();），並啟用旗標。若需停用，先停用旗標及 job；不影響現有語音與報到。秒級 job 即使無任務仍有資料庫工作及記錄量，需監控；不承諾零成本。未啟用本檔任何命令。
+
+## 端到端隔離驗證（CI）
+新增 `scripts/verify-background-reminders-integration.mjs`，僅 GitHub Actions 臨時 Supabase（固定 loopback 54321/54322）可執行。建立本機 Auth 測試帳號、實際登入及驗證 Token，透過 PostgREST 服務角色註冊裝置、驗證匿名／已登入使用者不能直接呼叫特權 RPC 或讀取訂閱，並用兩個 dispatchers 同時認領任務。實際加密後以測試裝置的 ECDH 金鑰解密，交由正式 worker 產生通知，驗證開關撤銷及真實 Auth 登出阻止已認領任務發送。Apple transport 僅為測試替身，沒有真實推播。另於交易內驗證 pg_cron 接受 10 seconds 間隔，不建立持久排程。CI 停止後清除臨時資料庫；不使用任何正式密鑰。此測試不能取代 iPhone 正式 PWA 或真實秒級延遲驗收。
