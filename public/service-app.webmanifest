@@ -1,0 +1,17 @@
+{
+  "name": "夏凱納靈糧堂｜主日崇拜招待",
+  "short_name": "主日崇拜招待",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FFF9F3",
+  "theme_color": "#6D55A3",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "any"
+    }
+  ]
+}

@@ -6,6 +6,7 @@
 create table public.background_reminder_devices (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
+  session_id uuid not null,
   check_in_id uuid not null references public.service_check_ins(id) on delete cascade,
   service_id uuid not null,
   assignment_id uuid not null,
@@ -61,6 +62,31 @@ alter table public.background_task_reminder_deliveries enable row level security
 revoke all on public.background_reminder_devices, public.background_task_reminder_deliveries
   from public, anon, authenticated;
 grant select, insert, update, delete on public.background_reminder_devices, public.background_task_reminder_deliveries
+  to service_role;
+
+-- The service role cannot read auth.sessions. Expose only a boolean in a
+-- dedicated non-exposed schema; never grant broad access to Auth records.
+create schema background_reminder_private;
+revoke all on schema background_reminder_private from public, anon, authenticated;
+grant usage on schema background_reminder_private to service_role;
+
+create function background_reminder_private.session_is_live(
+  p_user_id uuid, p_session_id uuid, p_at timestamptz
+)
+returns boolean
+language sql stable security definer
+set search_path = pg_catalog
+as $$
+  select exists (
+    select 1 from auth.sessions s
+    where s.id = p_session_id and s.user_id = p_user_id
+      and (s.not_after is null or s.not_after > p_at)
+      and (auth.uid() is null or auth.uid() = p_user_id)
+  );
+$$;
+revoke all on function background_reminder_private.session_is_live(uuid, uuid, timestamptz)
+  from public, anon, authenticated;
+grant execute on function background_reminder_private.session_is_live(uuid, uuid, timestamptz)
   to service_role;
 
 -- Registration and delivery both derive authorization from the same check-in.
@@ -141,7 +167,7 @@ $$;
 -- The actual check-in, assignment, expiry and scope are always server-derived.
 -- An existing endpoint cannot change owner or keys, even on re-registration.
 create function public.register_background_reminder_device(
-  p_user_id uuid, p_service_type text, p_endpoint text,
+  p_user_id uuid, p_session_id uuid, p_service_type text, p_endpoint text,
   p_p256dh text, p_auth_secret text, p_at timestamptz default clock_timestamp()
 )
 returns table (device_id uuid, expires_at timestamptz)
@@ -152,12 +178,13 @@ declare
   binding record;
   target_service uuid;
 begin
-  if p_user_id is null or p_service_type is null or p_service_type not in ('六晚崇','主一堂','主二堂')
+  if p_user_id is null or p_session_id is null or p_service_type is null or p_service_type not in ('六晚崇','主一堂','主二堂')
     or p_endpoint is null or length(p_endpoint) > 2048
     or p_endpoint !~ '^https://web[.]push[.]apple[.]com/[A-Za-z0-9_-]+$'
     or p_p256dh is null or p_p256dh !~ '^[A-Za-z0-9_-]{87}$'
     or p_auth_secret is null or p_auth_secret !~ '^[A-Za-z0-9_-]{22}$'
     or p_at is null then return; end if;
+  if not background_reminder_private.session_is_live(p_user_id, p_session_id, p_at) then return; end if;
   select ws.id into target_service from public.worship_services ws
     where ws.service_date = (p_at at time zone 'Asia/Taipei')::date
       and ws.service_type = p_service_type and ws.status = 'published';
@@ -167,19 +194,22 @@ begin
   if not found then return; end if;
   return query
     insert into public.background_reminder_devices as d (
-      user_id, check_in_id, service_id, assignment_id, endpoint, p256dh,
+      user_id, session_id, check_in_id, service_id, assignment_id, endpoint, p256dh,
       auth_secret, enabled, opted_in_at, expires_at, updated_at
     )
-    values (p_user_id, binding.check_in_id, binding.service_id, binding.assignment_id,
+    values (p_user_id, p_session_id, binding.check_in_id, binding.service_id, binding.assignment_id,
       p_endpoint, p_p256dh, p_auth_secret, true, p_at,
       least(binding.closes_at, p_at + interval '12 hours'), p_at)
     on conflict (endpoint) do update set
+      session_id = excluded.session_id,
       check_in_id = excluded.check_in_id, service_id = excluded.service_id,
       assignment_id = excluded.assignment_id, enabled = true,
       opted_in_at = case when d.enabled and d.expires_at > p_at
+        and d.session_id = excluded.session_id
         and d.check_in_id = excluded.check_in_id and d.service_id = excluded.service_id
         and d.assignment_id = excluded.assignment_id then d.opted_in_at else p_at end,
       expires_at = case when d.enabled and d.expires_at > p_at
+        and d.session_id = excluded.session_id
         and d.check_in_id = excluded.check_in_id and d.service_id = excluded.service_id
         and d.assignment_id = excluded.assignment_id then least(d.expires_at, excluded.expires_at)
         else excluded.expires_at end,
@@ -209,11 +239,11 @@ as $$
 $$;
 
 revoke all on function public.background_reminder_open_bindings(timestamptz, uuid, uuid),
-  public.register_background_reminder_device(uuid, text, text, text, text, timestamptz),
+  public.register_background_reminder_device(uuid, uuid, text, text, text, text, timestamptz),
   public.disable_background_reminder_device(uuid, text, timestamptz)
   from public, anon, authenticated;
 grant execute on function public.background_reminder_open_bindings(timestamptz, uuid, uuid),
-  public.register_background_reminder_device(uuid, text, text, text, text, timestamptz),
+  public.register_background_reminder_device(uuid, uuid, text, text, text, text, timestamptz),
   public.disable_background_reminder_device(uuid, text, timestamptz)
   to service_role;
 
@@ -239,6 +269,7 @@ as $$
       on b.user_id = d.user_id and b.check_in_id = d.check_in_id
       and b.service_id = d.service_id and b.assignment_id = d.assignment_id
     where d.enabled and d.opted_in_at <= p_at and d.expires_at > p_at
+      and background_reminder_private.session_is_live(d.user_id, d.session_id, p_at)
   ),
   timed_nodes as (
     select e.*, n.id as timeline_node_id, n.sort_order,

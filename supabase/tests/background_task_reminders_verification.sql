@@ -7,6 +7,9 @@ declare
   lead_user uuid := gen_random_uuid();
   deputy_user uuid := gen_random_uuid();
   volunteer_user uuid := gen_random_uuid();
+  lead_session uuid := gen_random_uuid();
+  deputy_session uuid := gen_random_uuid();
+  volunteer_session uuid := gen_random_uuid();
   svc uuid := gen_random_uuid();
   other_svc uuid := gen_random_uuid();
   lead_assignment uuid := gen_random_uuid();
@@ -48,11 +51,13 @@ begin
      or has_function_privilege('authenticated', 'public.finish_background_task_reminder(uuid, text, integer, timestamptz)', 'execute')
      or not has_function_privilege('service_role', 'public.claim_background_task_reminders(timestamptz, integer)', 'execute')
      or not has_function_privilege('service_role', 'public.take_background_task_reminder(uuid, timestamptz)', 'execute')
-     or has_function_privilege('authenticated', 'public.register_background_reminder_device(uuid,text,text,text,text,timestamptz)', 'execute')
+     or has_function_privilege('authenticated', 'public.register_background_reminder_device(uuid,uuid,text,text,text,text,timestamptz)', 'execute')
      or has_function_privilege('anon', 'public.disable_background_reminder_device(uuid,text,timestamptz)', 'execute')
      or has_function_privilege('authenticated', 'public.background_reminder_open_bindings(timestamptz,uuid,uuid)', 'execute')
-     or not has_function_privilege('service_role', 'public.register_background_reminder_device(uuid,text,text,text,text,timestamptz)', 'execute')
+     or not has_function_privilege('service_role', 'public.register_background_reminder_device(uuid,uuid,text,text,text,text,timestamptz)', 'execute')
      or not has_function_privilege('service_role', 'public.disable_background_reminder_device(uuid,text,timestamptz)', 'execute')
+     or has_schema_privilege('authenticated', 'background_reminder_private', 'USAGE')
+     or has_function_privilege('authenticated', 'background_reminder_private.session_is_live(uuid,uuid,timestamptz)', 'execute')
   then raise exception 'Reminder tables and dispatch functions must be server-only'; end if;
 
   if exists (
@@ -65,6 +70,8 @@ begin
     (lead_user, 'bg-lead-' || lead_user::text || '@example.invalid', '{"display_name":"Test Lead"}'),
     (deputy_user, 'bg-deputy-' || deputy_user::text || '@example.invalid', '{"display_name":"Test Deputy"}'),
     (volunteer_user, 'bg-volunteer-' || volunteer_user::text || '@example.invalid', '{"display_name":"Test Volunteer"}');
+  insert into auth.sessions (id,user_id,created_at,updated_at) values
+    (lead_session,lead_user,opted,opted),(deputy_session,deputy_user,opted,opted),(volunteer_session,volunteer_user,opted,opted);
   update public.profiles set is_active = true where id in (lead_user, deputy_user, volunteer_user);
   insert into public.user_roles (user_id, role) values
     (lead_user,'coordinator'), (deputy_user,'coordinator'), (volunteer_user,'volunteer')
@@ -112,39 +119,42 @@ begin
   select svc, volunteer_assignment, fixture.node_id from unnest(array['__bg_first__','__bg_own__']) as fixture(node_id);
 
   -- Real check-ins, fictional subscription keys. No network operation.
+  if exists(select 1 from public.register_background_reminder_device(lead_user,deputy_session,'主一堂',
+    registration_endpoint,repeat('A',87),repeat('B',22),opted)) then
+    raise exception 'A session owned by another account must not authorize registration'; end if;
   select x.device_id, x.expires_at into registered_device, registration_expiry
-    from public.register_background_reminder_device(lead_user,'主一堂',
+    from public.register_background_reminder_device(lead_user,lead_session,'主一堂',
       registration_endpoint,repeat('A',87),repeat('B',22),opted) x;
   if registered_device is null or registration_expiry is distinct from '2030-01-06 10:45:00+08'::timestamptz
     then raise exception 'Registration must bind the actual service cutoff'; end if;
   if not exists(select 1 from public.background_reminder_devices d
-      where d.id = registered_device and d.user_id = lead_user and d.check_in_id = lead_check
+      where d.id = registered_device and d.user_id = lead_user and d.session_id = lead_session and d.check_in_id = lead_check
       and d.assignment_id = lead_assignment and d.service_id = svc)
     then raise exception 'Registration binding must be server-derived'; end if;
-  if not exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+  if not exists(select 1 from public.register_background_reminder_device(lead_user,lead_session,'主一堂',
       registration_endpoint,repeat('A',87),repeat('B',22),opted + interval '1 minute') r
       where r.device_id = registered_device and r.expires_at = registration_expiry)
     then raise exception 'An unchanged active subscription must be idempotent'; end if;
-  if exists(select 1 from public.register_background_reminder_device(deputy_user,'主一堂',
+  if exists(select 1 from public.register_background_reminder_device(deputy_user,deputy_session,'主一堂',
       registration_endpoint,repeat('A',87),repeat('B',22),opted + interval '1 minute'))
     then raise exception 'Another user must not take over a registered subscription'; end if;
-  if exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+  if exists(select 1 from public.register_background_reminder_device(lead_user,lead_session,'主一堂',
       registration_endpoint,repeat('C',87),repeat('B',22),opted + interval '1 minute'))
     then raise exception 'An existing endpoint must not change keys'; end if;
-  if exists(select 1 from public.register_background_reminder_device(lead_user,'主二堂',
+  if exists(select 1 from public.register_background_reminder_device(lead_user,lead_session,'主二堂',
       'https://web.push.apple.com/wrong-service',repeat('A',87),repeat('B',22),opted))
     then raise exception 'An unchecked-in service must not register a subscription'; end if;
-  if exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+  if exists(select 1 from public.register_background_reminder_device(lead_user,lead_session,'主一堂',
       'https://web.push.apple.com/closed-service',repeat('A',87),repeat('B',22),'2030-01-06 10:45:00+08'))
     then raise exception 'Closed service must not register a subscription'; end if;
   if public.disable_background_reminder_device(deputy_user,registration_endpoint,opted + interval '2 minutes')
     then raise exception 'Another user must not disable a subscription'; end if;
   if not public.disable_background_reminder_device(lead_user,registration_endpoint,opted + interval '2 minutes')
     then raise exception 'Owner must be able to disable their subscription'; end if;
-  if exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+  if exists(select 1 from public.register_background_reminder_device(lead_user,lead_session,'主一堂',
       registration_endpoint,repeat('A',87),repeat('B',22),opted + interval '1 minute'))
     then raise exception 'An older registration must not overwrite a later disable'; end if;
-  if not exists(select 1 from public.register_background_reminder_device(lead_user,'主一堂',
+  if not exists(select 1 from public.register_background_reminder_device(lead_user,lead_session,'主一堂',
       registration_endpoint,repeat('A',87),repeat('B',22),opted + interval '3 minutes') r
       where r.device_id = registered_device)
     then raise exception 'Owner must be able to re-enable their own subscription'; end if;
@@ -155,10 +165,13 @@ begin
 
   -- Fictional endpoints and non-cryptographic placeholder keys: never sent.
   insert into public.background_reminder_devices (
-    id, user_id, check_in_id, service_id, assignment_id, endpoint, p256dh, auth_secret,
+    id, user_id, session_id, check_in_id, service_id, assignment_id, endpoint, p256dh, auth_secret,
     enabled, opted_in_at, expires_at
   )
-  select fixture.id, fixture.user_id, fixture.check_in_id, svc, fixture.assignment_id,
+  select fixture.id, fixture.user_id,
+    case when fixture.user_id = lead_user then lead_session
+      when fixture.user_id = deputy_user then deputy_session else volunteer_session end,
+    fixture.check_in_id, svc, fixture.assignment_id,
     'https://web.push.apple.com/test-' || fixture.id::text, repeat('A',87), repeat('B',22),
     fixture.enabled, opted, fixture.expires_at
   from (values
@@ -237,6 +250,12 @@ begin
     then raise exception 'Inactive account must not receive a reminder'; end if;
   if exists(select 1 from public.background_reminder_candidates('2030-01-06 10:45:01+08') c where c.device_id = lead_device)
     then raise exception 'Lead first-service cutoff must be honored'; end if;
+  delete from auth.sessions where id = lead_session;
+  if exists(select 1 from public.background_reminder_candidates(due) c where c.device_id = lead_device)
+    then raise exception 'Signed-out session must not receive reminders'; end if;
+  if exists(select 1 from public.register_background_reminder_device(lead_user,lead_session,'主一堂',
+    registration_endpoint,repeat('A',87),repeat('B',22),due))
+    then raise exception 'Signed-out session cannot re-register using an old token'; end if;
   update public.worship_services set status = 'completed' where id = svc;
   if exists(select 1 from public.background_reminder_candidates(due))
     then raise exception 'Completed service must not generate reminders'; end if;

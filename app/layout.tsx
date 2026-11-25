@@ -4,6 +4,8 @@ import './globals.css'
 export const metadata = {
   title: '主日崇拜招待',
   description: '主日崇拜招待排程系統',
+  manifest: '/service-app.webmanifest',
+  appleWebApp: { capable: true, title: '主日崇拜招待', statusBarStyle: 'default' },
 }
 
 export default function RootLayout({

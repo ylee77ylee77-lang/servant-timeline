@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { AudioLines, Bell, ChevronDown, ChevronUp } from "lucide-react";
 import { SettingsAccordionCard, type SettingsPanel } from "@/components/profile/SettingsAccordionCard";
+import type { DeviceSyncStatus } from "@/lib/notifications/background-device-client";
 import { MAX_REMINDER_LEAD_MINUTES, formatReminderLeadLabel, normalizeReminderLeadTime, stepReminderLeadTime } from "@/lib/voice/reminder-timing";
 
 type VoiceProfile = "zephyr" | "iapetus";
@@ -26,6 +27,9 @@ type PersonalPreferencesCardsProps = {
   isWakeLockActive: boolean;
   expandedPanel: SettingsPanel | null;
   onToggle: (panel: SettingsPanel) => void;
+  backgroundVibrationStatus?: DeviceSyncStatus | null;
+  onAuthorizeBackgroundVibration?: () => void;
+  onRetryBackgroundVibration?: () => void;
 };
 
 const VOICE_OPTIONS = [
@@ -138,6 +142,9 @@ export function PersonalPreferencesCards({
   onChange,
   expandedPanel,
   onToggle,
+  backgroundVibrationStatus,
+  onAuthorizeBackgroundVibration,
+  onRetryBackgroundVibration,
 }: PersonalPreferencesCardsProps) {
   const selectedVoice = settings.voiceProfile === "iapetus" ? "男聲" : "女聲";
   const selectedDetail = DETAIL_OPTIONS.find((item) => item.value === settings.voiceDetailLevel) ?? DETAIL_OPTIONS[1];
@@ -193,12 +200,19 @@ export function PersonalPreferencesCards({
             <span className="min-w-0">
               <span className="block text-sm font-black text-[#1F2937]">震動提醒</span>
               <span className="mt-0.5 block text-[11px] font-medium leading-4 text-[#7B7B74]">
-                {vibrationCapability === "ios-switch"
+                {backgroundVibrationStatus?.message ?? (vibrationCapability === "ios-switch"
                   ? "iPhone 點選開關可有觸覺回饋；任務到點自動震動需使用系統通知或原生 App。"
                   : vibrationCapability === "none"
                     ? "此瀏覽器不支援任務到點的網頁震動。"
-                    : "進入下一個任務區塊時震動提醒。"}
+                    : "進入下一個任務區塊時震動提醒。")}
               </span>
+              {backgroundVibrationStatus?.action && (settings.vibrationReminderEnabled || backgroundVibrationStatus.action === "retry") && (
+                <button type="button"
+                  onClick={backgroundVibrationStatus.action === "authorize" ? onAuthorizeBackgroundVibration : onRetryBackgroundVibration}
+                  className="mt-1 min-h-8 text-[11px] font-bold text-[#6D55A3] underline">
+                  {backgroundVibrationStatus.action === "authorize" ? "啟用背景通知" : "重新檢查"}
+                </button>
+              )}
             </span>
             <PreferenceSwitch
               label="震動提醒"

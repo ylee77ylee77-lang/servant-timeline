@@ -32,3 +32,5 @@ PR #54 原生開關觸覺回饋、PR #55 主畫面 PWA 通知、PR #56 伺服器
 - 裝置 API 使用既有登入驗證，拒絕跨來源請求及不合法的 P-256 公鑰。正式註冊/撤銷都以伺服器驗證的帳號呼叫 RPC；不回傳端點或私鑰。
 - Dispatch API 僅接受持有獨立伺服器密鑰的排程器，無法指定使用者、任務或時間。資料庫原子 take 與結果紀錄控制重複通知。404/410 撤銷相符的失效訂閱。
 - 目前預覽與正式共用資料庫，故兩支 API 的資料庫操作只允許正式環境；正式註冊／發送還需 ENABLE_BACKGROUND_TASK_REMINDERS=true、獨立正式 VAPID 金鑰及 BACKGROUND_REMINDER_DISPATCH_SECRET。沒有設定任何正式金鑰、Cron、migration 或啟用旗標。測試均使用虛構訂閱與 mocked fetch。
+
+- 登入工作階段綁定：僅在 Auth.getUser 驗證原 Bearer Token 後提取 session_id；資料庫以非公開 schema 的布林函式確認 auth.sessions 的所有權與有效期，不開放 Auth 表查詢。每次任務規劃及 take 均重新驗證，成功登出使舊訂閱失效。

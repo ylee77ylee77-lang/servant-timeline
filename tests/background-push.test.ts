@@ -85,6 +85,7 @@ test("dispatch secret fails closed and routes do not take user-controlled IDs or
   const route = fs.readFileSync("app/api/background-reminders/dispatch/route.ts", "utf8");
   const config = fs.readFileSync("lib/notifications/background-config.ts", "utf8");
   assert.match(device, /p_user_id: user\.userId/);
+  assert.match(device, /p_session_id: sessionId/);
   assert.match(device, /requireActiveUser\(request\)/);
   assert.match(device, /request\.headers\.get\("origin"\) !== request\.nextUrl\.origin/);
   assert.doesNotMatch(device, /p_at:|body\.userId|body\.assignmentId|body\.checkInId/);

@@ -16,6 +16,7 @@ import { Eye, EyeOff, KeyRound, LogIn, LogOut, Loader2 } from "lucide-react";
 import { accountCodeToInternalEmail, normalizeAccountCode } from "@/lib/auth/account-code";
 import { getPublicSupabaseConfig } from "@/lib/supabase/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { stopBackgroundRemindersOnSignOut } from "@/lib/notifications/background-device-client";
 import { normalizeRecoveryName, requiresPasswordChange } from "@/lib/auth/password-reset";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
 import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
@@ -342,6 +343,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setMustChangePassword(false);
       setLoginCode(accountCode);
       setLoginNotice("密碼已更新，請使用新密碼重新登入。");
+      await stopBackgroundRemindersOnSignOut(session?.access_token);
       await getSupabaseBrowserClient().auth.signOut();
     } catch (error) {
       setForcedPasswordIsError(true);
@@ -354,8 +356,10 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = useCallback(async () => {
-    await getSupabaseBrowserClient().auth.signOut();
-  }, []);
+    const stopped = await stopBackgroundRemindersOnSignOut(session?.access_token);
+    const { error } = await getSupabaseBrowserClient().auth.signOut();
+    if (error && !stopped) window.alert("尚未完成登出及背景提醒停止，請確認網路後重試。");
+  }, [session?.access_token]);
 
   // The avatar editor persists changes through the existing authorized PUT
   // endpoint; this only updates the already-loaded profile inside this session.

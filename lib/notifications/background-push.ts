@@ -17,6 +17,23 @@ export type PushKeys = { subject: string; publicKey: string; privateKey: string 
 const services = new Set(["六晚崇", "主一堂", "主二堂"]);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Decode only AFTER the same bearer token has been validated by Auth.getUser.
+ * The SQL registration independently verifies that this session belongs to the user.
+ */
+export function getVerifiedSessionId(authorization: string | null, userId: string): string | null {
+  const token = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
+  if (!token || token.length > 16_384) return null;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    return claims.sub === userId && typeof claims.session_id === "string"
+      && uuidPattern.test(claims.session_id) ? claims.session_id : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isApplePushEndpoint(endpoint: unknown): endpoint is string {
   return typeof endpoint === "string" && endpoint.length <= 2048
     && /^https:\/\/web\.push\.apple\.com\/[A-Za-z0-9_-]+$/.test(endpoint);

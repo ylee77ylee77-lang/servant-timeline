@@ -3,7 +3,7 @@ import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admi
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { isServiceType } from "@/lib/services/catalog";
 import { getBackgroundPushConfig, backgroundRemindersEnabledEnvironment } from "@/lib/notifications/background-config";
-import { isApplePushEndpoint, parseAppleSubscription } from "@/lib/notifications/background-push";
+import { getVerifiedSessionId, isApplePushEndpoint, parseAppleSubscription } from "@/lib/notifications/background-push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,8 +71,10 @@ export async function POST(request: NextRequest) {
     if (!sub || typeof body.serviceType !== "string" || !isServiceType(body.serviceType)) {
       return reply({ error: "訂閱或堂次無效。" }, 400);
     }
+    const sessionId = getVerifiedSessionId(request.headers.get("authorization"), user.userId);
+    if (!sessionId) return reply({ error: "登入階段已失效，請重新登入。" }, 401);
     const { data, error } = await db.rpc("register_background_reminder_device", {
-      p_user_id: user.userId, p_service_type: body.serviceType, p_endpoint: sub.endpoint,
+      p_user_id: user.userId, p_session_id: sessionId, p_service_type: body.serviceType, p_endpoint: sub.endpoint,
       p_p256dh: sub.keys.p256dh, p_auth_secret: sub.keys.auth,
     });
     if (error) return reply({ error: "尚未完成背景提醒註冊，請重試。" }, 503);
