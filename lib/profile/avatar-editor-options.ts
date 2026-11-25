@@ -84,7 +84,7 @@ export function getAvatarEditorGroups(avatar:AvatarConfig,hasMaterialColors:bool
     add("eyewear","眼鏡",[],"請先選擇角色。");
   }
   if(outfitOptions.length){
-    add("outfit","服裝",[{id:"original" as const,label:"原版休閒服"},...outfitOptions].map(option=>choice(option.id,option.label,(avatar.formalOutfit?.id??"original")===option.id,selectAvatarFormalOutfit(avatar,option.id))));
+    add("outfit","服裝",[{id:"original" as const,label:"休閒服"},...outfitOptions].map(option=>choice(option.id,option.label,(avatar.formalOutfit?.id??"original")===option.id,selectAvatarFormalOutfit(avatar,option.id))));
   }
   add("background","背景",backgrounds.map(option=>choice(option.value,option.label,avatar.background===option.value,{...avatar,background:option.value})));
   add("pet","陪伴動物",pets.map(option=>choice(option.value,option.label,avatar.pet===option.value,{...avatar,pet:option.value})));

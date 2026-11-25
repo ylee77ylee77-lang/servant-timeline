@@ -53,6 +53,7 @@ test("all outfit, background, companion and eyewear text choices keep original s
   const base=normalizeAvatarConfig({style:"feminine",glasses:true,lens:{transparency:35},pet:"lion",background:"sky"});
   const groups=getAvatarEditorGroups(base,true);
   assert.equal(groups.find(g=>g.id==="outfit")?.choices.length,6);
+  assert.equal(groups.find(g=>g.id==="outfit")?.choices.find(c=>c.id==="original")?.label,"休閒服");
   assert.equal(groups.find(g=>g.id==="background")?.choices.length,5);
   assert.equal(groups.find(g=>g.id==="pet")?.choices.length,5);
   assert.equal(groups.find(g=>g.id==="eyewear")?.choices.length,4);
