@@ -96,9 +96,20 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
         {male ? (
           <>
             {jacket && <path d={open ? "M183 388L259 424L342 388L313 460L288 512H225L203 459Z" : "M189 388L259 424L338 388L309 466L289 512H223L211 466Z"} fill={paint(innerId)} />}
-            <path d="M181 389Q259 449 346 388L349 400Q261 458 177 401Z" fill={collar.deep} opacity=".34" />
-            <path d="M253 428Q262 433 270 427L272 512H248Z" fill={paint(collarId + "-fold")} />
-            <path d="M249 450L248 512M270 451L272 512" stroke={collar.dark} strokeWidth="1.25" opacity=".42" />
+            {open ? (
+              <>
+                {/* Casual blazer: a clean knit inner layer, not a second buttoned shirt. */}
+                <path d="M183 389Q259 456 342 389L347 400Q260 468 177 401Z" fill={paint(innerId + "-fold")} />
+                <path d="M187 398Q260 462 339 398" fill="none" stroke={inner.deep} strokeWidth="4" opacity=".32" />
+                <path d="M192 399Q261 458 335 399" fill="none" stroke={inner.edge} strokeWidth="1.8" opacity=".67" />
+              </>
+            ) : (
+              <>
+                <path d="M181 389Q259 449 346 388L349 400Q261 458 177 401Z" fill={collar.deep} opacity=".34" />
+                <path d="M253 428Q262 433 270 427L272 512H248Z" fill={paint(collarId + "-fold")} />
+                <path d="M249 450L248 512M270 451L272 512" stroke={collar.dark} strokeWidth="1.25" opacity=".42" />
+              </>
+            )}
             {plan.id === "suit-tie" ? (
               <g strokeLinejoin="round">
                 <path d="M250 442L268 442L284 512H234Z" fill={tie.deep} opacity=".38" transform="translate(2 3)" />
@@ -107,14 +118,18 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
                 <path d="M245 425Q259 421 272 425L278 440Q269 450 260 453Q249 450 241 441Z" fill={paint(tieId + "-fold")} stroke={tie.deep} strokeWidth="1.15" />
                 <path d="M247 428Q260 425 270 428" stroke={tie.edge} strokeWidth="1.5" fill="none" opacity=".7" />
               </g>
-            ) : (
+            ) : !open ? (
               <>
-                <Button cx={261} cy={open ? 477 : 466} shades={collar} />
-                <Button cx={261} cy={open ? 503 : 496} shades={collar} />
+                <Button cx={261} cy={466} shades={collar} />
+                <Button cx={261} cy={496} shades={collar} />
+              </>
+            ) : null}
+            {!open && (
+              <>
+                <Fold d="M189 388Q218 409 258 426L230 453Q200 437 168 410Z" edge="M169 410Q199 438 230 453L258 426" id={collarId} shades={collar} />
+                <Fold d="M338 388Q309 409 261 426L288 453Q324 436 353 409Z" edge="M353 409Q324 436 288 453L261 426" id={collarId} shades={collar} />
               </>
             )}
-            <Fold d={open ? "M189 388Q209 410 253 432L225 463Q197 444 167 411Z" : "M189 388Q218 409 258 426L230 453Q200 437 168 410Z"} edge={open ? "M168 411Q198 445 225 463L253 432" : "M169 410Q199 438 230 453L258 426"} id={collarId} shades={collar} />
-            <Fold d={open ? "M338 388Q310 413 265 432L294 463Q327 442 356 410Z" : "M338 388Q309 409 261 426L288 453Q324 436 353 409Z"} edge={open ? "M356 410Q326 443 294 463L265 432" : "M353 409Q324 436 288 453L261 426"} id={collarId} shades={collar} />
             {jacket && (
               <>
                 <Fold d="M189 388Q159 402 131 425L173 441L154 463Q193 490 232 512H254Q229 472 212 444Z" edge="M132 425L173 441L154 463Q194 490 232 512" id={mainId} shades={primary} />
@@ -148,14 +163,15 @@ export function AvatarFormalOutfitArtwork({ plan, id }: { plan: Plan; id: string
           </>
         ) : (
           <>
-            {/* Sculpted neckline and overlapping satin panel. */}
-            <path d="M196 419Q224 458 276 462Q325 458 358 419L365 428Q331 470 276 473Q219 470 189 429Z" fill={primary.deep} opacity=".28" />
-            <Fold d="M210 408Q237 442 276 445Q317 443 344 407L359 419Q326 457 276 463Q226 458 196 420Z" edge="M196 420Q226 458 276 463Q326 457 359 419" id={mainId} shades={primary} />
-            <path d="M349 435Q319 465 276 478Q225 492 188 512H316Q335 481 349 435Z" fill={primary.deep} opacity=".22" />
-            <path d="M353 434Q319 464 281 478Q239 491 200 512H321Q340 481 353 434Z" fill={paint(mainId + "-fold")} />
-            <path d="M350 440Q321 466 281 480Q237 494 205 512" fill="none" stroke={primary.edge} strokeWidth="2.1" opacity=".62" strokeLinecap="round" />
-            <path d="M339 452Q312 480 275 489Q246 498 230 512M344 462Q325 490 293 500" fill="none" stroke={primary.dark} strokeWidth="2.1" opacity=".27" strokeLinecap="round" />
-            <path d="M339 450Q312 478 275 487Q246 496 230 511" fill="none" stroke={primary.light} strokeWidth="1.3" opacity=".35" strokeLinecap="round" />
+            {/* Asymmetric wrap dress with broad overlapping satin folds,
+                positioned high enough to be visible inside the round crop. */}
+            <path d="M201 413Q237 437 276 439Q312 435 349 407L367 423Q324 455 283 470L222 512H170Q215 470 254 455Q220 444 189 432Z" fill={primary.deep} opacity=".28" />
+            <Fold d="M210 408Q240 434 277 440Q315 434 344 407L360 421Q324 455 283 468Q243 455 193 425Z" edge="M193 425Q239 454 283 468Q325 454 360 421" id={mainId} shades={primary} />
+            <path d="M349 421C324 449 294 464 262 476Q218 491 194 512H332Q342 473 349 421Z" fill={primary.deep} opacity=".45" />
+            <path d="M355 420C325 448 295 460 266 470Q223 485 202 512H331Q340 472 355 420Z" fill={paint(mainId + "-fold")} />
+            <path d="M353 424C325 451 294 464 266 474Q226 488 205 512" fill="none" stroke={primary.edge} strokeWidth="3.1" opacity=".76" strokeLinecap="round" />
+            <path d="M343 441Q315 474 279 485Q249 497 236 512M340 455Q320 484 292 496" fill="none" stroke={primary.dark} strokeWidth="3.2" opacity=".42" strokeLinecap="round" />
+            <path d="M343 438Q315 471 279 482Q249 494 236 510" fill="none" stroke={primary.light} strokeWidth="1.8" opacity=".55" strokeLinecap="round" />
           </>
         )}
       </g>
