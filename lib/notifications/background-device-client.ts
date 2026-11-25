@@ -53,9 +53,14 @@ function clearReminderConsent() {
 
 function serial<T>(job: () => Promise<T>): Promise<T> {
   // Browser-wide lock where available; also serialize operations in this page.
-  const run = () => typeof navigator !== "undefined" && navigator.locks
-    ? navigator.locks.request("shekinah-background-reminder-device", job)
-    : job();
+  const run = async (): Promise<T> => {
+    if (typeof navigator !== "undefined" && navigator.locks) {
+      // The DOM declaration can infer a nested promise; await flattens the
+      // browser's actual result while retaining the lock until job settles.
+      return await navigator.locks.request("shekinah-background-reminder-device", job);
+    }
+    return await job();
+  };
   const result = queue.then(run, run);
   queue = result.then(() => undefined, () => undefined);
   return result;
