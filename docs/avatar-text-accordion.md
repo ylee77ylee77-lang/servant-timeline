@@ -1,0 +1,5 @@
+# Avatar text accordion
+
+- Shared registration/profile editor preserves the single sticky preview. All role, face, hairstyle, eyewear, clothing, color, background and companion options are independent disclosure cards, one open section at a time. Existing users start collapsed; first-time neutral users start with role open. Selection updates the local preview; opening another card closes the previous card. Existing color wheel and transparency slider remain actual controls within the open card. No thumbnail or swatch outside the preview.
+- UI-only labels: 活潑型 / 自然型, 蓬鬆捲髮 / 波浪長髮 / 立體蓬髮 / 自然中長髮; 角色, 陪伴動物. No asset paths, stored identifiers, data or authorization changes. Existing display mode and save flow stay intact. Icon and tone picker also use two text cards; manual base chooser no thumbnails.
+- Unit tests cover selection/IDs and the shared toggle; real server-rendered markup checks closed sections, first role, no thumbnails, and lens slider hidden until open. Full regression CI and iPhone review still required.

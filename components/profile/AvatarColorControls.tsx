@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { AvatarOptionCard } from "@/components/profile/AvatarOptionCard";
 import {
   AVATAR_COLOR_LABELS,
   AVATAR_COLOR_WHEEL_SIZE,
@@ -196,13 +197,17 @@ export function AvatarColorControls({
   values,
   onChange,
   lensTransparency,
+  openPart,
+  onTogglePart,
 }: {
   channels: readonly AvatarColorChannel[];
   values: ColorValues;
   onChange: (part: AvatarPickerPart, value: AvatarColorHex | null) => void;
   lensTransparency?: {value:number;custom:boolean;onChange:(value:number)=>void;onReset:()=>void};
+  openPart: AvatarPickerPart | null;
+  onTogglePart: (part: AvatarPickerPart) => void;
 }) {
-  const [openPart, setOpenPart] = useState<AvatarPickerPart | null>(null);
+  // Controlled by the editor, so opening a color closes every other option card.
   const [drafts, setDrafts] = useState<DraftCache>({});
   const id = useId();
 
@@ -223,40 +228,23 @@ export function AvatarColorControls({
   }
 
   return (
-    <div className="space-y-2">
+    <>
       {channels.map((channel) => {
-        const { part, original } = channel;
-        const value = values[part];
-        const color = value ?? original;
-        const cached = drafts[part];
-        const open = part === openPart;
-        const panelId = `${id}-${part}`;
+        const {part,original}=channel;
+        const value=values[part];
+        const color=value??original;
+        const cached=drafts[part];
+        const open=part===openPart;
+        const summary=part==="lens"&&lensTransparency
+          ? `${lensTransparency.value}% 透明`
+          : value===undefined?"原色":"自訂色彩";
         return (
-          <section key={part} className="rounded-2xl border border-[#E6EAF0] bg-white">
-            <button
-              type="button"
-              aria-expanded={open}
-              aria-controls={panelId}
-              aria-label={`${AVATAR_COLOR_LABELS[part]}，${value === undefined ? "原色" : "自訂色彩"} ${color}`}
-              onClick={() => setOpenPart((previous) => previous === part ? null : part)}
-              className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm font-bold text-[#1F2937]"
-            >
-              <span className="flex-1">{AVATAR_COLOR_LABELS[part]}</span>
-              <span aria-hidden="true" className="size-7 shrink-0 rounded-full border border-black/10" style={{ backgroundColor: color }} />
-              <span aria-hidden="true" className="text-[#6D55A3]">{open ? "−" : "+"}</span>
-            </button>
-            <div id={panelId} hidden={!open}>
-              {open && (
-                <ColorWheel
-                  channel={channel}
-                  color={color}
-                  custom={value !== undefined}
-                  selection={value !== undefined && cached?.color === value ? cached.selection : avatarColorSelectionFromHex(part, color)}
-                  onChange={(next) => changeColor(part, next)}
-                />
-              )}
-            </div>
-            {part === "lens" && lensTransparency && (
+          <AvatarOptionCard key={part} title={AVATAR_COLOR_LABELS[part]} summary={summary}
+            expanded={open} onToggle={()=>onTogglePart(part)}>
+            <ColorWheel channel={channel} color={color} custom={value!==undefined}
+              selection={value!==undefined&&cached?.color===value?cached.selection:avatarColorSelectionFromHex(part,color)}
+              onChange={next=>changeColor(part,next)}/>
+            {part==="lens"&&lensTransparency&&(
               <div className="space-y-1.5 border-t border-[#E6EAF0] px-3 pb-3 pt-2">
                 <label className="flex items-center justify-between gap-2 text-sm font-bold text-[#1F2937]" htmlFor={`${id}-lens-transparency`}>
                   鏡片透明度 <span className="tabular-nums text-[#6D55A3]">{lensTransparency.value}%</span>
@@ -264,14 +252,14 @@ export function AvatarColorControls({
                 <input id={`${id}-lens-transparency`} type="range" min={0} max={100} step={5} value={lensTransparency.value}
                   className="h-8 w-full accent-[#6D55A3]" onChange={event=>lensTransparency.onChange(Number(event.currentTarget.value))}/>
                 <div className="flex justify-between text-xs text-[#7B7B74]"><span>不透明</span><span>完全透明</span></div>
-                {lensTransparency.value===100 && <p className="text-xs text-[#7B7B74]">降低透明度即可顯示鏡片色。</p>}
+                {lensTransparency.value===100&&<p className="text-xs text-[#7B7B74]">降低透明度即可顯示鏡片色。</p>}
                 <button type="button" disabled={!lensTransparency.custom} onClick={lensTransparency.onReset}
                   className="min-h-11 rounded-xl border border-[#E6EAF0] px-3 text-xs font-bold text-[#6D55A3] disabled:opacity-50">還原透明鏡片</button>
               </div>
             )}
-          </section>
+          </AvatarOptionCard>
         );
       })}
-    </div>
+    </>
   );
 }
