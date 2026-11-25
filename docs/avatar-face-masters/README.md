@@ -148,3 +148,31 @@ The new hair and eye components are still candidates; visual acceptance,
 full formal/casual outfit alignment, application catalog and shared renderer
 integration, persistence and iPhone testing remain necessary. Existing
 runtime, main, and database are unchanged.
+
+## Candidate garment fitting
+
+CI #279 passed all preceding candidate eyewear checks (72 sizes, 18
+full-source protection checks and 18 combined tint checks). The new fit
+module aligns the existing ten garment artworks to the six candidate
+portraits. Only the garment is transformed; the face is never warped. The
+optional artwork fit retains the released default path and transform when
+omitted. Source-specific head and hair-tip cutouts preserve the complete
+upper portrait. An expanded fabric field is composited only into the
+source silhouette outside that cutout, preserving the source alpha.
+
+Local Pillow/CairoSVG diagnostics confirmed the six cutout shapes, exact
+preservation above source y=390 and unchanged alpha. The diagnostic uses a
+plain fill, not the actual garment artwork. The new offline CI harness
+renders the actual React AvatarFormalOutfitArtwork, checks 30 full-source
+fits, 120 display-size combinations (72 formal, 48 casual), 45 individual
+clothing/lining/tie color trials and six combined person/eyewear/outfit
+color trials; it exports independent-outfit-review.png. The CI results and
+actual garment visual acceptance are pending. The neckline fit intentionally
+replaces part of the lower neck where a higher collar would sit. The
+source silhouette retains any existing antialiased/soft donor edges.
+
+Exact raster blending here is a QA proof, not the browser implementation.
+Runtime registration and a shared renderer composition that matches this
+proof still need implementation and device testing. The existing garment
+artwork default is unchanged; no new portrait is enabled or persisted, and
+no database or main branch change is included.
