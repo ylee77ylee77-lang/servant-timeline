@@ -1,6 +1,6 @@
 # 服事演練｜開發與驗收規格
 
-狀態：第一階段草稿，只包含可獨立驗證的時間規則與資格判斷。尚無正式可操作入口，尚無資料庫 migration、API、推播或介面接線。不得以此分支的單元測試代替上線驗收。
+狀態：開發草稿。核心時間與資格規則已建立；第二階段新增獨立資料表及管理員交易 RPC 的 SQL 草稿與資料庫驗證。尚未建立正式 migration 檔名、未接 API／介面／推播，禁止合併。不得以單元測試代替上線驗收。
 
 ## 已確認的產品方向
 
@@ -15,7 +15,13 @@
 
 管理員按開始時以伺服器記錄 startsAt，按結束時記錄 endedAt，未結束即保持開放（每次操作仍需通過帳號、角色、成員及正式報到等安全條件）。不使用 expiresAt 或固定演練時長。複製共用流程的有效任務，按來源時間分組；同時任務保留同組，按 sort_order 排序。演練任務時刻與場次生命週期分離：工程暫定從開始時刻向上對齊分鐘後第六分鐘安排首區塊，後續每兩分鐘安排下一區塊，讓預設五分鐘提前提醒有測試空間，不截斷長流程。此間距只是待驗收的任務排程規則，不是演練時限；可隨後調整。最後區塊後依然可以操作清單、回顧流程，不自動重播或重新排程。使用絕對時間戳，不修改手機時鐘或正式場次。早於開始或錯過發送時間窗的提醒不補發。原始節點 ID 僅作參考，不得當成演練寫入目標。
 
-## 下一階段：資料庫與伺服器（尚未實作）
+## 第二階段：資料庫管理基礎（SQL 草稿，待 CI）
+
+- 新增 service_rehearsals、members、nodes、items、item_states；使用獨立 UUID、外鍵與 RLS，禁止 anon/authenticated 直接存取。暫定同時間只有一個開放中的演練，避免多位管理員重複啟動。管理員可在演練中補加入已審核的總招，並撤銷資格。
+- 管理員開始、補加入、撤銷、結束 RPC 皆使用既有 live auth session 檢查及當前角色；整個開始交易複製共用流程及清單快照，不寫正式表。結束可安全重複呼叫，並清除該場次的演練報到欄位。任務狀態寫入暫未授權，直到參與者 RPC 與正式報到互斥機制完成。
+- 本機無 Supabase CLI／Postgres，因此由既有 CI 的臨時步驟執行 supabase migration new 產生正式遷移檔名，在隔離資料庫驗證 supabase/drafts/service-rehearsal-foundation.sql；通過後移至 migrations 並移除臨時 CI 步驟。無正式資料庫變更。
+
+## 後續：資料庫與伺服器接線（尚未完成）
 
 1. 建立獨立 rehearsal sessions、memberships、task snapshots、task states、device subscriptions、delivery ledger。所有演練寫入使用獨立 UUID 及演練 ID。不得將演練列放入 worship_services、service_assignments、service_check_ins 或正式 checklist states。
 2. 管理員建立、批次指派、開始、撤銷、結束使用 requireAdmin。參與者狀態及操作使用 requireActiveUser，另核對 live auth session、最新角色、啟用狀態、指定成員、伺服器時間、實際正式報到。不得接受 client 自述角色、時間、網路或會員身份。
