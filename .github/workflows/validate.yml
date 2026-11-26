@@ -116,6 +116,23 @@ jobs:
           version: 2.101.0
           github-token: ${{ github.token }}
 
+      - name: Generate migration name for staged admin timeline test
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration new admin_timeline_vibration_test
+          migration="$(find supabase/migrations -name '*_admin_timeline_vibration_test.sql' -print -quit)"
+          test -n "$migration"
+          cp supabase/staged/admin_timeline_vibration_test.sql "$migration"
+          echo "Generated migration: $migration"
+
+      - name: Upload generated admin timeline migration
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-timeline-migration
+          path: supabase/migrations/*_admin_timeline_vibration_test.sql
+          if-no-files-found: error
+
       - name: Normalize disposable local Supabase config for stable CLI
         shell: bash
         run: |
