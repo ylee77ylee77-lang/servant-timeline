@@ -4,7 +4,7 @@ This branch only changes self-service registration and the server-side contact-e
 
 Before merging:
 - Apply the CLI-generated versioned migration `20261126040922_registration_email_verification.sql` to an isolated database first. Never apply to production as part of a build.
-- Test migration and SQL authorization on an isolated Supabase database, including lint/build/Node tests. Review security advisors.
+- Test migration and SQL authorization on an isolated Supabase database, including lint/build/Node tests. The CI-only registration integration starts Next.js against the disposable database, exercises real API routes and registration claims with seeded challenges, and verifies SMTP failure without sending email. Review security advisors.
 - Configure a randomly generated, at least 32-byte server-only secret in `REGISTRATION_VERIFICATION_SECRET` for each target environment. Do not use `NEXT_PUBLIC_` or commit any value. Keep the existing Gmail SMTP settings. Use an isolated Supabase project and sender/recipient for preview email tests; do not create test accounts in production.
 - Preview email link in Gmail and Apple Mail on iPhone and Android; test browser continuation, six-digit copy/paste, leading zero, wrong/expired codes, 60-second resend, 5-attempt lock, changing email, scanner/link rewriting, duplicate submits, pending administrator approval, and old login/account recovery.
 - Public email-send limits are 30 attempts per rolling day globally, 5 per hour per address, 60 seconds between sends to one address/session, and 15 per ten minutes per trusted client source. Failed sends count toward quota. Review limits before a large volunteer registration event.

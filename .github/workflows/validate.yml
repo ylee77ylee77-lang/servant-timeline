@@ -220,6 +220,17 @@ jobs:
           export BACKGROUND_REMINDER_LOCAL_TEST=1
           node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/verify-background-reminders-integration.mjs
 
+      - name: Verify registration API against disposable Supabase
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env)"
+          export LOCAL_SUPABASE_URL="$API_URL"
+          export LOCAL_SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          export LOCAL_SUPABASE_ANON_KEY="$ANON_KEY"
+          export REGISTRATION_LOCAL_TEST=1
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/verify-registration-integration.mjs
+
       - name: Review local database security advisors
         shell: bash
         run: |
