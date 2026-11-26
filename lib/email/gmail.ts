@@ -109,16 +109,17 @@ async function writeCommand(
 }
 
 async function sendGmailMessage({
-  toEmail, subject, textContent, htmlContent,
+  toEmail, subject, textContent, htmlContent, senderNameOverride,
 }: {
   toEmail: string;
   subject: string;
   textContent: string;
   htmlContent?: string;
+  senderNameOverride?: string;
 }) {
   const smtpUser = normalizeContactEmail(process.env.GMAIL_SMTP_USER);
   const appPassword = String(process.env.GMAIL_APP_PASSWORD ?? "").replace(/\s+/g, "");
-  const senderName = String(process.env.GMAIL_SENDER_NAME ?? "夏凱納招待服事").trim();
+  const senderName = String(senderNameOverride ?? process.env.GMAIL_SENDER_NAME ?? "夏凱納招待服事").trim();
   const recipient = normalizeContactEmail(toEmail);
 
   if (
@@ -232,12 +233,11 @@ export async function sendAccountRecoveryEmail({
 }
 
 export async function sendRegistrationVerificationEmail({
-  toEmail, code, verifyUrl, copyUrl,
+  toEmail, code, verifyUrl,
 }: {
   toEmail: string;
   code: string;
   verifyUrl: string;
-  copyUrl: string;
 }) {
-  return sendGmailMessage({ toEmail, ...registrationEmailContent({ code, verifyUrl, copyUrl }) });
+  return sendGmailMessage({ toEmail, senderNameOverride: "夏凱納招待服事", ...registrationEmailContent({ code, verifyUrl }) });
 }

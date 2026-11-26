@@ -116,20 +116,6 @@ jobs:
           version: 2.101.0
           github-token: ${{ github.token }}
 
-      # Temporary generation step; replace the staged file with the CLI-created
-      # migration path before merging. The database job still tests that file.
-      - name: Generate cross-context registration migration
-        if: hashFiles('supabase/registration-cross-context-sync.sql') != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          supabase migration new --help
-          supabase migration new registration_cross_context_sync
-          migration="$(find supabase/migrations -name '*_registration_cross_context_sync.sql' -print -quit)"
-          test -n "$migration"
-          cp supabase/registration-cross-context-sync.sql "$migration"
-          echo "GENERATED_REGISTRATION_SYNC_MIGRATION=$migration"
-
       - name: Normalize disposable local Supabase config for stable CLI
         shell: bash
         run: |

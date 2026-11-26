@@ -68,7 +68,6 @@ export async function POST(request: NextRequest) {
         await sendRegistrationVerificationEmail({
           toEmail: contactEmail, code,
           verifyUrl: registrationLink(origin, "verify", link),
-          copyUrl: registrationLink(origin, "copy", code),
         });
       } catch {
         await supabase.from("registration_email_challenges").update({ status: "invalidated" })

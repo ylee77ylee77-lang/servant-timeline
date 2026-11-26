@@ -47,13 +47,16 @@ test("email has branded accessible HTML, a selectable code and plaintext fallbac
   const content = registrationEmailContent({
     code: "000012",
     verifyUrl: "https://example.test/?registration=verify#token=example",
-    copyUrl: "https://example.test/?registration=copy#code=000012",
   });
   assert.match(content.htmlContent, /#00B8B8/);
   assert.match(content.htmlContent, /#785AA5/);
   assert.match(content.htmlContent, /#7A7A73/);
   assert.match(content.htmlContent, />000012</);
-  assert.match(content.htmlContent, /複製驗證碼/);
+  assert.match(content.htmlContent, /長按驗證碼複製/);
+  assert.equal((content.htmlContent.match(/<a\s+href=/gi) ?? []).length, 1);
+  assert.equal((content.textContent.match(/https:\/\//g) ?? []).length, 1);
+  assert.doesNotMatch(content.htmlContent, /registration=copy|<img\b|<button\b/i);
+  assert.doesNotMatch(content.textContent, /registration=copy/);
   assert.match(content.textContent, /000012/);
   assert.match(content.textContent, /驗證有效期限為 10 分鐘/);
   assert.doesNotMatch(content.htmlContent, /<script|onclick=/i);
