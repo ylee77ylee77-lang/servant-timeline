@@ -124,6 +124,8 @@ async function sendGmailMessage({
   if (
     !isValidContactEmail(smtpUser)
     || !isValidContactEmail(recipient)
+    || /[<>]/.test(recipient)
+    || /[<>]/.test(smtpUser)
     || appPassword.length !== 16
   ) {
     throw new Error("Gmail SMTP is not configured.");

@@ -4,8 +4,8 @@ export function registrationEmailContent({ code, verifyUrl, copyUrl }: {
   copyUrl: string;
 }) {
   // The URLs originate only from the server's trusted application origin.
-  const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] || char);
+  const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => entities[char] || char);
   const verify = escapeHtml(verifyUrl);
   const copy = escapeHtml(copyUrl);
   const otp = escapeHtml(code);

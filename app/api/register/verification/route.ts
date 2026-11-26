@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth/registration-verification-server";
 import { sendRegistrationVerificationEmail } from "@/lib/email/gmail";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
+import { getRequestClientIp } from "@/lib/network/church-wifi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,11 +48,15 @@ export async function POST(request: NextRequest) {
       const link = createRegistrationToken();
       const code = createRegistrationCode();
       const digest = registrationDigest(session);
-      const codeDigest = registrationCodeDigest(process.env.REGISTRATION_VERIFICATION_SECRET || "", digest, code);
+      const secret = process.env.REGISTRATION_VERIFICATION_SECRET || "";
+      const codeDigest = registrationCodeDigest(secret, digest, code);
+      const ip = getRequestClientIp(request);
+      const sourceDigest = ip ? registrationCodeDigest(secret, "source", ip) : "";
       const origin = registrationMailOrigin();
       const { data: result, error } = await supabase.rpc("registration_email_start", {
         p_old_session: sessionDigest, p_session: digest, p_link: registrationDigest(link),
         p_code: codeDigest, p_display_name: displayName, p_account_code: accountCode, p_contact_email: contactEmail,
+        p_source: sourceDigest,
       });
       if (error) throw error;
       if (result !== "created") {

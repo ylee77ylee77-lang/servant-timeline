@@ -86,6 +86,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [registrationCopyCode, setRegistrationCopyCode] = useState("");
   const [registrationCopyMessage, setRegistrationCopyMessage] = useState("");
   const registrationRequestInFlight = useRef(false);
+  const registrationMailHandled = useRef(false);
   const registrationCopyInput = useRef<HTMLInputElement>(null);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegistrationPassword, setShowRegistrationPassword] = useState(false);
@@ -274,6 +275,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const restoreRegistration = useCallback(async (open: boolean) => {
     if (registrationRequestInFlight.current) return;
     registrationRequestInFlight.current = true;
+    setRegistrationEmailBusy(true);
     try {
       const response = await fetch("/api/register/verification", {
         credentials: "same-origin", cache: "no-store",
@@ -286,7 +288,10 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         setShowPasswordReset(false);
       }
     } catch { /* Keep existing fields when temporarily offline. */ }
-    finally { registrationRequestInFlight.current = false; }
+    finally {
+      registrationRequestInFlight.current = false;
+      setRegistrationEmailBusy(false);
+    }
   }, [applyRegistrationDraft]);
 
   useEffect(() => {
@@ -297,6 +302,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const href = window.location.href;
       const mail = readRegistrationMailLink(href);
       if (new URL(href).searchParams.has("registration")) {
+        registrationMailHandled.current = true;
         window.history.replaceState(window.history.state, "", cleanRegistrationMailLink(href));
         if (mail?.mode === "copy") {
           setRegistrationCopyCode(mail.value);
@@ -313,16 +319,24 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [requestRegistrationEmail, restoreRegistration]);
+
+  useEffect(() => {
+    if (isLoading || session) return;
+    const timer = window.setTimeout(() => {
+      if (registrationMailHandled.current) return;
       try {
         if (window.location.pathname === "/" && window.localStorage.getItem(REGISTRATION_PROGRESS_KEY)) void restoreRegistration(true);
       } catch { /* Restore is also available from the registration button. */ }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [requestRegistrationEmail, restoreRegistration]);
+  }, [isLoading, session, restoreRegistration]);
 
   const hasRegistrationDraft = Boolean(registrationDraft);
   useEffect(() => {
-    if (!showRegistration || !hasRegistrationDraft) return;
+    if (!showRegistration || !hasRegistrationDraft || isRegistrationSubmitting) return;
     const refresh = () => {
       if (document.visibilityState === "visible") void restoreRegistration(false);
     };
@@ -334,7 +348,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, [showRegistration, hasRegistrationDraft, restoreRegistration]);
+  }, [showRegistration, hasRegistrationDraft, isRegistrationSubmitting, restoreRegistration]);
 
   const registrationVerified = registrationDraft?.status === "verified"
     && Date.parse(registrationDraft.expiresAt) > registrationClock;

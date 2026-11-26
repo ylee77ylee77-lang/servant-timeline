@@ -128,6 +128,20 @@ jobs:
           sed -i '/^\[auth\.email\]$/,/^\[/s/^enable_signup = false$/enable_signup = true/' supabase/config.toml
           python3 -c 'import tomllib; a=tomllib.load(open("supabase/config.toml","rb"))["auth"]; assert a["enable_signup"] is False and a["email"]["enable_signup"] is True'
 
+      # Temporary: generate the actual migration path using the installed CLI.
+      # Remove this step once the generated path is committed to the branch.
+      - name: Generate registration migration in isolated checkout
+        if: hashFiles('supabase/registration-email-verification.sql') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration new --help
+          supabase migration new registration_email_verification
+          migration="$(find supabase/migrations -name '*_registration_email_verification.sql' -print -quit)"
+          test -n "$migration"
+          cp supabase/registration-email-verification.sql "$migration"
+          echo "GENERATED_REGISTRATION_MIGRATION=$migration"
+
       - name: Start isolated local Supabase and apply migrations
         id: supabase_start
         shell: bash
