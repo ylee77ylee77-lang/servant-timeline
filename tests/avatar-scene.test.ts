@@ -185,7 +185,8 @@ test("registration and profile share the final short display labels and icon pic
   assert.match(picker, /選擇圖示/);
   assert.match(picker, /色調/);
   assert.match(registration, /title="大頭貼"/);
-  assert.match(registration, /summary=\{\["選填"/);
+  assert.match(registration, /summary="選填"/);
+  assert.doesNotMatch(registration, /summary=[^\n]*選填[^\n]*AVATAR_DISPLAY_LABELS/);
   assert.doesNotMatch(registration, /系統預設圖示|自訂3D大頭貼/);
 });
 

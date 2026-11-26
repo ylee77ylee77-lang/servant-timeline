@@ -27,7 +27,7 @@ import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
 import { SettingsAccordionCard } from "@/components/profile/SettingsAccordionCard";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
-import { AVATAR_DISPLAY_LABELS, getDefaultAvatarConfig, normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
+import { getDefaultAvatarConfig, getDefaultRegistrationAvatarConfig, normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 
 export type AppRole = "volunteer" | "coordinator" | "admin";
 
@@ -74,7 +74,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [registrationContactEmail, setRegistrationContactEmail] = useState("");
   const [registrationPassword, setRegistrationPassword] = useState("");
   const [registrationPasswordConfirm, setRegistrationPasswordConfirm] = useState("");
-  const [registrationAvatar, setRegistrationAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
+  const [registrationAvatar, setRegistrationAvatar] = useState<AvatarConfig>(getDefaultRegistrationAvatarConfig);
   const [registrationAvatarOpen, setRegistrationAvatarOpen] = useState(false);
   const [registrationMessage, setRegistrationMessage] = useState("");
   const [registrationIsError, setRegistrationIsError] = useState(false);
@@ -258,7 +258,6 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (!response.ok) throw new Error(data?.error || "目前無法完成驗證，請稍後再試。");
       if (body.action === "send") setRegistrationMessage("驗證信已寄出，請開啟信件或貼上驗證碼。");
-      if (body.action === "verify-link" || body.action === "verify-code") setRegistrationMessage("電子郵件驗證成功");
       setRegistrationOtp("");
       return true;
     } catch (error) {
@@ -523,7 +522,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setRegistrationContactEmail("");
       setRegistrationPassword("");
       setRegistrationPasswordConfirm("");
-      setRegistrationAvatar(getDefaultAvatarConfig());
+      setRegistrationAvatar(getDefaultRegistrationAvatarConfig());
       setRegistrationAvatarOpen(false);
     } catch (error) {
       setRegistrationIsError(true);
@@ -715,8 +714,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
               <h1 className="mt-2 text-2xl font-black text-[#1F2937]">註冊新帳號</h1>
               <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
-                {registrationVerified ? "電子郵件已驗證，請繼續完成設定。註冊後需由管理員啟用。"
-                  : registrationVerifiedElsewhere ? "電子郵件已在其他介面完成驗證。"
+                {registrationVerified || registrationVerifiedElsewhere ? "註冊後需由管理員啟用帳號。"
                   : registrationUsedElsewhere ? "請確認另一個介面的註冊結果。"
                   : "先完成電子郵件驗證，再設定密碼與大頭貼。註冊後需由管理員啟用。"}
               </p>
@@ -761,35 +759,30 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
             {registrationDraft && (
               <section className="mt-4 rounded-2xl border border-[#785AA5]/15 bg-[#F6F3FA] p-4">
-                {registrationVerified ? (
-                  <div className="flex items-center gap-2 font-bold text-[#007D7D]">
-                    <span aria-hidden="true">✓</span> 電子郵件已驗證
-                  </div>
-                ) : registrationUsedElsewhere ? (
-                  <p role="status" className="text-sm font-bold leading-6 text-[#007D7D]">
-                    註冊資格已在其他介面使用，請確認原介面的註冊結果，再返回登入。
-                  </p>
-                ) : registrationVerifiedElsewhere ? (
+                {registrationVerified || registrationVerifiedElsewhere ? (
                   <>
                     <div role="status" className="flex items-center gap-2 font-bold text-[#007D7D]">
                       <span aria-hidden="true">✓</span> 電子郵件已驗證
                     </div>
-                    <p className="mt-2 text-xs leading-5 text-[#7A7A73]">
-                      {registrationCanResume
-                        ? "可在原網頁繼續；若要在此介面完成註冊，請貼上原信件的六位數驗證碼，不必重新寄信。"
-                        : "請在已取得註冊資格的介面繼續完成設定。"}
-                    </p>
-                    {registrationCanResume && (
-                      <>
-                        <label htmlFor="registration-otp" className="mt-3 block text-sm font-black text-[#785AA5]">接續註冊</label>
-                        <input id="registration-otp" type="text" inputMode="numeric" autoComplete="one-time-code"
-                          value={registrationOtp} onChange={(event) => handleRegistrationOtp(event.target.value)}
-                          disabled={registrationEmailBusy || isRegistrationSubmitting}
-                          placeholder="貼上原驗證碼"
-                          className="mt-2 w-full rounded-xl border border-[#785AA5]/25 bg-white px-3 py-3 text-center text-xl font-bold tracking-[0.2em] text-[#785AA5] outline-none focus:border-[#785AA5]" />
-                      </>
+                    {registrationVerifiedElsewhere && (
+                      registrationCanResume ? (
+                        <>
+                          <label htmlFor="registration-otp" className="mt-3 block text-xs font-medium leading-5 text-[#7A7A73]">貼上原驗證碼即可繼續。</label>
+                          <input id="registration-otp" type="text" inputMode="numeric" autoComplete="one-time-code"
+                            value={registrationOtp} onChange={(event) => handleRegistrationOtp(event.target.value)}
+                            disabled={registrationEmailBusy || isRegistrationSubmitting}
+                            placeholder="六位數驗證碼"
+                            className="mt-2 w-full rounded-xl border border-[#785AA5]/25 bg-white px-3 py-3 text-center text-xl font-bold tracking-[0.2em] text-[#785AA5] outline-none focus:border-[#785AA5]" />
+                        </>
+                      ) : (
+                        <p className="mt-2 text-xs leading-5 text-[#7A7A73]">請在可設定密碼的介面完成註冊。</p>
+                      )
                     )}
                   </>
+                ) : registrationUsedElsewhere ? (
+                  <p role="status" className="text-sm font-bold leading-6 text-[#007D7D]">
+                    註冊資格已在其他介面使用，請確認原介面的註冊結果，再返回登入。
+                  </p>
                 ) : registrationOtpExpired ? (
                   <p role="status" className="rounded-xl bg-[#FFF2F4] px-3 py-3 text-sm font-bold text-[#A93143]">
                     驗證碼已失效，請重新發送。
@@ -826,7 +819,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               <SettingsAccordionCard
                 panelId="registration-avatar-options"
                 title="大頭貼"
-                summary={["選填", AVATAR_DISPLAY_LABELS[registrationAvatar.displayMode]].join("・")}
+                summary="選填"
                 icon={<SystemAvatar config={registrationAvatar} displayName={registrationDisplayName} size={registrationAvatarOpen ? 80 : 52} />}
                 expanded={registrationAvatarOpen}
                 onToggle={() => setRegistrationAvatarOpen((open) => !open)}
@@ -876,7 +869,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               </>
             )}
 
-            {registrationMessage && (
+            {registrationMessage && (!registrationVerified || registrationIsError) && (
               <p role="status" className={`mt-4 text-sm font-bold leading-6 ${registrationIsError ? "rounded-xl bg-[#FFF2F4] px-3 py-2 text-[#A93143]" : "text-[#007D7D]"}`}>
                 {registrationMessage}
               </p>

@@ -5,7 +5,7 @@ import {
   normalizeAccountCode,
 } from "@/lib/auth/account-code";
 import { isValidContactEmail, normalizeContactEmail } from "@/lib/auth/password-reset";
-import { normalizeAvatarConfig } from "@/lib/profile/avatar";
+import { getDefaultRegistrationAvatarConfig, normalizeAvatarConfig } from "@/lib/profile/avatar";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { isRegistrationSameOrigin, readRegistrationSession, writeRegistrationCookie } from "@/lib/auth/registration-verification-server";
 
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     const displayName = String(body.displayName ?? "").normalize("NFKC").trim();
     const contactEmail = normalizeContactEmail(body.contactEmail);
     const password = String(body.password ?? "");
-    const avatarConfig = normalizeAvatarConfig(body.avatarConfig);
+    const avatarConfig = normalizeAvatarConfig(body.avatarConfig ?? getDefaultRegistrationAvatarConfig());
 
     if (!isValidAccountCode(accountCode)) {
       return NextResponse.json(
