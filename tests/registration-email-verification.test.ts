@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createRegistrationCode, createRegistrationToken, isRegistrationCode,
-  isRegistrationToken, registrationCodeDigest, registrationDigest, registrationLink,
+  isRegistrationToken, registrationCodeDigest, registrationDigest, registrationLink, isRegistrationOriginAllowed,
 } from "../lib/auth/registration-verification.ts";
 import { cleanRegistrationMailLink, normalizeRegistrationCodeInput, readRegistrationMailLink } from "../lib/auth/registration-verification-client.ts";
 import { registrationEmailContent } from "../lib/email/registration-verification-template.ts";
@@ -57,4 +57,31 @@ test("email has branded accessible HTML, a selectable code and plaintext fallbac
   assert.match(content.textContent, /000012/);
   assert.match(content.textContent, /驗證有效期限為 10 分鐘/);
   assert.doesNotMatch(content.htmlContent, /<script|onclick=/i);
+});
+
+test("registration origin checks actual loopback authority and Vercel HTTPS, never foreign origins", () => {
+  const local = {
+    origin: "http://127.0.0.1:3000", host: "127.0.0.1:3000",
+    contentType: "application/json; charset=UTF-8", requestOrigin: "http://localhost:3000",
+    isVercel: false, isDevelopment: true,
+  };
+  assert.equal(isRegistrationOriginAllowed(local), true);
+  assert.equal(isRegistrationOriginAllowed({ ...local, origin: "http://localhost:3000" }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...local, origin: "http://127.0.0.1:3001" }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...local, origin: "null" }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...local, origin: null }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...local, host: null }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...local, contentType: "text/plain; application/json" }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...local, origin: "http://evil.example", host: "evil.example" }), false);
+
+  const deployed = {
+    ...local, origin: "https://servant-timeline.vercel.app", host: "servant-timeline.vercel.app",
+    isVercel: true, isDevelopment: false,
+  };
+  assert.equal(isRegistrationOriginAllowed(deployed), true);
+  assert.equal(isRegistrationOriginAllowed({ ...deployed, origin: "https://evil.example" }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...deployed, origin: "http://servant-timeline.vercel.app" }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...deployed, origin: "https://servant-timeline.vercel.app/path" }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...deployed, isVercel: false }), false);
+  assert.equal(isRegistrationOriginAllowed({ ...deployed, isVercel: false, requestOrigin: deployed.origin }), true);
 });

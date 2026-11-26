@@ -1,7 +1,7 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { REGISTRATION_COOKIE, isRegistrationToken, registrationDigest } from "@/lib/auth/registration-verification";
+import { REGISTRATION_COOKIE, isRegistrationToken, registrationDigest, isRegistrationOriginAllowed } from "@/lib/auth/registration-verification";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 
 export function readRegistrationSession(request: NextRequest) {
@@ -25,9 +25,14 @@ export function writeRegistrationCookie(response: NextResponse, token: string) {
 }
 
 export function isRegistrationSameOrigin(request: NextRequest) {
-  const origin = request.headers.get("origin");
-  return origin === request.nextUrl.origin
-    && (request.headers.get("content-type") || "").includes("application/json");
+  return isRegistrationOriginAllowed({
+    origin: request.headers.get("origin"),
+    host: request.headers.get("host"),
+    contentType: request.headers.get("content-type"),
+    requestOrigin: request.nextUrl.origin,
+    isVercel: process.env.VERCEL === "1",
+    isDevelopment: process.env.NODE_ENV === "development",
+  });
 }
 
 export function registrationMailOrigin() {

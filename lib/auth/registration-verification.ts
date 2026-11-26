@@ -35,3 +35,33 @@ export function registrationLink(origin: string, mode: "verify" | "copy", value:
   url.hash = new URLSearchParams({ [mode === "verify" ? "token" : "code"]: value }).toString();
   return url.toString();
 }
+
+/** Use the actual HTTP authority, not Next.js's potentially normalized internal URL. */
+export function isRegistrationOriginAllowed({
+  origin, host, contentType, requestOrigin, isVercel, isDevelopment,
+}: {
+  origin: string | null;
+  host: string | null;
+  contentType: string | null;
+  requestOrigin: string;
+  isVercel: boolean;
+  isDevelopment: boolean;
+}) {
+  if (!origin || !host || contentType?.split(";")[0].trim().toLowerCase() !== "application/json") return false;
+  let parsed: URL;
+  try { parsed = new URL(origin); } catch { return false; }
+  if (parsed.origin !== origin || parsed.host !== host.toLowerCase()) return false;
+
+  // Vercel supplies Host from the client's actual deployment/custom domain.
+  // Do not trust arbitrary client-supplied forwarded-host or forwarded-proto.
+  if (isVercel) return parsed.protocol === "https:";
+  // Next.js normalizes loopback hostnames in local development. Accept only
+  // the actual loopback HTTP authority, with an exact port match.
+  if (isDevelopment) {
+    return ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
+      && ["http:", "https:"].includes(parsed.protocol);
+  }
+  // Outside Vercel and explicit loopback development, retain the stricter
+  // Next.js origin boundary; unsupported proxies fail closed.
+  return parsed.protocol === "https:" && origin === requestOrigin;
+}
