@@ -18,6 +18,10 @@ import { getPublicSupabaseConfig } from "@/lib/supabase/config";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { stopBackgroundRemindersOnSignOut } from "@/lib/notifications/background-device-client";
 import { normalizeRecoveryName, requiresPasswordChange } from "@/lib/auth/password-reset";
+import {
+  cleanRegistrationMailLink, normalizeRegistrationCodeInput, readRegistrationMailLink,
+  REGISTRATION_PROGRESS_KEY, type RegistrationDraft,
+} from "@/lib/auth/registration-verification-client";
 import { AvatarEditor } from "@/components/profile/AvatarEditor";
 import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
@@ -75,6 +79,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [registrationMessage, setRegistrationMessage] = useState("");
   const [registrationIsError, setRegistrationIsError] = useState(false);
   const [isRegistrationSubmitting, setIsRegistrationSubmitting] = useState(false);
+  const [registrationDraft, setRegistrationDraft] = useState<RegistrationDraft | null>(null);
+  const [registrationOtp, setRegistrationOtp] = useState("");
+  const [registrationEmailBusy, setRegistrationEmailBusy] = useState(false);
+  const [registrationClock, setRegistrationClock] = useState(() => Date.now());
+  const [registrationCopyCode, setRegistrationCopyCode] = useState("");
+  const [registrationCopyMessage, setRegistrationCopyMessage] = useState("");
+  const registrationRequestInFlight = useRef(false);
+  const registrationCopyInput = useRef<HTMLInputElement>(null);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegistrationPassword, setShowRegistrationPassword] = useState(false);
   const [showRegistrationPasswordConfirm, setShowRegistrationPasswordConfirm] = useState(false);
@@ -207,6 +219,164 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [isConfigured, loadAuthorization]);
 
+
+  const rememberRegistrationProgress = useCallback((pending: boolean) => {
+    try {
+      if (pending) window.localStorage.setItem(REGISTRATION_PROGRESS_KEY, "1");
+      else window.localStorage.removeItem(REGISTRATION_PROGRESS_KEY);
+    } catch { /* The HttpOnly server cookie still protects the registration. */ }
+  }, []);
+
+  const applyRegistrationDraft = useCallback((draft: RegistrationDraft | null) => {
+    setRegistrationDraft(draft);
+    setRegistrationClock(Date.now());
+    rememberRegistrationProgress(Boolean(draft));
+    if (!draft) return;
+    setRegistrationDisplayName(draft.displayName);
+    setRegistrationAccountCode(draft.accountCode);
+    setRegistrationContactEmail(draft.contactEmail);
+  }, [rememberRegistrationProgress]);
+
+  const requestRegistrationEmail = useCallback(async (body: Record<string, unknown>) => {
+    if (registrationRequestInFlight.current) return false;
+    registrationRequestInFlight.current = true;
+    setRegistrationEmailBusy(true);
+    setRegistrationMessage("");
+    setRegistrationIsError(false);
+    try {
+      const response = await fetch("/api/register/verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => null);
+      if (data && Object.prototype.hasOwnProperty.call(data, "draft")) {
+        applyRegistrationDraft(data.draft ?? null);
+      }
+      if (!response.ok) throw new Error(data?.error || "目前無法完成驗證，請稍後再試。");
+      if (body.action === "send") setRegistrationMessage("驗證信已寄出，請開啟信件或貼上驗證碼。");
+      if (body.action === "verify-link" || body.action === "verify-code") setRegistrationMessage("電子郵件驗證成功");
+      setRegistrationOtp("");
+      return true;
+    } catch (error) {
+      setRegistrationIsError(true);
+      setRegistrationMessage(error instanceof Error ? error.message : "目前無法完成驗證，請稍後再試。");
+      if (body.action === "verify-code") setRegistrationOtp("");
+      return false;
+    } finally {
+      registrationRequestInFlight.current = false;
+      setRegistrationEmailBusy(false);
+    }
+  }, [applyRegistrationDraft]);
+
+  const restoreRegistration = useCallback(async (open: boolean) => {
+    if (registrationRequestInFlight.current) return;
+    registrationRequestInFlight.current = true;
+    try {
+      const response = await fetch("/api/register/verification", {
+        credentials: "same-origin", cache: "no-store",
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      applyRegistrationDraft(data.draft ?? null);
+      if (data.draft && open) {
+        setShowRegistration(true);
+        setShowPasswordReset(false);
+      }
+    } catch { /* Keep existing fields when temporarily offline. */ }
+    finally { registrationRequestInFlight.current = false; }
+  }, [applyRegistrationDraft]);
+
+  useEffect(() => {
+    // A token lives in the fragment, not a GET query or access log. Only
+    // the user-facing browser redeems it by POST. Avoid a second redemption
+    // during React StrictMode's development remount.
+    const timer = window.setTimeout(() => {
+      const href = window.location.href;
+      const mail = readRegistrationMailLink(href);
+      if (new URL(href).searchParams.has("registration")) {
+        window.history.replaceState(window.history.state, "", cleanRegistrationMailLink(href));
+        if (mail?.mode === "copy") {
+          setRegistrationCopyCode(mail.value);
+          return;
+        }
+        setShowRegistration(true);
+        setShowPasswordReset(false);
+        if (mail?.mode === "verify") {
+          void requestRegistrationEmail({ action: "verify-link", token: mail.value });
+        } else {
+          setRegistrationIsError(true);
+          setRegistrationMessage("驗證連結無效，請重新發送驗證信。");
+          void restoreRegistration(false);
+        }
+        return;
+      }
+      try {
+        if (window.location.pathname === "/" && window.localStorage.getItem(REGISTRATION_PROGRESS_KEY)) void restoreRegistration(true);
+      } catch { /* Restore is also available from the registration button. */ }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [requestRegistrationEmail, restoreRegistration]);
+
+  const hasRegistrationDraft = Boolean(registrationDraft);
+  useEffect(() => {
+    if (!showRegistration || !hasRegistrationDraft) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") void restoreRegistration(false);
+    };
+    const tick = window.setInterval(() => setRegistrationClock(Date.now()), 1000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(tick);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [showRegistration, hasRegistrationDraft, restoreRegistration]);
+
+  const registrationVerified = registrationDraft?.status === "verified"
+    && Date.parse(registrationDraft.expiresAt) > registrationClock;
+  const registrationResendSeconds = registrationDraft
+    ? Math.max(0, Math.ceil((Date.parse(registrationDraft.resendAt) - registrationClock) / 1000)) : 0;
+  const registrationOtpExpired = registrationDraft
+    && (registrationDraft.status === "expired" || registrationDraft.status === "locked"
+      || Date.parse(registrationDraft.expiresAt) <= registrationClock);
+
+  const sendRegistrationEmail = () => requestRegistrationEmail({
+    action: "send",
+    displayName: registrationDisplayName,
+    accountCode: registrationAccountCode,
+    contactEmail: registrationContactEmail,
+  });
+
+  const changeRegistrationIdentity = async () => {
+    const cancelled = await requestRegistrationEmail({ action: "cancel" });
+    if (cancelled) {
+      setRegistrationPassword("");
+      setRegistrationPasswordConfirm("");
+      setRegistrationAvatarOpen(false);
+    }
+  };
+
+  const handleRegistrationOtp = (value: string) => {
+    const next = normalizeRegistrationCodeInput(value);
+    setRegistrationOtp(next);
+    if (next.length === 6) void requestRegistrationEmail({ action: "verify-code", code: next });
+  };
+
+  const copyRegistrationOtp = async () => {
+    try {
+      await navigator.clipboard.writeText(registrationCopyCode);
+      setRegistrationCopyMessage("已複製，請返回原註冊頁面貼上。");
+    } catch {
+      registrationCopyInput.current?.focus();
+      registrationCopyInput.current?.select();
+      setRegistrationCopyMessage("請長按選取的驗證碼並複製，再返回原註冊頁面貼上。");
+    }
+  };
+
   const handleLogin = async (event: FormEvent) => {
     event.preventDefault();
     setErrorMessage("");
@@ -268,6 +438,18 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     setRegistrationMessage("");
     setRegistrationIsError(false);
 
+    if (!registrationVerified) {
+      if (!registrationDraft || registrationOtpExpired) {
+        await sendRegistrationEmail();
+      } else if (registrationOtp.length === 6) {
+        await requestRegistrationEmail({ action: "verify-code", code: registrationOtp });
+      } else {
+        setRegistrationIsError(true);
+        setRegistrationMessage("請先點擊信件連結或輸入六位數驗證碼。");
+      }
+      return;
+    }
+
     const normalizedCode = normalizeAccountCode(registrationAccountCode);
     if (registrationPassword !== registrationPasswordConfirm) {
       setRegistrationIsError(true);
@@ -295,6 +477,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
       setRegistrationIsError(false);
       setRegistrationMessage(data?.message || "註冊完成，請等待管理員啟用帳號。");
+      applyRegistrationDraft(null);
+      setLoginNotice(data?.message || "註冊完成，請等待管理員啟用帳號。");
+      setShowRegistration(false);
       setLoginCode(normalizedCode);
       setRegistrationDisplayName("");
       setRegistrationAccountCode("");
@@ -306,6 +491,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       setRegistrationIsError(true);
       setRegistrationMessage(error instanceof Error ? error.message : "註冊失敗，請稍後再試。");
+      void restoreRegistration(false);
     } finally {
       setIsRegistrationSubmitting(false);
     }
@@ -381,6 +567,26 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       signOut,
     };
   }, [accountCode, avatarConfig, displayName, isActive, roles, session, signOut, updateAvatarConfig]);
+
+  if (registrationCopyCode) {
+    return (
+      <main className="min-h-screen bg-[#F5F6F6] px-5 py-10 flex items-center justify-center">
+        <section className="w-full max-w-sm rounded-[28px] border border-[#E6EAF0] bg-white p-7 text-center shadow-xl shadow-[#785AA5]/10">
+          <p className="text-xs font-black tracking-[0.24em] text-[#007D7D]">SHEKINAH</p>
+          <h1 className="mt-4 text-xl font-black text-[#353B3B]">複製驗證碼</h1>
+          <p className="mt-2 text-sm leading-6 text-[#7A7A73]">複製後請返回原本的招待服事註冊頁面貼上。</p>
+          <input ref={registrationCopyInput} readOnly aria-label="六位數驗證碼" value={registrationCopyCode}
+            className="mt-5 w-full rounded-2xl border border-[#785AA5]/20 bg-[#F6F3FA] px-3 py-5 text-center text-3xl font-black tracking-[0.3em] text-[#785AA5]" />
+          <button type="button" onClick={() => void copyRegistrationOtp()}
+            className="mt-4 w-full rounded-2xl bg-[#785AA5] px-4 py-3 font-bold text-white">複製驗證碼</button>
+          <p role="status" className="mt-3 text-sm leading-6 text-[#007D7D]">{registrationCopyMessage}</p>
+          <p className="mt-3 text-xs text-[#7A7A73]">驗證有效期限為 10 分鐘</p>
+          <button type="button" onClick={() => { setRegistrationCopyCode(""); setRegistrationCopyMessage(""); }}
+            className="mt-5 text-sm font-bold text-[#785AA5]">返回系統</button>
+        </section>
+      </main>
+    );
+  }
 
   if (!isConfigured) {
     return <AuthMessage title="系統尚未完成登入設定" detail="請由管理員設定 Supabase 公開連線資訊後再試。" />;
@@ -463,7 +669,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!session || !contextValue) {
+  if (!session || !contextValue || showRegistration) {
     return (
       <main className="min-h-screen bg-[#FFF9F3] px-5 py-10 flex items-center justify-center">
         {showRegistration ? (
@@ -472,7 +678,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               <p className="text-xs font-black tracking-[0.24em] text-[#00A6A6]">招待服事</p>
               <h1 className="mt-2 text-2xl font-black text-[#1F2937]">註冊新帳號</h1>
               <p className="mt-2 text-sm font-medium leading-6 text-[#7B7B74]">
-                建立自己的服事帳號。註冊完成後需由管理員啟用，啟用後即可登入使用。
+                {registrationVerified ? "電子郵件已驗證，請繼續完成設定。註冊後需由管理員啟用。" : "先完成電子郵件驗證，再設定密碼與大頭貼。註冊後需由管理員啟用。"}
               </p>
             </div>
 
@@ -481,6 +687,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               id="registration-name"
               autoComplete="name"
               value={registrationDisplayName}
+              readOnly={Boolean(registrationDraft) || registrationEmailBusy || isRegistrationSubmitting}
               onChange={(event) => setRegistrationDisplayName(event.target.value)}
               className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
               required
@@ -492,6 +699,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               autoCapitalize="none"
               autoComplete="username"
               value={registrationAccountCode}
+              readOnly={Boolean(registrationDraft) || registrationEmailBusy || isRegistrationSubmitting}
               onChange={(event) => setRegistrationAccountCode(event.target.value)}
               placeholder="英文小寫、數字、點、底線或連字號"
               className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
@@ -504,12 +712,50 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               type="email"
               autoComplete="email"
               value={registrationContactEmail}
+              readOnly={Boolean(registrationDraft) || registrationEmailBusy || isRegistrationSubmitting}
               onChange={(event) => setRegistrationContactEmail(event.target.value)}
               placeholder="用於忘記帳號／密碼時收取登入資料"
               className="mt-2 w-full rounded-2xl border border-[#D9DEE7] px-4 py-3 outline-none focus:border-[#6D55A3]"
               required
             />
 
+            {registrationDraft && (
+              <section className="mt-4 rounded-2xl border border-[#785AA5]/15 bg-[#F6F3FA] p-4">
+                {registrationVerified ? (
+                  <div className="flex items-center gap-2 font-bold text-[#007D7D]">
+                    <span aria-hidden="true">✓</span> 電子郵件已驗證
+                  </div>
+                ) : registrationOtpExpired ? (
+                  <p role="status" className="rounded-xl bg-[#FFF2F4] px-3 py-3 text-sm font-bold text-[#A93143]">
+                    驗證碼已失效，請重新發送。
+                  </p>
+                ) : (
+                  <>
+                    <label htmlFor="registration-otp" className="block text-sm font-black text-[#785AA5]">六位數驗證碼</label>
+                    <input id="registration-otp" type="text" inputMode="numeric" autoComplete="one-time-code"
+                      value={registrationOtp} onChange={(event) => handleRegistrationOtp(event.target.value)}
+                      disabled={registrationEmailBusy || isRegistrationSubmitting}
+                      placeholder="輸入或貼上" aria-describedby="registration-otp-help"
+                      className="mt-2 w-full rounded-xl border border-[#785AA5]/25 bg-white px-3 py-3 text-center text-xl font-bold tracking-[0.2em] text-[#785AA5] outline-none focus:border-[#785AA5]" />
+                    <p id="registration-otp-help" className="mt-2 text-xs leading-5 text-[#7A7A73]">貼上完整六位數即可自動驗證，也可以點擊信件中的驗證連結。</p>
+                  </>
+                )}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <button type="button" onClick={() => void changeRegistrationIdentity()} disabled={registrationEmailBusy || isRegistrationSubmitting}
+                    className="text-xs font-bold text-[#785AA5] disabled:opacity-50">修改註冊資料</button>
+                  {!registrationVerified && (
+                    <button type="button" onClick={() => void sendRegistrationEmail()}
+                      disabled={registrationEmailBusy || isRegistrationSubmitting || registrationResendSeconds > 0}
+                      className="text-xs font-bold text-[#785AA5] disabled:opacity-50">
+                      {registrationResendSeconds > 0 ? registrationResendSeconds + " 秒後重新發送" : "重新發送"}
+                    </button>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {registrationVerified && (
+              <>
             <div className="mt-5">
               <SettingsAccordionCard
                 panelId="registration-avatar-options"
@@ -561,19 +807,22 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               className="mt-5"
             />
 
+              </>
+            )}
+
             {registrationMessage && (
-              <p role="status" className={`mt-4 text-sm font-bold leading-6 ${registrationIsError ? "text-[#D73A49]" : "text-[#008A7A]"}`}>
+              <p role="status" className={`mt-4 text-sm font-bold leading-6 ${registrationIsError ? "rounded-xl bg-[#FFF2F4] px-3 py-2 text-[#A93143]" : "text-[#007D7D]"}`}>
                 {registrationMessage}
               </p>
             )}
 
             <button
               type="submit"
-              disabled={isRegistrationSubmitting}
-              className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6D55A3] px-5 py-3.5 font-black text-white disabled:opacity-60"
+              disabled={isRegistrationSubmitting || registrationEmailBusy || Boolean(registrationDraft && !registrationVerified && (registrationOtpExpired ? registrationResendSeconds > 0 : registrationOtp.length !== 6))}
+              className={`mt-6 flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 font-black disabled:opacity-60 ${registrationVerified ? "bg-[#785AA5] text-white" : "bg-[#00B8B8] text-[#073B3B]"}`}
             >
-              {isRegistrationSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-              {isRegistrationSubmitting ? "註冊中" : "建立帳號"}
+              {isRegistrationSubmitting || registrationEmailBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+              {isRegistrationSubmitting ? "註冊中" : registrationEmailBusy ? "處理中" : registrationVerified ? "建立帳號" : registrationDraft && !registrationOtpExpired ? "驗證電子郵件" : "發送驗證信"}
             </button>
 
             <button
@@ -581,6 +830,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
               onClick={() => {
                 setShowRegistration(false);
                 setRegistrationAvatarOpen(false);
+                setRegistrationPassword("");
+                setRegistrationPasswordConfirm("");
                 setRegistrationMessage("");
                 setRegistrationIsError(false);
               }}
@@ -707,6 +958,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
                   setRegistrationAvatarOpen(false);
                   setRegistrationMessage("");
                   setRegistrationIsError(false);
+                  void restoreRegistration(false);
                 }}
                 className="mt-2 w-full rounded-2xl border border-[#6D55A3]/20 bg-[#F3EEFF] px-5 py-3 font-black text-[#6D55A3]"
               >
