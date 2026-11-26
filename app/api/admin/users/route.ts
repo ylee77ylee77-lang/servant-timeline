@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
           .select("user_id,role"),
         supabase
           .from("account_recovery_contacts")
-          .select("user_id,contact_email"),
+          .select("user_id,contact_email,email_verified_at,email_verification_required"),
       ]);
 
     if (profileError) throw profileError;
@@ -44,7 +44,10 @@ export async function GET(request: NextRequest) {
     }
 
     const contactMap = new Map(
-      (contactRows ?? []).map((row) => [String(row.user_id), String(row.contact_email || "")])
+      (contactRows ?? []).map((row) => [String(row.user_id), {
+        email: String(row.contact_email || ""), verified: Boolean(row.email_verified_at),
+        verificationRequired: Boolean(row.email_verification_required),
+      }])
     );
 
     const users = (profiles ?? [])
@@ -53,7 +56,9 @@ export async function GET(request: NextRequest) {
         id: String(profile.id),
         accountCode: String(profile.account_code ?? ""),
         displayName: String(profile.display_name ?? "同工"),
-        contactEmail: contactMap.get(String(profile.id)) ?? "",
+        contactEmail: contactMap.get(String(profile.id))?.email ?? "",
+        emailVerified: contactMap.get(String(profile.id))?.verified ?? false,
+        emailVerificationRequired: contactMap.get(String(profile.id))?.verificationRequired ?? false,
         isActive: Boolean(profile.is_active),
         roles: roleMap.get(String(profile.id)) ?? [],
       }));

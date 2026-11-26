@@ -16,6 +16,8 @@ type RegisteredUser = {
   accountCode: string;
   displayName: string;
   contactEmail: string;
+  emailVerified: boolean;
+  emailVerificationRequired: boolean;
   isActive: boolean;
   roles: AppRole[];
 };
@@ -169,7 +171,7 @@ export default function AdminUsersPage() {
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error || "儲存救援 Email 失敗。");
-      setEmailMessage(`已更新 ${data.user.displayName} 的救援 Email。`);
+      setEmailMessage(`已更新 ${data.user.displayName} 的救援 Email。若變更地址，原驗證狀態將失效。`);
       await loadResetRequests();
     } catch (error) {
       setEmailIsError(true);
@@ -346,7 +348,7 @@ export default function AdminUsersPage() {
             <option value="">請選擇帳號</option>
             {registeredUsers.map((user) => (
               <option key={user.id} value={user.id}>
-                {user.displayName}（{user.accountCode}）{user.contactEmail ? "" : "｜未設定 Email"}
+                {user.displayName}（{user.accountCode}）{user.contactEmail ? (user.emailVerified ? "｜Email 已驗證" : "｜Email 尚未驗證") : "｜未設定 Email"}
               </option>
             ))}
           </select>
@@ -403,6 +405,9 @@ export default function AdminUsersPage() {
                   <div key={user.id} className="rounded-2xl border border-[#E6EAF0] p-4">
                     <div className="font-black text-[#1F2937]">{user.displayName}</div>
                     <div className="mt-1 text-sm font-bold text-[#6D55A3]">{user.accountCode}</div>
+                    <p className={`mt-1 text-xs font-bold ${user.emailVerified ? "text-[#007D7D]" : "text-[#A93143]"}`}>
+                      {user.emailVerified ? "Email 已驗證" : "Email 尚未驗證"}
+                    </p>
                     <button
                       type="button"
                       onClick={() => void activateCoordinator(user.id)}
@@ -452,7 +457,7 @@ export default function AdminUsersPage() {
               .filter((user) => user.isActive)
               .map((user) => (
                 <option key={user.id} value={user.id}>
-                  {user.displayName}（{user.accountCode}）{user.contactEmail ? "" : "｜未設定 Email"}
+                  {user.displayName}（{user.accountCode}）{user.contactEmail ? (user.emailVerified ? "｜Email 已驗證" : "｜Email 尚未驗證") : "｜未設定 Email"}
                 </option>
               ))}
           </select>

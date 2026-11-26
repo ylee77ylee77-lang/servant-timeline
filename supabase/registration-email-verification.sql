@@ -1,7 +1,8 @@
 -- Staged schema: the validation runner generates a migration using Supabase CLI.
 -- No remote database changes are performed by this branch.
 alter table public.account_recovery_contacts
-  add column if not exists email_verified_at timestamptz;
+  add column if not exists email_verified_at timestamptz,
+  add column if not exists email_verification_required boolean not null default false;
 
 create or replace function app_private.clear_changed_recovery_email_verification()
 returns trigger language plpgsql security invoker set search_path = pg_catalog

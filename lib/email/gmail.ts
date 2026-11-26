@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import { registrationEmailContent } from "@/lib/email/registration-verification-template";
 import { connect, type TLSSocket } from "node:tls";
 import { isValidContactEmail, normalizeContactEmail } from "@/lib/auth/password-reset";
 
@@ -107,14 +108,13 @@ async function writeCommand(
   return response;
 }
 
-export async function sendAccountRecoveryEmail({
-  toEmail,
-  accountCode,
-  temporaryPassword,
+async function sendGmailMessage({
+  toEmail, subject, textContent, htmlContent,
 }: {
   toEmail: string;
-  accountCode: string;
-  temporaryPassword: string;
+  subject: string;
+  textContent: string;
+  htmlContent?: string;
 }) {
   const smtpUser = normalizeContactEmail(process.env.GMAIL_SMTP_USER);
   const appPassword = String(process.env.GMAIL_APP_PASSWORD ?? "").replace(/\s+/g, "");
@@ -170,20 +170,16 @@ export async function sendAccountRecoveryEmail({
     await writeCommand(socket, readResponse, "DATA", [354]);
 
     const messageId = `<${randomUUID()}@servant-timeline.vercel.app>`;
-    const subject = "夏凱納招待服事｜帳號協助完成";
-    const textContent = [
-      "夏凱納招待服事｜帳號協助完成",
-      "",
-      "管理員已確認你的帳號協助申請。",
-      `服事帳號：${accountCode}`,
-      `臨時密碼：${temporaryPassword}`,
-      "",
-      "請使用以上資料登入：",
-      "https://servant-timeline.vercel.app",
-      "",
-      "登入後系統會要求你立即設定自己的新密碼。",
-      "若你沒有提出這項申請，請直接聯絡管理員。",
-    ].join("\r\n");
+    const boundary = "shekinah-" + randomUUID();
+    const encodePart = (value: string) => (Buffer.from(value, "utf8").toString("base64").match(/.{1,76}/g) || []).join("\r\n");
+    const contentHeaders = htmlContent
+      ? ['Content-Type: multipart/alternative; boundary="' + boundary + '"']
+      : ["Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit"];
+    const content = htmlContent ? [
+      "--" + boundary, "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64",
+      "", encodePart(textContent), "--" + boundary, "Content-Type: text/html; charset=UTF-8",
+      "Content-Transfer-Encoding: base64", "", encodePart(htmlContent), "--" + boundary + "--",
+    ].join("\r\n") : textContent;
 
     const message = [
       `From: ${encodeHeader(senderName || "夏凱納招待服事")} <${smtpUser}>`,
@@ -192,10 +188,9 @@ export async function sendAccountRecoveryEmail({
       `Date: ${new Date().toUTCString()}`,
       `Message-ID: ${messageId}`,
       "MIME-Version: 1.0",
-      "Content-Type: text/plain; charset=UTF-8",
-      "Content-Transfer-Encoding: 8bit",
+      ...contentHeaders,
       "",
-      dotStuff(textContent),
+      dotStuff(content),
     ].join("\r\n");
 
     socket.write(`${message}\r\n.\r\n`);
@@ -208,4 +203,39 @@ export async function sendAccountRecoveryEmail({
     socket.end();
     socket.destroy();
   }
+}
+
+export async function sendAccountRecoveryEmail({
+  toEmail, accountCode, temporaryPassword,
+}: {
+  toEmail: string;
+  accountCode: string;
+  temporaryPassword: string;
+}) {
+  const subject = "夏凱納招待服事｜帳號協助完成";
+  const textContent = [
+    "夏凱納招待服事｜帳號協助完成",
+    "",
+    "管理員已確認你的帳號協助申請。",
+    `服事帳號：${accountCode}`,
+    `臨時密碼：${temporaryPassword}`,
+    "",
+    "請使用以上資料登入：",
+    "https://servant-timeline.vercel.app",
+    "",
+    "登入後系統會要求你立即設定自己的新密碼。",
+    "若你沒有提出這項申請，請直接聯絡管理員。",
+  ].join("\r\n");
+  return sendGmailMessage({ toEmail, subject, textContent });
+}
+
+export async function sendRegistrationVerificationEmail({
+  toEmail, code, verifyUrl, copyUrl,
+}: {
+  toEmail: string;
+  code: string;
+  verifyUrl: string;
+  copyUrl: string;
+}) {
+  return sendGmailMessage({ toEmail, ...registrationEmailContent({ code, verifyUrl, copyUrl }) });
 }

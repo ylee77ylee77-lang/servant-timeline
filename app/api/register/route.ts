@@ -7,12 +7,14 @@ import {
 import { isValidContactEmail, normalizeContactEmail } from "@/lib/auth/password-reset";
 import { normalizeAvatarConfig } from "@/lib/profile/avatar";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
+import { isRegistrationSameOrigin, readRegistrationSession, writeRegistrationCookie } from "@/lib/auth/registration-verification-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   let createdUserId: string | null = null;
+  if (!isRegistrationSameOrigin(request)) return NextResponse.json({ error: "請從註冊頁面操作。" }, { status: 403 });
 
   try {
     const body = await request.json().catch(() => ({}));
@@ -51,6 +53,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "這個服事帳號已被使用。" }, { status: 409 });
     }
 
+    const sessionDigest = readRegistrationSession(request);
+    if (!sessionDigest) {
+      return NextResponse.json({ error: "請先完成電子郵件驗證。" }, { status: 403 });
+    }
+    // Single-use server-side claim binds the verified email and both identity fields.
+    const { data: verifiedAt, error: claimError } = await supabase.rpc("registration_email_claim", {
+      p_session: sessionDigest, p_display_name: displayName, p_account_code: accountCode, p_contact_email: contactEmail,
+    });
+    if (claimError) throw claimError;
+    if (typeof verifiedAt !== "string" || !verifiedAt) {
+      return NextResponse.json({ error: "請先完成電子郵件驗證或重新發送驗證信。" }, { status: 403 });
+    }
+
     const { data: created, error: createError } = await supabase.auth.admin.createUser({
       email: accountCodeToInternalEmail(accountCode),
       password,
@@ -87,6 +102,8 @@ export async function POST(request: NextRequest) {
       .upsert({
         user_id: createdUserId,
         contact_email: contactEmail,
+        email_verified_at: verifiedAt,
+        email_verification_required: true,
         updated_at: new Date().toISOString(),
       });
     if (contactError) throw contactError;
@@ -99,14 +116,14 @@ export async function POST(request: NextRequest) {
       .eq("user_id", createdUserId);
     if (roleDeleteError) throw roleDeleteError;
 
-    return NextResponse.json(
+    return writeRegistrationCookie(NextResponse.json(
       {
         ok: true,
         message: "註冊完成，請等待管理員啟用帳號。",
         user: { accountCode, displayName },
       },
-      { status: 201 }
-    );
+      { status: 201, headers: { "Cache-Control": "no-store" } }
+    ), "");
   } catch (error) {
     if (createdUserId) {
       await getSupabaseAdminClient().auth.admin.deleteUser(createdUserId).catch(() => undefined);
