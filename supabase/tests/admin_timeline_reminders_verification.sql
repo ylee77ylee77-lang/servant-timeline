@@ -42,8 +42,9 @@ begin
  if (select count(*) from background_reminder_private.admin_test_candidates(due) where device_id=dev)<>1
  or not background_reminder_private.should_dispatch(due) then raise exception 'Expected one weekday cue'; end if;
  select c.delivery_id into delivery from public.claim_admin_timeline_reminders(due,50)c;
- if delivery is null or not exists(select 1 from public.take_admin_timeline_reminder(delivery,due) t where t.service_type='六晚崇' and t.task_time='19:00')
- or exists(select 1 from public.take_admin_timeline_reminder(delivery,due)) then raise exception 'Claim must be atomically taken only once'; end if;
+ if delivery is null then raise exception 'Expected claim'; end if;
+ if not exists(select 1 from public.take_admin_timeline_reminder(delivery,due) t where t.service_type='六晚崇' and t.task_time='19:00') then raise exception 'Expected correct task'; end if;
+ if exists(select 1 from public.take_admin_timeline_reminder(delivery,due)) then raise exception 'Claim must be atomically taken only once'; end if;
  if not public.finish_admin_timeline_reminder(delivery,'accepted',201,due) then raise exception 'Finish failed'; end if;
  if exists(select 1 from public.claim_admin_timeline_reminders(due,50)) then raise exception 'Duplicate delivery'; end if;
  if public.disable_admin_timeline_reminder_device(v,ep,due) then raise exception 'Foreign owner revoked device'; end if;

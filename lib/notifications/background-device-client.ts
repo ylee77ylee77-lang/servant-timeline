@@ -90,8 +90,8 @@ function decodePublicKey(key: string): Uint8Array<ArrayBuffer> {
   return result;
 }
 
-async function fetchDevice(accessToken: string, body?: object): Promise<Response> {
-  return fetch(ROUTE, {
+async function fetchDevice(accessToken: string, body?: object, adminTest = false): Promise<Response> {
+  return fetch(adminTest ? ROUTE + "?adminTest=1" : ROUTE, {
     method: body ? "POST" : "GET",
     headers: { Authorization: "Bearer " + accessToken, ...(body ? { "Content-Type": "application/json" } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -99,8 +99,8 @@ async function fetchDevice(accessToken: string, body?: object): Promise<Response
   });
 }
 
-export async function getBackgroundDeviceConfig(accessToken: string): Promise<string | null> {
-  const response = await fetchDevice(accessToken);
+export async function getBackgroundDeviceConfig(accessToken: string, adminTest = false): Promise<string | null> {
+  const response = await fetchDevice(accessToken, undefined, adminTest);
   if (!response.ok) throw new Error("Config unavailable");
   const data = await response.json();
   return data.enabled === true && typeof data.publicKey === "string" ? data.publicKey : null;
@@ -202,6 +202,7 @@ export async function syncBackgroundDevice(input: {
   prepared: PreparedReminder; accessToken: string; userId: string;
   enabled: boolean; serviceType: string; checkInId: string; isCurrent?: () => boolean;
   previewMode?: boolean;
+  formalEnabled?: boolean; adminTestEnabled?: boolean; adminTestService?: string;
 }): Promise<DeviceSyncStatus> {
   if (!input.enabled) {
     const stopped = await revokeBackgroundDevice(input.accessToken);
@@ -222,16 +223,45 @@ export async function syncBackgroundDevice(input: {
       return { message: "請重新啟用背景通知。", action: "authorize" };
     }
     if (input.previewMode) return { message: "測試模式｜已允許通知，可開始三個模擬任務。" };
-    if (!input.serviceType || !input.checkInId) {
-      return { message: "已允許通知，完成報到後啟用背景提醒。" };
+    const formalBinding = input.formalEnabled !== false && Boolean(input.serviceType && input.checkInId);
+    const current = () => (!input.isCurrent || input.isCurrent()) && hasReminderConsent(input.userId);
+    if (!current()) return { message: "背景提醒同步中…" };
+    if (input.adminTestEnabled && (formalBinding || !input.adminTestService)) {
+      const stopped = await fetchDevice(input.accessToken, { action: "disable-admin-test", endpoint: sub.endpoint });
+      if (!stopped.ok) {
+        // Formal registration remains independent of the test-only API.
+        if (!formalBinding) throw new Error("Admin test stop unavailable");
+      }
     }
-    // The server derives check-in and assignment; these IDs are only local
-    // guards against previewing a hall or testing without a formal check-in.
-    if (input.isCurrent && !input.isCurrent()) return { message: "背景提醒同步中…" };
-    if (!hasReminderConsent(input.userId)) return { message: "背景震動提醒已關閉。" };
-    const response = await fetchDevice(input.accessToken, {
-      action: "register", serviceType: input.serviceType, subscription: sub.toJSON(),
-    });
+    if (!current()) return { message: "背景提醒同步中…" };
+    let response: Response | undefined;
+    if (formalBinding) {
+      response = await fetchDevice(input.accessToken, {
+        action: "register", serviceType: input.serviceType, subscription: sub.toJSON(),
+      });
+      // An admin's local test check-in is not a formal DB binding.
+      // Only a server-side 409 permits fallback to isolated testing.
+      if (response.status !== 409 || !input.adminTestEnabled || !input.adminTestService) {
+        if (response.status === 409) return { message: "目前沒有可啟用的有效報到，請確認堂次及服事時間。", action: "retry" };
+        if (!response.ok) throw new Error("Device registration unavailable");
+      } else response = undefined;
+    }
+    if (!response && input.adminTestEnabled && input.adminTestService) {
+      if (!current()) return { message: "背景提醒同步中…" };
+      response = await fetchDevice(input.accessToken, {
+        action: "register-admin-test", serviceType: input.adminTestService, subscription: sub.toJSON(),
+      });
+      if (response.status === 409) return { message: "目前無法啟用管理員測試，請確認堂次或正式報到狀態。", action: "retry" };
+      if (!response.ok) throw new Error("Admin test registration unavailable");
+      const data = await response.json();
+      if (data.enabled !== true || !Number.isFinite(Date.parse(data.expiresAt)) || Date.parse(data.expiresAt) <= Date.now()) {
+        throw new Error("Admin test registration incomplete");
+      }
+      return { message: input.adminTestService + "｜管理員震動測試已啟用，鎖屏也可收到任務通知。" };
+    }
+    if (!response) return { message: input.adminTestEnabled
+      ? "已允許通知，選擇堂次並進入流程即可測試。"
+      : "已允許通知，完成報到後啟用背景提醒。" };
     if (response.status === 409) {
       return { message: "目前沒有可啟用的有效報到，請確認堂次及服事時間。", action: "retry" };
     }

@@ -7,8 +7,8 @@ export function backgroundRemindersEnabledEnvironment() {
   return process.env.VERCEL_ENV === "production";
 }
 
-export function getBackgroundPushConfig(): { keys: PushKeys; dispatcherSecret: string } | null {
-  if (!backgroundRemindersEnabledEnvironment() || process.env.ENABLE_BACKGROUND_TASK_REMINDERS !== "true") return null;
+function readProductionPushConfig(): { keys: PushKeys; dispatcherSecret: string } | null {
+  if (!backgroundRemindersEnabledEnvironment()) return null;
   const keys = {
     subject: (process.env.WEB_PUSH_VAPID_SUBJECT ?? "").trim(),
     publicKey: (process.env.WEB_PUSH_VAPID_PUBLIC_KEY ?? "").trim(),
@@ -17,4 +17,13 @@ export function getBackgroundPushConfig(): { keys: PushKeys; dispatcherSecret: s
   const dispatcherSecret = (process.env.BACKGROUND_REMINDER_DISPATCH_SECRET ?? "").trim();
   if (!validVapidKeys(keys) || dispatcherSecret.length < 32 || dispatcherSecret.length > 512) return null;
   return { keys, dispatcherSecret };
+}
+
+export function getBackgroundPushConfig() {
+  return process.env.ENABLE_BACKGROUND_TASK_REMINDERS === "true" ? readProductionPushConfig() : null;
+}
+
+// Independent rollout switch; enabling admin testing never enables formal sends.
+export function getAdminTimelinePushConfig() {
+  return process.env.ENABLE_ADMIN_TIMELINE_VIBRATION_TEST === "true" ? readProductionPushConfig() : null;
 }
