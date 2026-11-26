@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { isServiceType } from "@/lib/services/catalog";
-import { getBackgroundPushConfig, backgroundRemindersEnabledEnvironment } from "@/lib/notifications/background-config";
+import { getBackgroundPushConfig, getAdminTimelinePushConfig, backgroundRemindersEnabledEnvironment } from "@/lib/notifications/background-config";
 import { getVerifiedSessionId, isApplePushEndpoint, parseAppleSubscription } from "@/lib/notifications/background-push";
 
 export const runtime = "nodejs";
@@ -34,8 +34,10 @@ async function readSmallJson(request: NextRequest): Promise<unknown> {
 
 export async function GET(request: NextRequest) {
   try {
-    await requireActiveUser(request);
-    const config = getBackgroundPushConfig();
+    const user = await requireActiveUser(request);
+    const config = request.nextUrl.searchParams.get("adminTest") === "1"
+      ? (user.roles.includes("admin") ? getAdminTimelinePushConfig() : null)
+      : getBackgroundPushConfig();
     return reply({ enabled: !!config, publicKey: config?.keys.publicKey ?? null });
   } catch (error) {
     const resolved = getAuthErrorResponse(error);
@@ -55,6 +57,15 @@ export async function POST(request: NextRequest) {
     if (!raw || typeof raw !== "object") return reply({ error: "請求內容無效。" }, 400);
     const body = raw as { action?: unknown; subscription?: unknown; endpoint?: unknown; serviceType?: unknown };
     const db = getSupabaseAdminClient();
+    if (body.action === "disable-admin-test") {
+      if (!user.roles.includes("admin")) return reply({ error: "你沒有管理員權限。" }, 403);
+      if (!isApplePushEndpoint(body.endpoint)) return reply({ error: "訂閱資料無效。" }, 400);
+      const { error } = await db.rpc("disable_admin_timeline_reminder_device", {
+        p_user_id: user.userId, p_endpoint: body.endpoint,
+      });
+      if (error) return reply({ error: "尚未確認停止測試提醒，請重試。" }, 503);
+      return reply({ enabled: false });
+    }
     if (body.action === "disable") {
       if (!isApplePushEndpoint(body.endpoint)) return reply({ error: "訂閱資料無效。" }, 400);
       // Allow revocation even after a production feature flag is turned off.
@@ -62,24 +73,35 @@ export async function POST(request: NextRequest) {
         p_user_id: user.userId, p_endpoint: body.endpoint,
       });
       if (error) return reply({ error: "尚未確認停止背景提醒，請重試。" }, 503);
+      // Revoke admin test bindings even if their rollout flag has been disabled.
+      if (user.roles.includes("admin")) {
+        const { error: testError } = await db.rpc("disable_admin_timeline_reminder_device", {
+          p_user_id: user.userId, p_endpoint: body.endpoint,
+        });
+        if (testError) return reply({ error: "尚未確認停止測試提醒，請重試。" }, 503);
+      }
       // Same response if no matching device exists, so no ownership oracle.
       return reply({ enabled: false });
     }
-    if (body.action !== "register") return reply({ error: "操作無效。" }, 400);
-    if (!getBackgroundPushConfig()) return reply({ error: "背景震動尚未啟用。" }, 503);
+    const adminTest = body.action === "register-admin-test";
+    if (body.action !== "register" && !adminTest) return reply({ error: "操作無效。" }, 400);
+    if (adminTest && !user.roles.includes("admin")) return reply({ error: "你沒有管理員權限。" }, 403);
+    if (!(adminTest ? getAdminTimelinePushConfig() : getBackgroundPushConfig())) {
+      return reply({ error: "背景震動尚未啟用。" }, 503);
+    }
     const sub = parseAppleSubscription(body.subscription);
     if (!sub || typeof body.serviceType !== "string" || !isServiceType(body.serviceType)) {
       return reply({ error: "訂閱或堂次無效。" }, 400);
     }
     const sessionId = getVerifiedSessionId(request.headers.get("authorization"), user.userId);
     if (!sessionId) return reply({ error: "登入階段已失效，請重新登入。" }, 401);
-    const { data, error } = await db.rpc("register_background_reminder_device", {
+    const { data, error } = await db.rpc(adminTest ? "register_admin_timeline_reminder_device" : "register_background_reminder_device", {
       p_user_id: user.userId, p_session_id: sessionId, p_service_type: body.serviceType, p_endpoint: sub.endpoint,
       p_p256dh: sub.keys.p256dh, p_auth_secret: sub.keys.auth,
     });
     if (error) return reply({ error: "尚未完成背景提醒註冊，請重試。" }, 503);
     const binding = Array.isArray(data) ? data[0] : null;
-    if (!binding) return reply({ error: "無法綁定有效報到及此裝置，請確認堂次或重新訂閱。" }, 409);
+    if (!binding) return reply({ error: adminTest ? "無法啟用管理員測試，請確認堂次與登入狀態。" : "無法綁定有效報到及此裝置，請確認堂次或重新訂閱。" }, 409);
     return reply({ enabled: true, expiresAt: binding.expires_at });
   } catch (error) {
     const resolved = getAuthErrorResponse(error);

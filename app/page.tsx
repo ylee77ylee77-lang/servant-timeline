@@ -508,6 +508,7 @@ export default function App() {
     accessToken: session.access_token, userId: session.user.id,
     loaded: personalSettingsLoaded, enabled: personalSettings.vibrationReminderEnabled,
     allowPreview: isAdmin,
+    adminTestService: isAdmin && activeTab === "timeline" ? currentService : "",
     serviceType: checkinStatus !== "not_checked_in" && checkInId ? checkedInService : "",
     checkInId,
   });
@@ -5199,6 +5200,17 @@ export default function App() {
   const renderTimelineView = () => {
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
+        {isAdmin && backgroundReminder.adminTimelineTestEnabled && personalSettings.vibrationReminderEnabled && backgroundReminder.status && (
+          <p role="status" className="mb-3 text-xs font-medium text-[#7B7B74]">
+            {backgroundReminder.status.message}
+            {backgroundReminder.status.action && (
+              <button type="button" className="ml-2 font-bold text-[#6D55A3] underline"
+                onClick={backgroundReminder.status.action === "authorize" ? backgroundReminder.authorize : backgroundReminder.refresh}>
+                {backgroundReminder.status.action === "authorize" ? "允許通知" : "重新檢查"}
+              </button>
+            )}
+          </p>
+        )}
         {isTimelineEditMode && (
           <>
             <div className="fixed top-[calc(env(safe-area-inset-top)+12px)] left-5 right-5 z-[120] mx-auto max-w-md p-4 bg-[#F3EEFF]/95 backdrop-blur border border-[#6D55A3]/20 rounded-[20px] flex items-center justify-between gap-3 shadow-2xl shadow-[#6D55A3]/20">

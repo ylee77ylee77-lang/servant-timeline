@@ -221,6 +221,66 @@ try {
   equal(notifications.length, 1, "No notification after sign-out");
   stages.push("real REST revoke and Auth sign-out suppress claimed tasks");
 
+
+  // Test an actual admin Auth session on Thursday with no formal check-in,
+  // using the same service-role RPCs, encryption and worker as production.
+  const testDay = "2030-01-03";
+  const testOpt = testDay + "T18:00:00+08:00";
+  const testDue = testDay + "T19:00:05+08:00";
+  const testNext = testDay + "T19:01:05+08:00";
+  const testEmail = "admin-reminder-ci-" + randomUUID() + "@example.invalid";
+  const testPassword = randomBytes(24).toString("base64url");
+  const testUser = check(await admin.auth.admin.createUser({
+    email: testEmail, password: testPassword, email_confirm: true, user_metadata: { display_name: "Admin fixture" },
+  }), "Create local admin").user.id;
+  const testBrowser = makeUserClient();
+  const testSigned = check(await testBrowser.auth.signInWithPassword({ email: testEmail, password: testPassword }), "Sign in admin fixture");
+  const testSession = getVerifiedSessionId("Bearer " + testSigned.session.access_token, testUser);
+  assert.ok(testSession);
+  const testEndpoint = endpoint + "-admin";
+  sql("begin;\n" +
+    "update public.profiles set is_active=true where id='" + testUser + "';\n" +
+    "update public.timeline_nodes set is_active=false where service_id is null and service_type='六晚崇';\n" +
+    "insert into public.timeline_nodes(id,service_type,time,title,sort_order,is_active) values " +
+    ["18:30","19:00","19:00","19:01"].map((time,i)=>"('__admin_ci_" + i + "__','六晚崇','" + time + "','Admin fixture'," + i + ",true)").join(",") + ";\ncommit;");
+  const testRegisterArgs = {
+    p_user_id: testUser,p_session_id: testSession,p_service_type: "六晚崇",p_endpoint: testEndpoint,
+    p_p256dh: subscription.keys.p256dh,p_auth_secret: subscription.keys.auth,p_at: testOpt,
+  };
+  equal((await rpc("register_admin_timeline_reminder_device",testRegisterArgs)).length,0,"Non-admin rejected even via trusted service-role RPC");
+  sql("insert into public.user_roles(user_id,role) values('" + testUser + "','admin') on conflict do nothing;");
+  equal((await rpc("register_admin_timeline_reminder_device",testRegisterArgs)).length,1,"Admin weekday registration without check-in");
+  assert.ok((await testBrowser.rpc("register_admin_timeline_reminder_device",testRegisterArgs)).error,"Admin cannot call service-only registration directly");
+  const testStore = at => ({
+    claim: limit => rpc("claim_admin_timeline_reminders",{p_at:at,p_limit:limit}),
+    take: async id => (await rpc("take_admin_timeline_reminder",{p_delivery_id:id,p_at:at}))[0] ?? null,
+    finish: (id,state,status) => rpc("finish_admin_timeline_reminder",{p_delivery_id:id,p_state:state,p_provider_status:status,p_at:at}),
+  });
+  const testSender = (sub,cue) => sendBackgroundPush(sub,{...cue,adminTest:true},keys,async (url,options) => {
+    equal(url,testEndpoint,"Admin fixture endpoint");
+    const decrypted=ece.decrypt(Buffer.from(options.body),{version:"aes128gcm",privateKey:receiver,authSecret:auth}).toString("utf8");
+    const payload=JSON.parse(decrypted);
+    assert.deepEqual(Object.keys(payload).sort(),["date","id","kind","service","time"]);
+    equal(payload.kind,"service-task-reminder-admin-test","Test-only notification marker");
+    equal(payload.date,testDay,"Weekday notification date");
+    equal(payload.service,"六晚崇","Selected timeline");
+    await push(decrypted);
+    return new Response(null,{status:201});
+  },()=>Date.parse(testDue));
+  const testPair=await Promise.all([
+    dispatchBackgroundReminders(testStore(testDue),testSender),
+    dispatchBackgroundReminders(testStore(testDue),testSender),
+  ]);
+  equal(testPair.reduce((sum,x)=>sum+x.accepted,0),1,"Admin test concurrent dispatch");
+  equal(notifications.at(-1).body,testDay+" 六晚崇 19:00 任務到點（管理員測試）","Test-only worker display");
+  equal(notifications.length,2,"No duplicate test notification");
+  equal((await rpc("claim_background_task_reminders",{p_at:testDue,p_limit:50})).length,0,"Formal dispatch still closed on Thursday");
+  const testClaims=await testStore(testNext).claim(50);
+  equal(testClaims.length,1,"Next admin cue claimed");
+  check(await testBrowser.auth.signOut(),"Admin Auth sign-out");
+  equal(await testStore(testNext).take(testClaims[0].delivery_id),null,"Admin sign-out suppresses claimed cue");
+  stages.push("admin Thursday REST registration without check-in, role rejection, concurrent encrypted delivery, worker marker and sign-out");
+
   // pg_cron interval capability is verified only in this disposable database,
   // with a harmless SQL job unscheduled in the same transaction. No push.
   sql("begin;\ncreate extension if not exists pg_cron;\n" +
