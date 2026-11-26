@@ -1,3 +1,4 @@
+-- CLI-generated migration filename from isolated CI run 45827475464.
 
 -- Isolated admin-only task-time testing; never create a formal check-in.
 -- No job, secret, device or notification is created by this migration.
@@ -46,11 +47,12 @@ create function background_reminder_private.admin_test_blocks(p_service text,p_d
 returns table(scheduled_at timestamptz)
 language sql stable security invoker set search_path=pg_catalog as $$
  select b.scheduled_at from (
-  select distinct case when n.time ~ '^(0?[0-9]|1[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?
+  select distinct case when n.time ~ '^(0?[0-9]|1[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$'
+    then (p_date+make_time(split_part(n.time,':',1)::integer,
+      split_part(n.time,':',2)::integer,0)) at time zone 'Asia/Taipei' end as scheduled_at
   from public.timeline_nodes n
   where n.service_id is null and n.is_active and n.service_type=p_service
-    and n.time ~ '^(0?[0-9]|1[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$'
- ) b order by b.scheduled_at offset 1;
+ ) b where b.scheduled_at is not null order by b.scheduled_at offset 1;
 $$;
 
 create function public.register_admin_timeline_reminder_device(
@@ -183,6 +185,9 @@ as $$
     when p_at is null then false
     when extract(second from p_at at time zone 'Asia/Taipei') > 20 then false
     when exists (
+      select 1 from background_reminder_private.admin_test_devices d
+      where d.enabled and d.expires_at > p_at
+    ) and exists (
       select 1 from background_reminder_private.admin_test_candidates(p_at) c
       where not exists (
         select 1 from background_reminder_private.admin_test_deliveries l

@@ -20,7 +20,8 @@ function readProductionPushConfig(): { keys: PushKeys; dispatcherSecret: string 
 }
 
 export function getBackgroundPushConfig() {
-  return process.env.ENABLE_BACKGROUND_TASK_REMINDERS === "true" ? readProductionPushConfig() : null;
+  if (process.env.ENABLE_BACKGROUND_TASK_REMINDERS !== "true") return null;
+  return readProductionPushConfig();
 }
 
 // Independent rollout switch; enabling admin testing never enables formal sends.

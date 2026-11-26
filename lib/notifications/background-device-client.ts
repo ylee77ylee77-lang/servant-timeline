@@ -226,12 +226,12 @@ export async function syncBackgroundDevice(input: {
     const formalBinding = input.formalEnabled !== false && Boolean(input.serviceType && input.checkInId);
     const current = () => (!input.isCurrent || input.isCurrent()) && hasReminderConsent(input.userId);
     if (!current()) return { message: "背景提醒同步中…" };
-    if (input.adminTestEnabled && (formalBinding || !input.adminTestService)) {
-      const stopped = await fetchDevice(input.accessToken, { action: "disable-admin-test", endpoint: sub.endpoint });
-      if (!stopped.ok) {
-        // Formal registration remains independent of the test-only API.
-        if (!formalBinding) throw new Error("Admin test stop unavailable");
-      }
+    // Do not reset an active admin test just because a local check-in was
+    // attempted. Only the server can establish a real formal binding.
+    const stopTest = () => fetchDevice(input.accessToken, { action: "disable-admin-test", endpoint: sub.endpoint });
+    if (input.adminTestEnabled && !input.adminTestService && !formalBinding) {
+      const stopped = await stopTest();
+      if (!stopped.ok) throw new Error("Admin test stop unavailable");
     }
     if (!current()) return { message: "背景提醒同步中…" };
     let response: Response | undefined;
@@ -242,6 +242,11 @@ export async function syncBackgroundDevice(input: {
       // An admin's local test check-in is not a formal DB binding.
       // Only a server-side 409 permits fallback to isolated testing.
       if (response.status !== 409 || !input.adminTestEnabled || !input.adminTestService) {
+        if (input.adminTestEnabled && (response.ok || !input.adminTestService) && current()) {
+          // The server already excludes formal bindings from test dispatch.
+          // Revocation is best-effort here; never interrupt formal reminders.
+          await stopTest().catch(() => null);
+        }
         if (response.status === 409) return { message: "目前沒有可啟用的有效報到，請確認堂次及服事時間。", action: "retry" };
         if (!response.ok) throw new Error("Device registration unavailable");
       } else response = undefined;
@@ -262,10 +267,6 @@ export async function syncBackgroundDevice(input: {
     if (!response) return { message: input.adminTestEnabled
       ? "已允許通知，選擇堂次並進入流程即可測試。"
       : "已允許通知，完成報到後啟用背景提醒。" };
-    if (response.status === 409) {
-      return { message: "目前沒有可啟用的有效報到，請確認堂次及服事時間。", action: "retry" };
-    }
-    if (!response.ok) throw new Error("Device registration unavailable");
     const data = await response.json();
     if (data.enabled !== true) throw new Error("Device registration incomplete");
     const expires = Date.parse(data.expiresAt);

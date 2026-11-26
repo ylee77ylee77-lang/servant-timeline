@@ -29,7 +29,8 @@ begin
  ('__admin_vib_1__','六晚崇','19:00','任務',1,true),
  ('__admin_vib_2__','六晚崇','19:00','同分鐘',2,true),
  ('__admin_vib_3__','六晚崇','19:01','下一任務',3,true),
- ('__admin_vib_disabled__','六晚崇','18:40','停用',4,false);
+ ('__admin_vib_disabled__','六晚崇','18:40','停用',4,false),
+ ('__admin_vib_invalid__','六晚崇','invalid','無效時間',5,true);
  if exists(select 1 from public.register_admin_timeline_reminder_device(v,sv,'六晚崇',ep,repeat('A',87),repeat('B',22),opt))
  or exists(select 1 from public.register_admin_timeline_reminder_device(a,sv,'六晚崇',ep,repeat('A',87),repeat('B',22),opt))
  then raise exception 'Unauthorized registration'; end if;
@@ -50,8 +51,19 @@ begin
  if public.disable_admin_timeline_reminder_device(v,ep,due) then raise exception 'Foreign owner revoked device'; end if;
  if not public.disable_admin_timeline_reminder_device(a,ep,due) then raise exception 'Owner revoke failed'; end if;
  if exists(select 1 from background_reminder_private.admin_test_candidates(due+interval '1 minute') where device_id=dev) then raise exception 'Disabled device dispatched'; end if;
- perform public.register_admin_timeline_reminder_device(a,sa,'六晚崇',ep,repeat('A',87),repeat('B',22),due+interval '1 second');
+ if not exists(select 1 from public.register_admin_timeline_reminder_device(a,sa,'六晚崇',ep,repeat('A',87),repeat('B',22),due+interval '1 second') r where r.device_id=dev)
+ then raise exception 'Expected same device on re-enable'; end if;
+ if (select count(*) from background_reminder_private.admin_test_candidates(due+interval '1 minute') where device_id=dev)<>1
+ then raise exception 'Expected future cue after re-enable'; end if;
+ if exists(select 1 from background_reminder_private.admin_test_candidates(due+interval '30 seconds') where device_id=dev)
+ or exists(select 1 from background_reminder_private.admin_test_candidates(due+interval '1 day') where device_id=dev)
+ then raise exception 'Past or next-day cue must not be replayed'; end if;
  delete from public.user_roles where user_id=a and role='admin';
  if exists(select 1 from background_reminder_private.admin_test_candidates(due+interval '1 minute') where device_id=dev) then raise exception 'Demoted admin dispatched'; end if;
+ insert into public.user_roles(user_id,role) values(a,'admin') on conflict do nothing;
+ delete from auth.sessions where id=sa;
+ if exists(select 1 from background_reminder_private.admin_test_candidates(due+interval '1 minute') where device_id=dev)
+ or exists(select 1 from public.register_admin_timeline_reminder_device(a,sa,'六晚崇',ep,repeat('A',87),repeat('B',22),due+interval '1 minute'))
+ then raise exception 'Revoked session must not dispatch or register'; end if;
 end $$;
 rollback;
