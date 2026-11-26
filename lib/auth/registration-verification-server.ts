@@ -50,16 +50,28 @@ export function registrationMailOrigin() {
 export async function getRegistrationDraft(sessionDigest: string) {
   if (!sessionDigest) return null;
   const { data, error } = await getSupabaseAdminClient().from("registration_email_challenges")
-    .select("display_name,account_code,contact_email,status,created_at,expires_at")
-    .eq("session_digest", sessionDigest).maybeSingle();
+    .select("display_name,account_code,contact_email,status,created_at,expires_at,session_digest,linked_from_session_digest,handoff_used,attempts")
+    .or("session_digest.eq." + sessionDigest + ",linked_from_session_digest.eq." + sessionDigest)
+    .maybeSingle();
   if (error) throw error;
-  if (!data || !["pending", "verified", "locked"].includes(data.status)) return null;
+  if (!data) return null;
+  const isCurrent = data.session_digest === sessionDigest;
+  if (!isCurrent && !["verified", "consumed"].includes(data.status)) return null;
+  if (isCurrent && !["pending", "verified", "locked"].includes(data.status)) return null;
+  const now = Date.now();
+  const expires = Date.parse(data.expires_at);
+  const resumeUntil = Math.min(expires, Date.parse(data.created_at) + 10 * 60_000);
+  const status = !isCurrent && data.status === "consumed" ? "used_elsewhere"
+    : expires <= now ? "expired"
+    : !isCurrent ? "verified_elsewhere" : String(data.status);
   return {
     displayName: String(data.display_name),
     accountCode: String(data.account_code),
     contactEmail: String(data.contact_email),
-    status: Date.parse(data.expires_at) <= Date.now() ? "expired" : String(data.status),
+    status,
     resendAt: new Date(Date.parse(data.created_at) + 60_000).toISOString(),
     expiresAt: String(data.expires_at),
+    resumeUntil: status === "verified_elsewhere" && !data.handoff_used && data.attempts < 5 && resumeUntil > now
+      ? new Date(resumeUntil).toISOString() : null,
   };
 }

@@ -16,7 +16,7 @@ import { getRequestClientIp } from "@/lib/network/church-wifi";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const verificationError = "驗證已失效或已在其他介面完成，請重新發送驗證信。";
+const verificationError = "驗證連結或驗證碼已失效或使用，請確認原註冊介面的進度。";
 
 export async function GET(request: NextRequest) {
   try {
@@ -68,7 +68,6 @@ export async function POST(request: NextRequest) {
         await sendRegistrationVerificationEmail({
           toEmail: contactEmail, code,
           verifyUrl: registrationLink(origin, "verify", link),
-          copyUrl: registrationLink(origin, "copy", code),
         });
       } catch {
         await supabase.from("registration_email_challenges").update({ status: "invalidated" })
@@ -79,14 +78,25 @@ export async function POST(request: NextRequest) {
     }
     if (action === "verify-code") {
       if (!sessionDigest || !isRegistrationCode(body.code)) return registrationResponse({ error: "請輸入六位數驗證碼。" }, 400);
-      const { data: result, error } = await supabase.rpc("registration_email_verify_code", {
-        p_session: sessionDigest,
-        p_code: registrationCodeDigest(process.env.REGISTRATION_VERIFICATION_SECRET || "", sessionDigest, body.code),
+      const digest = registrationCodeDigest(process.env.REGISTRATION_VERIFICATION_SECRET || "", sessionDigest, body.code);
+      const first = await supabase.rpc("registration_email_verify_code", {
+        p_session: sessionDigest, p_code: digest,
       });
-      if (error) throw error;
+      if (first.error) throw first.error;
+      let result = first.data;
+      if (result === "invalid") {
+        const resume = await supabase.rpc("registration_email_resume", {
+          p_session: sessionDigest, p_code: digest,
+        });
+        if (resume.error) throw resume.error;
+        result = resume.data;
+      }
       if (result !== "verified") {
         return registrationResponse({ error: result === "incorrect" ? "驗證碼錯誤，請重新輸入。"
-          : result === "locked" ? "驗證碼錯誤已達 5 次，請重新發送。" : verificationError,
+          : result === "locked" ? "驗證碼錯誤已達 5 次，請重新發送。"
+          : result === "resume_locked" ? "接續註冊的驗證碼錯誤已達 5 次，請在已驗證的網頁繼續。"
+          : result === "resume_unavailable" ? "此介面已無法接續，請在持有註冊資格的介面繼續。"
+          : verificationError,
           draft: await getRegistrationDraft(sessionDigest) }, 400);
       }
       return registrationResponse({ draft: await getRegistrationDraft(sessionDigest) });

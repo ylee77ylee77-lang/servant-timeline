@@ -2,9 +2,10 @@ export type RegistrationDraft = {
   displayName: string;
   accountCode: string;
   contactEmail: string;
-  status: "pending" | "verified" | "locked" | "expired";
+  status: "pending" | "verified" | "verified_elsewhere" | "used_elsewhere" | "locked" | "expired";
   resendAt: string;
   expiresAt: string;
+  resumeUntil: string | null;
 };
 
 export const REGISTRATION_PROGRESS_KEY = "shekinah_registration_pending_v1";
