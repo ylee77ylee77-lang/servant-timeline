@@ -51,7 +51,8 @@ test("registration and profile share the same titled sticky live avatar header",
 
   assert.match(registration, /title="大頭貼"/);
   assert.match(settings, /title="大頭貼"/);
-  assert.match(registration, /summary=\{\["選填"/);
+  assert.match(registration, /summary="選填"/);
+  assert.doesNotMatch(registration, /summary=[^\n]*選填[^\n]*AVATAR_DISPLAY_LABELS/);
   assert.match(registration, /icon=\{<SystemAvatar config=\{registrationAvatar\}/);
   assert.match(settings, /icon=\{<SystemAvatar config=\{headingAvatar\}/);
   assert.match(registration, /size=\{registrationAvatarOpen \? 80 : 52\}/);
