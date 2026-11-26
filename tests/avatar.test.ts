@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   getDefaultAvatarConfig,
+  getDefaultRegistrationAvatarConfig,
   isAvatarPersonalized,
   normalizeAvatarConfig,
   getAvatarNameMark,
@@ -23,6 +24,16 @@ test("avatar defaults keep a clear neutral fallback", () => {
     iconType: "cross",
     iconTone: "lavender",
   });
+});
+
+test("new registration defaults to the name mark without changing existing profile defaults", () => {
+  const config = getDefaultRegistrationAvatarConfig();
+  assert.deepEqual(config, { ...getDefaultAvatarConfig(), displayMode: "name" });
+  assert.equal(getAvatarNameMark("王小明"), "小明");
+  assert.deepEqual(normalizeAvatarConfig(JSON.parse(JSON.stringify(config))), config);
+  assert.equal(normalizeAvatarConfig(undefined).displayMode, "custom");
+  assert.equal(normalizeAvatarConfig({ ...config, displayMode: "custom", style: "feminine" }).style, "feminine");
+  assert.equal(normalizeAvatarConfig({ ...config, displayMode: "default", iconType: "church" }).iconType, "church");
 });
 
 test("avatar normalization preserves valid masculine and feminine choices", () => {

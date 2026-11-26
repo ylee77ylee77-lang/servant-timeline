@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { accountCodeToInternalEmail } from "../lib/auth/account-code.ts";
+import { normalizeAvatarConfig } from "../lib/profile/avatar.ts";
 import {
   createRegistrationToken, registrationDigest, registrationCodeDigest,
   REGISTRATION_COOKIE,
@@ -105,9 +106,13 @@ function registrationBody(fixture) {
   return { ...fixture.identity, password: randomBytes(18).toString("base64url") };
 }
 async function verifyCreated(fixture, body) {
-  const profile = check(await admin.from("profiles").select("id,is_active,display_name")
+  const profile = check(await admin.from("profiles").select("id,is_active,display_name,avatar_config")
     .eq("account_code", fixture.identity.accountCode).single(), "Created profile");
   assert.equal(profile.display_name, fixture.identity.displayName);
+  assert.equal(profile.avatar_config.displayMode, body.avatarConfig?.displayMode ?? "name", "Persist name default or explicit selection");
+  if (body.avatarConfig) {
+    assert.deepEqual(profile.avatar_config, normalizeAvatarConfig(body.avatarConfig), "Preserve explicit avatar choices");
+  }
   assert.equal(profile.is_active, false, "No unreviewed activation");
   const roles = check(await admin.from("user_roles").select("role").eq("user_id", profile.id), "Created roles");
   assert.equal(roles.length, 0, "No unreviewed role");
@@ -175,7 +180,7 @@ try {
   stages.push("OTP, leading zero, origin protection, unauthenticated denial, concurrent completion, unchanged sign-in and contact invalidation");
 
   const link = await seed("LINK");
-  const linkBody = registrationBody(link);
+  const linkBody = { ...registrationBody(link), avatarConfig: { displayMode: "default", iconType: "church", iconTone: "blue" } };
   const opening = await request(route, { action: "verify-link", token: link.link });
   status(opening, 200, "Different browser link");
   const newCookie = cookieFrom(opening);
@@ -197,7 +202,7 @@ try {
   stages.push("Shared verified status, original browser cannot claim without proof, browser continuation");
 
   const handoff = await seed("HANDOFF");
-  const handoffBody = registrationBody(handoff);
+  const handoffBody = { ...registrationBody(handoff), avatarConfig: { displayMode: "custom", style: "feminine", pet: "eagle" } };
   const handoffLink = await request(route, { action: "verify-link", token: handoff.link });
   status(handoffLink, 200, "Link before handoff");
   const browserCookie = cookieFrom(handoffLink);
@@ -225,6 +230,7 @@ try {
   assert.equal(failure.cookie, "", "No verification cookie for failed send");
   stages.push("Mail configuration failure cannot authorize registration");
 
+  stages.push("New registration defaults to name identification; explicit faith icons and custom portraits are preserved");
   for (const stage of stages) console.log("PASS: " + stage);
 } finally {
   server.kill("SIGTERM");

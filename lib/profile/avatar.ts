@@ -135,6 +135,13 @@ export function getDefaultAvatarConfig(style: AvatarStyle = "neutral"): AvatarCo
   return { ...AVATAR_DEFAULTS[style] };
 }
 
+/** Optional avatar setup starts with the existing name display mode.
+ * Keep the general fallback unchanged for existing profiles and portrait editing.
+ */
+export function getDefaultRegistrationAvatarConfig(): AvatarConfig {
+  return { ...getDefaultAvatarConfig(), displayMode: "name" };
+}
+
 function normalizeMaterialColors(value: unknown): AvatarMaterialColors | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const input = value as Record<string, unknown>;

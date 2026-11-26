@@ -27,7 +27,7 @@ import { AvatarIconPicker } from "@/components/profile/AvatarIconPicker";
 import { AvatarDisplayModeSelector } from "@/components/profile/AvatarControls";
 import { SettingsAccordionCard } from "@/components/profile/SettingsAccordionCard";
 import { SystemAvatar } from "@/components/profile/SystemAvatar";
-import { getDefaultAvatarConfig, normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
+import { getDefaultAvatarConfig, getDefaultRegistrationAvatarConfig, normalizeAvatarConfig, type AvatarConfig } from "@/lib/profile/avatar";
 
 export type AppRole = "volunteer" | "coordinator" | "admin";
 
@@ -74,7 +74,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [registrationContactEmail, setRegistrationContactEmail] = useState("");
   const [registrationPassword, setRegistrationPassword] = useState("");
   const [registrationPasswordConfirm, setRegistrationPasswordConfirm] = useState("");
-  const [registrationAvatar, setRegistrationAvatar] = useState<AvatarConfig>(getDefaultAvatarConfig());
+  const [registrationAvatar, setRegistrationAvatar] = useState<AvatarConfig>(getDefaultRegistrationAvatarConfig);
   const [registrationAvatarOpen, setRegistrationAvatarOpen] = useState(false);
   const [registrationMessage, setRegistrationMessage] = useState("");
   const [registrationIsError, setRegistrationIsError] = useState(false);
@@ -522,7 +522,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setRegistrationContactEmail("");
       setRegistrationPassword("");
       setRegistrationPasswordConfirm("");
-      setRegistrationAvatar(getDefaultAvatarConfig());
+      setRegistrationAvatar(getDefaultRegistrationAvatarConfig());
       setRegistrationAvatarOpen(false);
     } catch (error) {
       setRegistrationIsError(true);
