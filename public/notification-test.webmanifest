@@ -1,0 +1,17 @@
+{
+  "name": "夏凱納招待｜系統通知測試",
+  "short_name": "招待通知測試",
+  "id": "/notification-test",
+  "start_url": "/notification-test",
+  "scope": "/notification-test",
+  "display": "standalone",
+  "background_color": "#FFF9F3",
+  "theme_color": "#008A7A",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "any"
+    }
+  ]
+}
