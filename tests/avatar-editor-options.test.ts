@@ -1,18 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {normalizeAvatarConfig} from "../lib/profile/avatar.ts";
-import {getAvatarEditorGroups,toggleAvatarOption,selectAvatarEditorRole,type AvatarEditorSection} from "../lib/profile/avatar-editor-options.ts";
+import {getAvatarEditorGroups,groupAvatarEditorFeatures,toggleAvatarEditorFeature,toggleAvatarEditorColor,selectAvatarEditorRole,type AvatarEditorExpansion} from "../lib/profile/avatar-editor-options.ts";
+import {getAvatarOutfitOptions,getAvatarOutfitChannels,selectAvatarFormalOutfit,setAvatarOutfitColor} from "../lib/profile/avatar-formal-outfit.ts";
+import {getAvatarLensPlan,selectAvatarLegacyEyewear} from "../lib/profile/avatar-eyewear.ts";
+import {AVATAR_LENS_DEFAULT_COLOR} from "../lib/profile/avatar-lens.ts";
+import {getAvatarIndependentOptions,selectAvatarIndependent} from "../lib/profile/avatar-independent.ts";
+import {getAvatarHairstyleOptions,selectAvatarHairstyle} from "../lib/profile/avatar-hairstyle.ts";
 import {getAvatarScene} from "../lib/profile/avatar-scene.ts";
 import {getAvatarIndependent} from "../lib/profile/avatar-independent.ts";
 import {getAvatarMaterialChannels} from "../lib/profile/avatar-materials.ts";
 
-test("the text editor has one disclosure state shared by choices and colors",()=>{
-  let current:AvatarEditorSection|null=null;
-  for(const next of ["role","face","hairstyle","hair","skin","eyewear","frame","lens","outfit","clothing","background","pet"] as const){
-    current=toggleAvatarOption(current,next);
-    assert.equal(current,next);
+test("one main feature and one of its own color controls can be open",()=>{
+  let current:AvatarEditorExpansion={group:null,color:null};
+  for(const [group,part] of [["face","skin"],["hairstyle","hair"],["eyewear","frame"],["outfit","clothing"]] as const){
+    current=toggleAvatarEditorFeature(current,group);
+    assert.deepEqual(current,{group,color:null});
+    current=toggleAvatarEditorColor(current,part);
+    assert.deepEqual(current,{group,color:part});
   }
-  assert.equal(toggleAvatarOption(current,"pet"),null);
+  assert.equal(toggleAvatarEditorColor(current,"lens"),current);
+  assert.deepEqual(toggleAvatarEditorColor(current,"lining"),{group:"outfit",color:"lining"});
+  assert.deepEqual(toggleAvatarEditorColor(current,"clothing"),{group:"outfit",color:null});
+  assert.deepEqual(toggleAvatarEditorFeature(current,"outfit"),{group:null,color:null});
+  assert.deepEqual(toggleAvatarEditorFeature(current,"pet"),{group:"pet",color:null});
 });
 
 test("role, face and hair descriptions match their registered assets without changing IDs",()=>{
@@ -66,4 +77,60 @@ test("all outfit, background, companion and eyewear text choices keep original s
   const neutral=getAvatarEditorGroups(normalizeAvatarConfig({style:"neutral"}),false);
   assert.equal(neutral.find(g=>g.id==="role")?.choices.filter(c=>c.selected).length,0);
   assert.equal(neutral.find(g=>g.id==="eyewear")?.emptyText,"請先選擇角色。");
+});
+
+test("seven feature cards own all applicable channels across old and independent portraits, frames and outfits",()=>{
+  for(const style of ["masculine","feminine"] as const){
+    const base=normalizeAvatarConfig({style,glasses:true,lens:{color:"#ABCDEF",transparency:65},materialColors:{hair:"#112233",skin:"#AABBCC",frame:"#654539"}});
+    const portraits=[base,...getAvatarHairstyleOptions(style).map(option=>selectAvatarHairstyle(base,option.id)),...getAvatarIndependentOptions(style).map(option=>selectAvatarIndependent(base,option.id))];
+    for(const portrait of portraits){
+      for(const frame of ["none","classic","round","square"] as const){
+        const framed=selectAvatarLegacyEyewear(portrait,frame);
+        for(const id of ["original" as const,...getAvatarOutfitOptions(style).map(option=>option.id)]){
+          const avatar=selectAvatarFormalOutfit(framed,id);
+          const material=getAvatarMaterialChannels(avatar);
+          const lens=getAvatarLensPlan(avatar,getAvatarScene(avatar).portrait);
+          const outfit=getAvatarOutfitChannels(avatar);
+          const channels=[...material,...(lens?[{part:"lens" as const,original:AVATAR_LENS_DEFAULT_COLOR}]:[]),...outfit];
+          const features=groupAvatarEditorFeatures(getAvatarEditorGroups(avatar,material.length>0),channels);
+          assert.deepEqual(features.map(group=>group.id),["role","face","hairstyle","eyewear","outfit","background","pet"]);
+          assert.deepEqual(features.map(group=>group.title),["角色","臉型","髮型","眼鏡","服裝","背景","動物"]);
+          assert.deepEqual(features.find(group=>group.id==="face")?.colorChannels.map(c=>c.part),["skin"]);
+          assert.deepEqual(features.find(group=>group.id==="hairstyle")?.colorChannels.map(c=>c.part),["hair"]);
+          assert.deepEqual(features.find(group=>group.id==="eyewear")?.colorChannels.map(c=>c.part),frame==="none"?[]:["frame","lens"]);
+          assert.deepEqual(features.find(group=>group.id==="outfit")?.colorChannels,outfit);
+          assert.deepEqual(features.flatMap(group=>group.colorChannels.map(c=>c.part)).sort(),channels.map(c=>c.part).sort());
+          assert.deepEqual(avatar.lens,base.lens);
+          assert.deepEqual(avatar.materialColors,base.materialColors);
+          for(const group of features)for(const choice of group.choices){
+            assert.equal(typeof choice.label,"string");
+          }
+        }
+      }
+    }
+  }
+});
+
+test("legacy fixed hair-tone fallback stays inside the hairstyle card",()=>{
+  const avatar=normalizeAvatarConfig({style:"masculine"});
+  const raw=getAvatarEditorGroups(avatar,false);
+  const features=groupAvatarEditorFeatures(raw,[]);
+  assert.equal(features.length,7);
+  assert.equal(features.find(group=>group.id==="hairstyle")?.secondaryChoices?.title,"髮色");
+  assert.deepEqual(features.find(group=>group.id==="hairstyle")?.secondaryChoices?.choices.map(c=>c.label),["深棕色","黑色"]);
+});
+
+test("switching compatible styles preserves saved colors without adding unsupported outfit channels",()=>{
+  const base=normalizeAvatarConfig({style:"masculine",glasses:true,lens:{color:"#AA88CC",transparency:65},materialColors:{hair:"#654539",skin:"#AABBCC",frame:"#987654"}});
+  const suit=setAvatarOutfitColor(setAvatarOutfitColor(setAvatarOutfitColor(selectAvatarFormalOutfit(base,"suit-tie"),"clothing","#345678"),"lining","#ABCDEF"),"tie","#123456");
+  const shirt=selectAvatarFormalOutfit(suit,"dress-shirt");
+  assert.deepEqual(shirt.formalOutfit?.colors,{clothing:"#345678"});
+  const hairstyle=selectAvatarIndependent(shirt,"male-b-short");
+  const hidden=selectAvatarLegacyEyewear(hairstyle,"none");
+  const restored=selectAvatarLegacyEyewear(hidden,"round");
+  for(const avatar of [shirt,hairstyle,hidden,restored]){
+    assert.deepEqual(avatar.lens,base.lens);
+    assert.deepEqual(avatar.materialColors,base.materialColors);
+    assert.deepEqual(avatar.formalOutfit?.colors,{clothing:"#345678"});
+  }
 });

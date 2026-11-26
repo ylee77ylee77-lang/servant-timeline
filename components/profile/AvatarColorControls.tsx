@@ -22,6 +22,13 @@ type DraftCache = Partial<Record<AvatarPickerPart, Readonly<{
   selection: AvatarColorSelection;
 }>>>;
 
+/** The editor owns this cache so collapsing a feature cannot lose the local
+ * wheel position at zero brightness or saturation. Persisted RGB is unchanged. */
+export function useAvatarColorDraftCache() {
+  const [drafts,setDrafts]=useState<DraftCache>({});
+  return {drafts,setDrafts};
+}
+
 function ColorWheel({
   channel,
   color,
@@ -199,6 +206,7 @@ export function AvatarColorControls({
   lensTransparency,
   openPart,
   onTogglePart,
+  draftCache,
 }: {
   channels: readonly AvatarColorChannel[];
   values: ColorValues;
@@ -206,9 +214,11 @@ export function AvatarColorControls({
   lensTransparency?: {value:number;custom:boolean;onChange:(value:number)=>void;onReset:()=>void};
   openPart: AvatarPickerPart | null;
   onTogglePart: (part: AvatarPickerPart) => void;
+  draftCache: ReturnType<typeof useAvatarColorDraftCache>;
 }) {
-  // Controlled by the editor, so opening a color closes every other option card.
-  const [drafts, setDrafts] = useState<DraftCache>({});
+  // Only one nested color opens inside the active feature; local draft
+  // coordinates survive a feature switch because the editor owns the cache.
+  const {drafts,setDrafts}=draftCache;
   const id = useId();
 
   function changeColor(part: AvatarPickerPart, next: AvatarColorSelection | null) {
