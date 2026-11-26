@@ -803,7 +803,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
                       placeholder="輸入或貼上" aria-describedby="registration-otp-help"
                       className="mt-2 w-full rounded-xl border border-[#785AA5]/25 bg-white px-3 py-3 text-center text-xl font-bold tracking-[0.2em] text-[#785AA5] outline-none focus:border-[#785AA5]" />
                     <p id="registration-otp-help" className="mt-2 text-xs leading-5 text-[#7A7A73]">長按信件內的驗證碼複製，貼上六位數即可自動驗證，也可以點擊信件中的驗證連結。</p>
-                    <p className="mt-2 text-xs leading-5 text-[#7A7A73]">沒收到信？請查看垃圾郵件夾，並將確認為本系統的驗證信標記為非垃圾郵件。</p>
+                    <p className="mt-2 text-xs leading-5 text-[#7A7A73]">未收到驗證信？請查看垃圾郵件夾。</p>
                   </>
                 )}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
