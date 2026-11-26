@@ -7,7 +7,8 @@ import {AVATAR_CLASSIC_HAIR_TONES,AVATAR_GLASSES_LABELS,getAvatarPortraitOptions
 import type {AvatarPickerPart} from "./avatar-color-wheel.ts";
 
 export type AvatarEditorGroupId = "role"|"face"|"hairstyle"|"classic-hair-tone"|"eyewear"|"outfit"|"background"|"pet";
-export type AvatarEditorSection = AvatarEditorGroupId | AvatarPickerPart;
+export type AvatarEditorFeatureId = Exclude<AvatarEditorGroupId,"classic-hair-tone">;
+export type AvatarEditorExpansion = Readonly<{group:AvatarEditorFeatureId|null;color:AvatarPickerPart|null}>;
 export type AvatarEditorChoice = {id:string;label:string;selected:boolean;next:AvatarConfig};
 export type AvatarEditorGroup = {id:AvatarEditorGroupId;title:string;choices:AvatarEditorChoice[];emptyText?:string};
 export function toggleAvatarOption<T extends string>(current:T|null,next:T):T|null {
@@ -89,4 +90,44 @@ export function getAvatarEditorGroups(avatar:AvatarConfig,hasMaterialColors:bool
   add("background","背景",backgrounds.map(option=>choice(option.value,option.label,avatar.background===option.value,{...avatar,background:option.value})));
   add("pet","動物",pets.map(option=>choice(option.value,option.label,avatar.pet===option.value,{...avatar,pet:option.value})));
   return groups;
+}
+
+/** UI-only ownership. Every available color belongs to exactly one feature. */
+export const AVATAR_COLOR_FEATURE = {
+  skin:"face",hair:"hairstyle",frame:"eyewear",lens:"eyewear",
+  clothing:"outfit",lining:"outfit",tie:"outfit",
+} as const satisfies Record<AvatarPickerPart,AvatarEditorFeatureId>;
+
+export type AvatarEditorFeature<T extends {part:AvatarPickerPart}> = Omit<AvatarEditorGroup,"id"> & {
+  id:AvatarEditorFeatureId;
+  colorChannels:T[];
+  secondaryChoices?:AvatarEditorGroup;
+};
+
+export function groupAvatarEditorFeatures<T extends {part:AvatarPickerPart}>(
+  groups:readonly AvatarEditorGroup[], channels:readonly T[],
+):AvatarEditorFeature<T>[] {
+  const fallback=groups.find(group=>group.id==="classic-hair-tone");
+  const features=groups.filter((group):group is AvatarEditorGroup & {id:AvatarEditorFeatureId}=>group.id!=="classic-hair-tone");
+  // Preserve the legacy fixed-tone fallback under hair rather than adding an
+  // eighth main card. Current registered portraits already have a hair group.
+  const entries=features.some(group=>group.id==="hairstyle")||!fallback
+    ? features
+    : [...features.slice(0,features.findIndex(group=>group.id==="eyewear")),
+        {id:"hairstyle" as const,title:"髮型",choices:[]},
+        ...features.slice(features.findIndex(group=>group.id==="eyewear"))];
+  return entries.map(group=>({
+    ...group,
+    colorChannels:channels.filter(channel=>AVATAR_COLOR_FEATURE[channel.part]===group.id),
+    ...(group.id==="hairstyle"&&fallback?{secondaryChoices:fallback}:{}),
+  }));
+}
+
+export function toggleAvatarEditorFeature(current:AvatarEditorExpansion,group:AvatarEditorFeatureId):AvatarEditorExpansion {
+  return {group:toggleAvatarOption(current.group,group),color:null};
+}
+
+export function toggleAvatarEditorColor(current:AvatarEditorExpansion,part:AvatarPickerPart):AvatarEditorExpansion {
+  if(AVATAR_COLOR_FEATURE[part]!==current.group)return current;
+  return {...current,color:toggleAvatarOption(current.color,part)};
 }
