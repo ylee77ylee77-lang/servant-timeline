@@ -1,9 +1,9 @@
 import { isServiceType, type ServiceType } from "./catalog.ts";
 
-export const DEFAULT_REHEARSAL_MINUTES = 20;
-export const MIN_REHEARSAL_MINUTES = 15;
-export const MAX_REHEARSAL_MINUTES = 60;
 const MINUTE_MS = 60_000;
+// Task pacing only; neither value limits the administrator-controlled session.
+const FIRST_BLOCK_OFFSET_MINUTES = 6;
+const BLOCK_INTERVAL_MINUTES = 2;
 
 export type RehearsalSourceNode = {
   id: string;
@@ -20,9 +20,12 @@ export type RehearsalBlock = {
 export type RehearsalPlan = {
   serviceType: ServiceType;
   startsAt: number;
-  expiresAt: number;
   blocks: RehearsalBlock[];
 };
+
+function validTimestamp(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0 && Number.isFinite(new Date(value).getTime());
+}
 
 function sourceSeconds(time: string): number {
   const match = /^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$/.exec(time);
@@ -30,28 +33,20 @@ function sourceSeconds(time: string): number {
   return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3] || 0);
 }
 
-/** Build an immutable-in-practice rehearsal clock from a server-read template.
- * Times are absolute epoch milliseconds, not a change to the live service clock.
- * Source IDs are references only: never use them as rehearsal write targets.
+/** Build a snapshot of task times from the server-recorded start event.
+ * The final task is not a session deadline. Only an authorized end event
+ * closes the session. Source IDs are references, never rehearsal write targets.
  */
 export function buildRehearsalPlan(input: {
   serviceType: unknown;
   nodes: readonly RehearsalSourceNode[];
   startsAt: number;
-  durationMinutes?: number;
 }): RehearsalPlan {
-  const { serviceType, nodes } = input;
-  const duration = input.durationMinutes ?? DEFAULT_REHEARSAL_MINUTES;
+  const { serviceType, nodes, startsAt } = input;
   if (typeof serviceType !== "string" || !isServiceType(serviceType)) {
     throw new Error("Invalid rehearsal service template");
   }
-  if (!Number.isSafeInteger(input.startsAt) || input.startsAt < 0
-    || !Number.isInteger(duration) || duration < MIN_REHEARSAL_MINUTES || duration > MAX_REHEARSAL_MINUTES) {
-    throw new Error("Invalid rehearsal window");
-  }
-  const startsAt = Math.ceil(input.startsAt / 1000) * 1000;
-  const expiresAt = startsAt + duration * MINUTE_MS;
-  if (!Number.isFinite(new Date(expiresAt).getTime())) throw new Error("Invalid rehearsal expiry");
+  if (!validTimestamp(startsAt)) throw new Error("Invalid rehearsal start");
   if (!nodes.length) throw new Error("Empty rehearsal timeline");
 
   const seen = new Set<string>();
@@ -67,44 +62,35 @@ export function buildRehearsalPlan(input: {
     group.push(node);
     groups.set(second, group);
   }
-  const times = [...groups.keys()].sort((a, b) => a - b);
-  // Leave a minute for initial check-in and a minute for final wrap-up.
-  // Distinct blocks remain distinct even when the source has uneven intervals.
-  const lastSlot = duration - 1;
-  if (times.length > lastSlot) throw new Error("Rehearsal duration is too short for the timeline");
-  let previousSlot = 0;
-  const blocks = times.map((time, index): RehearsalBlock => {
-    const remaining = times.length - index - 1;
-    const ideal = times.length === 1 ? Math.min(6, lastSlot)
-      : 1 + Math.round((time - times[0]) / (times[times.length - 1] - times[0]) * (lastSlot - 1));
-    const slot = Math.max(previousSlot + 1, Math.min(ideal, lastSlot - remaining));
-    previousSlot = slot;
+  // Minute-aligned task timestamps support the existing HH:mm timeline display.
+  // The first block leaves room to test the default five-minute advance reminder.
+  const anchor = Math.ceil(startsAt / MINUTE_MS) * MINUTE_MS;
+  const blocks = [...groups.keys()].sort((a, b) => a - b).map((time, index): RehearsalBlock => {
+    const dueAt = anchor + (FIRST_BLOCK_OFFSET_MINUTES + index * BLOCK_INTERVAL_MINUTES) * MINUTE_MS;
+    if (!validTimestamp(dueAt)) throw new Error("Invalid rehearsal task time");
     const group = groups.get(time)!;
     return {
       sourceTimeSeconds: time,
       sourceNodeIds: [...group].sort((a, b) => a.sort_order - b.sort_order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map(node => node.id),
-      dueAt: startsAt + slot * MINUTE_MS,
+      dueAt,
     };
   });
-  return { serviceType, startsAt, expiresAt, blocks };
+  return { serviceType, startsAt, blocks };
 }
 
 export type RehearsalWindow = {
   startsAt: number;
-  expiresAt: number;
   endedAt: number | null;
 };
 
 export function isRehearsalOpen(window: RehearsalWindow, now: number): boolean {
-  return Number.isSafeInteger(now) && Number.isSafeInteger(window.startsAt)
-    && Number.isSafeInteger(window.expiresAt) && window.startsAt >= 0
-    && window.expiresAt > window.startsAt && window.endedAt === null
-    && now >= window.startsAt && now < window.expiresAt;
+  return validTimestamp(now) && validTimestamp(window.startsAt)
+    && window.endedAt === null && now >= window.startsAt;
 }
 
-/** Absolute due time for a reminder, bounded by the same rehearsal window.
- * A missed advance reminder is not shifted or replayed into the rehearsal.
- * The caller must enforce device settings, check-in and delivery deduplication.
+/** Calculate an absolute reminder time for a server-snapshot block.
+ * No early or ended-session reminder; the dispatcher must also recheck live
+ * admission, the current time/delivery window, and deduplication before sending.
  */
 export function rehearsalReminderDueAt(
   window: RehearsalWindow, blockDueAt: number, leadSeconds: number,

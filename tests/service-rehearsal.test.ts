@@ -15,48 +15,50 @@ const nodes = [
 const plan = () => buildRehearsalPlan({ serviceType, startsAt: start, nodes });
 const admission = (): RehearsalAdmission => ({
   actor: { userId: "user-a", roles: ["coordinator"], active: true, sessionLive: true },
-  rehearsal: { id: "rehearsal-a", startsAt: start, expiresAt: start + 20 * minute, endedAt: null },
+  rehearsal: { id: "rehearsal-a", startsAt: start, endedAt: null },
   membership: { rehearsalId: "rehearsal-a", userId: "user-a", revokedAt: null, checkedInAt: start + minute },
   now: start + 2 * minute, onChurchNetwork: true, hasFormalCheckIn: false,
 });
 
-test("weekday rehearsal compresses a copy, groups equal times and retains check-in/wrap-up margins", () => {
+test("manual start determines a copied timeline without imposing a session deadline", () => {
   const original = JSON.stringify(nodes);
   const p = plan();
   assert.equal(p.startsAt, start);
-  assert.equal(p.expiresAt, start + 20 * minute);
+  assert.equal("expiresAt" in p, false);
   assert.deepEqual(p.blocks.map(b => b.sourceNodeIds), [["a", "b"], ["c"], ["d"]]);
-  assert.deepEqual(p.blocks.map(b => b.dueAt), [start + minute, start + 8 * minute, start + 19 * minute]);
+  assert.deepEqual(p.blocks.map(b => b.dueAt), [start + 6 * minute, start + 8 * minute, start + 10 * minute]);
   assert.equal(JSON.stringify(nodes), original);
 });
 
-test("dense source blocks never collapse into the same rehearsal minute", () => {
-  const dense = Array.from({ length: 14 }, (_, i) => ({ id: String(i), time: "08:" + String(i).padStart(2, "0"), sort_order: i }));
-  const p = buildRehearsalPlan({ serviceType, startsAt: start, nodes: dense, durationMinutes: 15 });
-  assert.deepEqual(p.blocks.map(b => b.dueAt), dense.map((_, i) => start + (i + 1) * minute));
-  assert.throws(() => buildRehearsalPlan({ serviceType, startsAt: start, nodes: [...dense, { id: "last", time: "09:00", sort_order: 99 }], durationMinutes: 15 }));
+test("long timelines retain every block without a 15-60 minute session limit", () => {
+  const dense = Array.from({ length: 80 }, (_, i) => ({ id: String(i), time: String(8 + Math.floor(i / 60)).padStart(2, "0") + ":" + String(i % 60).padStart(2, "0"), sort_order: i }));
+  const p = buildRehearsalPlan({ serviceType, startsAt: start, nodes: dense });
+  assert.equal(p.blocks.length, dense.length);
+  assert.deepEqual(p.blocks.map(b => b.dueAt), dense.map((_, i) => start + (6 + i * 2) * minute));
+  assert.ok(p.blocks.at(-1)!.dueAt > start + 60 * minute);
 });
 
-test("invalid templates, duplicate nodes and unsupported durations fail closed", () => {
+test("invalid starts, templates, duplicate nodes and invalid task times fail closed", () => {
   assert.throws(() => buildRehearsalPlan({ serviceType: "training", startsAt: start, nodes }));
-  assert.throws(() => buildRehearsalPlan({ serviceType, startsAt: NaN, nodes }));
+  for (const startsAt of [NaN, -1, Infinity, 1.5, 8.64e15]) {
+    assert.throws(() => buildRehearsalPlan({ serviceType, startsAt, nodes }));
+  }
   assert.throws(() => buildRehearsalPlan({ serviceType, startsAt: start, nodes: [] }));
   assert.throws(() => buildRehearsalPlan({ serviceType, startsAt: start, nodes: [nodes[0], nodes[0]] }));
   assert.throws(() => buildRehearsalPlan({ serviceType, startsAt: start, nodes: [{ ...nodes[0], time: "24:00" }] }));
-  for (const durationMinutes of [14, 61, 20.5, NaN]) assert.throws(() => buildRehearsalPlan({ serviceType, startsAt: start, nodes, durationMinutes }));
 });
 
-test("absolute time works across midnight; no early or post-expiry reminder", () => {
+test("absolute time crosses midnight; only the manual end closes the session", () => {
   const p = buildRehearsalPlan({ serviceType, startsAt: Date.parse("2026-11-27T23:55:00+08:00"), nodes });
-  const w = { ...p, endedAt: null };
-  assert.equal(rehearsalReminderDueAt(w, p.blocks[0].dueAt, 300), null);
+  const w = { startsAt: p.startsAt, endedAt: null };
+  assert.equal(rehearsalReminderDueAt(w, p.blocks[0].dueAt, 420), null);
   assert.equal(rehearsalReminderDueAt(w, p.blocks[1].dueAt, 315), p.blocks[1].dueAt - 315_000);
   assert.equal(rehearsalReminderDueAt(w, p.blocks[2].dueAt, 0), p.blocks[2].dueAt);
-  assert.equal(rehearsalReminderDueAt(w, p.expiresAt, 0), null);
-  assert.equal(rehearsalReminderDueAt({ ...w, endedAt: p.startsAt }, p.blocks[2].dueAt, 0), null);
+  assert.equal(rehearsalReminderDueAt({ ...w, endedAt: p.startsAt + 2 * minute }, p.blocks[2].dueAt, 0), null);
   assert.equal(isRehearsalOpen(w, p.startsAt - 1), false);
   assert.equal(isRehearsalOpen(w, p.startsAt), true);
-  assert.equal(isRehearsalOpen(w, p.expiresAt), false);
+  assert.equal(isRehearsalOpen(w, p.blocks[2].dueAt + 120 * minute), true);
+  assert.equal(isRehearsalOpen({ ...w, endedAt: p.startsAt }, p.startsAt), false);
 });
 
 test("only an active, explicitly enrolled coordinator/admin with a live session is eligible", () => {
@@ -70,13 +72,12 @@ test("only an active, explicitly enrolled coordinator/admin with a live session 
   assert.equal(rehearsalDenial({ ...f, actor: { ...f.actor, sessionLive: false } }, "operate"), "account");
 });
 
-test("cross-user/cross-rehearsal access, revocation, expiry and early termination are denied", () => {
+test("cross-user/cross-rehearsal access, revocation and manual termination are denied", () => {
   const f = admission();
   const m = f.membership!;
   assert.equal(rehearsalDenial({ ...f, membership: { ...m, userId: "user-b" } }, "operate"), "membership");
   assert.equal(rehearsalDenial({ ...f, membership: { ...m, rehearsalId: "rehearsal-b" } }, "operate"), "membership");
   assert.equal(rehearsalDenial({ ...f, membership: { ...m, revokedAt: f.now } }, "operate"), "membership");
-  assert.equal(rehearsalDenial({ ...f, now: f.rehearsal.expiresAt }, "operate"), "closed");
   assert.equal(rehearsalDenial({ ...f, now: start - 1 }, "view"), "closed");
   assert.equal(rehearsalDenial({ ...f, rehearsal: { ...f.rehearsal, endedAt: f.now } }, "operate"), "closed");
 });
@@ -93,11 +94,28 @@ test("formal check-in wins; rehearsal check-in requires network and operation re
   assert.equal(rehearsalDenial({ ...f, onChurchNetwork: false }, "operate"), null);
 });
 
-test("unknown action is denied; one task leaves time for the default five-minute advance", () => {
+test("unknown action is denied; the start timestamp is exact and tasks align to minutes", () => {
   const f = admission();
   assert.equal(rehearsalDenial(f, "unknown" as RehearsalAction), "action");
   const p = buildRehearsalPlan({ serviceType, startsAt: start + 25, nodes: [nodes[0]] });
-  assert.equal(p.startsAt, start + 1000);
-  assert.equal(p.blocks[0].dueAt, p.startsAt + 6 * minute);
-  assert.equal(rehearsalReminderDueAt({ ...p, endedAt: null }, p.blocks[0].dueAt, 300), p.startsAt + minute);
+  assert.equal(p.startsAt, start + 25);
+  assert.equal(p.blocks[0].dueAt, start + 7 * minute);
+  assert.equal(rehearsalReminderDueAt({ startsAt: p.startsAt, endedAt: null }, p.blocks[0].dueAt, 300), start + 2 * minute);
+});
+
+test("participants stay eligible after the final block and beyond 60 minutes until manual end", () => {
+  const f = admission();
+  const now = plan().blocks.at(-1)!.dueAt + 90 * minute;
+  for (const action of ["view", "check-in", "operate"] as const) {
+    assert.equal(rehearsalDenial({ ...f, now }, action), null);
+    assert.equal(rehearsalDenial({ ...f, now, rehearsal: { ...f.rehearsal, endedAt: now } }, action), "closed");
+  }
+  assert.equal(rehearsalDenial({ ...f, now, hasFormalCheckIn: true }, "operate"), "formal-check-in");
+});
+
+test("invalid or unstarted windows are closed and an old membership cannot operate in a new session", () => {
+  const f = admission();
+  assert.equal(isRehearsalOpen({ startsAt: NaN, endedAt: null }, f.now), false);
+  assert.equal(isRehearsalOpen({ startsAt: start, endedAt: null }, NaN), false);
+  assert.equal(rehearsalDenial({ ...f, rehearsal: { ...f.rehearsal, id: "new-rehearsal" } }, "operate"), "membership");
 });
