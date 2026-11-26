@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
           .maybeSingle(),
         supabase
           .from("account_recovery_contacts")
-          .select("contact_email")
+          .select("contact_email,email_verified_at,email_verification_required")
           .eq("user_id", userId)
           .maybeSingle(),
       ]);
@@ -125,6 +125,13 @@ export async function POST(request: NextRequest) {
         { error: "此帳號尚未設定救援 Email，請先在帳號管理中補上 Email。" },
         { status: 409 }
       );
+    }
+
+    // New self-registered accounts must never receive credentials at an
+    // address changed after verification. Preserve the existing reviewed
+    // administrator recovery procedure for legacy/admin-created accounts.
+    if (contact.email_verification_required && !contact.email_verified_at) {
+      return NextResponse.json({ error: "此帳號的救援 Email 尚未驗證。請先確認本人並安排安全的帳號協助，不可寄送登入資料。" }, { status: 409 });
     }
 
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
