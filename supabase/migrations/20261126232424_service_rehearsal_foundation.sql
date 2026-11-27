@@ -17,13 +17,10 @@ create unique index service_rehearsals_one_open on public.service_rehearsals ((t
 create table public.service_rehearsal_members (
   rehearsal_id uuid not null references public.service_rehearsals(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
-  enrolled_at timestamptz not null,
-  enrolled_by uuid references public.profiles(id) on delete set null,
-  revoked_at timestamptz,
+  -- A row records actual participation, not permission or pre-enrollment.
+  -- Null check-in means no current rehearsal check-in.
   checked_in_at timestamptz,
-  primary key (rehearsal_id,user_id),
-  check (revoked_at is null or revoked_at >= enrolled_at),
-  check (checked_in_at is null or (checked_in_at >= enrolled_at and revoked_at is null))
+  primary key (rehearsal_id,user_id)
 );
 create index service_rehearsal_members_by_user on public.service_rehearsal_members(user_id,rehearsal_id);
 
@@ -99,28 +96,20 @@ $$;
 revoke all on function service_rehearsal_private.assert_admin(uuid,uuid) from public,anon,authenticated;
 grant execute on function service_rehearsal_private.assert_admin(uuid,uuid) to service_role;
 
-create function service_rehearsal_private.assert_members(p_users uuid[])
-returns void language plpgsql security invoker set search_path = pg_catalog
+-- Eligibility is evaluated from current account data, not a roster snapshot.
+-- A newly approved coordinator is eligible even after the rehearsal starts.
+create function service_rehearsal_private.is_eligible_user(p_user uuid)
+returns boolean language sql stable security invoker set search_path = pg_catalog
 as $$
-begin
-  if p_users is null or cardinality(p_users)=0 or array_position(p_users,null) is not null
-    or cardinality(p_users)<>(select count(distinct u.id) from unnest(p_users) u(id)) then
-    raise exception using errcode='22023',message='Invalid rehearsal members';
-  end if;
-  if exists (
-    select 1 from unnest(p_users) u(id) where not exists (
-      select 1 from public.profiles p join public.user_roles r on r.user_id=p.id
-      where p.id=u.id and p.is_active and r.role in ('coordinator','admin')
-    )
-  ) then
-    raise exception using errcode='42501',message='Inactive or ineligible rehearsal member';
-  end if;
-end;
+  select exists (
+    select 1 from public.profiles p join public.user_roles r on r.user_id=p.id
+    where p.id=p_user and p.is_active and r.role in ('coordinator','admin')
+  );
 $$;
-revoke all on function service_rehearsal_private.assert_members(uuid[]) from public,anon,authenticated;
-grant execute on function service_rehearsal_private.assert_members(uuid[]) to service_role;
+revoke all on function service_rehearsal_private.is_eligible_user(uuid) from public,anon,authenticated;
+grant execute on function service_rehearsal_private.is_eligible_user(uuid) to service_role;
 
-create function public.start_service_rehearsal(p_actor uuid,p_session uuid,p_service_type text,p_users uuid[])
+create function public.start_service_rehearsal(p_actor uuid,p_session uuid,p_service_type text)
 returns uuid language plpgsql security invoker set search_path = pg_catalog
 as $$
 declare
@@ -130,7 +119,6 @@ declare
   v_node_count bigint;
 begin
   perform service_rehearsal_private.assert_admin(p_actor,p_session);
-  perform service_rehearsal_private.assert_members(p_users);
   if p_service_type is null or p_service_type not in ('六晚崇','主一堂','主二堂') then
     raise exception using errcode='22023',message='Invalid rehearsal template';
   end if;
@@ -139,8 +127,7 @@ begin
   if v_start>v_anchor then v_anchor := v_anchor+interval '1 minute'; end if;
   insert into public.service_rehearsals(service_type,started_at,started_by)
     values(p_service_type,v_start,p_actor) returning id into v_id;
-  insert into public.service_rehearsal_members(rehearsal_id,user_id,enrolled_at,enrolled_by)
-    select v_id,u.id,v_start,p_actor from unnest(p_users) u(id);
+  -- Check-in rows are created only by the future network-gated participant RPC.
 
   -- All nodes/items are copied using a single SQL statement snapshot.
   -- Invalid template times fail the NOT NULL constraint, rolling back the
@@ -177,47 +164,8 @@ begin
   return v_id;
 end;
 $$;
-revoke all on function public.start_service_rehearsal(uuid,uuid,text,uuid[]) from public,anon,authenticated;
-grant execute on function public.start_service_rehearsal(uuid,uuid,text,uuid[]) to service_role;
-
--- Late registrants can be enrolled explicitly. Re-enrollment is a fresh
--- rehearsal check-in; an already active enrollment is unchanged.
-create function public.enroll_service_rehearsal_members(p_actor uuid,p_session uuid,p_rehearsal uuid,p_users uuid[])
-returns integer language plpgsql security invoker set search_path = pg_catalog
-as $$
-declare v_at timestamptz; v_count integer;
-begin
-  perform service_rehearsal_private.assert_admin(p_actor,p_session);
-  perform service_rehearsal_private.assert_members(p_users);
-  perform 1 from public.service_rehearsals r where r.id=p_rehearsal and r.ended_at is null for update;
-  if not found then raise exception using errcode='22023',message='Rehearsal is not open'; end if;
-  v_at := clock_timestamp();
-  insert into public.service_rehearsal_members as m(rehearsal_id,user_id,enrolled_at,enrolled_by)
-    select p_rehearsal,u.id,v_at,p_actor from unnest(p_users) u(id)
-    on conflict (rehearsal_id,user_id) do update set enrolled_at=excluded.enrolled_at,
-      enrolled_by=excluded.enrolled_by,revoked_at=null,checked_in_at=null
-    where m.revoked_at is not null;
-  get diagnostics v_count = row_count;
-  return v_count;
-end;
-$$;
-revoke all on function public.enroll_service_rehearsal_members(uuid,uuid,uuid,uuid[]) from public,anon,authenticated;
-grant execute on function public.enroll_service_rehearsal_members(uuid,uuid,uuid,uuid[]) to service_role;
-
-create function public.revoke_service_rehearsal_member(p_actor uuid,p_session uuid,p_rehearsal uuid,p_user uuid)
-returns boolean language plpgsql security invoker set search_path = pg_catalog
-as $$
-begin
-  perform service_rehearsal_private.assert_admin(p_actor,p_session);
-  perform 1 from public.service_rehearsals r where r.id=p_rehearsal and r.ended_at is null for update;
-  if not found then return false; end if;
-  update public.service_rehearsal_members m set revoked_at=greatest(clock_timestamp(),m.enrolled_at),checked_in_at=null
-    where m.rehearsal_id=p_rehearsal and m.user_id=p_user and m.revoked_at is null;
-  return found;
-end;
-$$;
-revoke all on function public.revoke_service_rehearsal_member(uuid,uuid,uuid,uuid) from public,anon,authenticated;
-grant execute on function public.revoke_service_rehearsal_member(uuid,uuid,uuid,uuid) to service_role;
+revoke all on function public.start_service_rehearsal(uuid,uuid,text) from public,anon,authenticated;
+grant execute on function public.start_service_rehearsal(uuid,uuid,text) to service_role;
 
 create function public.end_service_rehearsal(p_actor uuid,p_session uuid,p_rehearsal uuid)
 returns timestamptz language plpgsql security invoker set search_path = pg_catalog
@@ -239,8 +187,8 @@ $$;
 revoke all on function public.end_service_rehearsal(uuid,uuid,uuid) from public,anon,authenticated;
 grant execute on function public.end_service_rehearsal(uuid,uuid,uuid) to service_role;
 
--- Return only the current rehearsal and minimal names/account codes needed
--- by the administrator to select participants. Never return contact details.
+-- Return the current session and aggregate counts only. No participant roster
+-- is required. Counts follow current eligibility, including late activations.
 create function public.get_service_rehearsal_admin_state(p_actor uuid,p_session uuid)
 returns jsonb language plpgsql security invoker set search_path = pg_catalog
 as $$
@@ -251,21 +199,16 @@ begin
     select r.id,r.service_type,r.started_at from public.service_rehearsals r
     where r.ended_at is null
   ), eligible as (
-    select p.id,p.display_name,p.account_code
-    from public.profiles p where p.is_active and exists (
-      select 1 from public.user_roles ur where ur.user_id=p.id and ur.role in ('coordinator','admin')
-    )
+    select p.id from public.profiles p
+    where service_rehearsal_private.is_eligible_user(p.id)
   )
   select jsonb_build_object(
     'rehearsal',(select jsonb_build_object('id',r.id,'serviceType',r.service_type,'startedAt',r.started_at) from current_rehearsal r),
-    'eligibleUsers',coalesce((select jsonb_agg(jsonb_build_object('id',e.id,'displayName',e.display_name,'accountCode',e.account_code)
-      order by e.display_name,e.id) from eligible e),'[]'::jsonb),
-    'members',coalesce((select jsonb_agg(jsonb_build_object('id',m.user_id,'displayName',p.display_name,'accountCode',p.account_code,
-      'checkedInAt',m.checked_in_at,'revokedAt',m.revoked_at,'eligible',e.id is not null) order by p.display_name,m.user_id)
-      from public.service_rehearsal_members m
+    'eligibleCount',(select count(*) from eligible),
+    'checkedInCount',(select count(*) from public.service_rehearsal_members m
       join current_rehearsal r on r.id=m.rehearsal_id
-      join public.profiles p on p.id=m.user_id
-      left join eligible e on e.id=m.user_id),'[]'::jsonb)
+      join eligible e on e.id=m.user_id
+      where m.checked_in_at is not null)
   ) into v_state;
   return v_state;
 end;

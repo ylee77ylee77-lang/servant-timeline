@@ -7,7 +7,7 @@ declare
   sa uuid := gen_random_uuid(); sc uuid := gen_random_uuid(); sv uuid := gen_random_uuid();
   r uuid; r2 uuid; first_due timestamptz; second_due timestamptz; ended timestamptz;
   table_name text; fn text; stamp timestamptz := clock_timestamp();
-  affected integer; revoked boolean; state jsonb; repeated_end timestamptz;
+  state jsonb; repeated_end timestamptz; eligible_before bigint;
   original_services bigint; original_checkins bigint; original_assignments bigint;
 begin
   foreach table_name in array array['service_rehearsals','service_rehearsal_members','service_rehearsal_nodes','service_rehearsal_items','service_rehearsal_item_states'] loop
@@ -18,9 +18,8 @@ begin
       raise exception 'Table % must have RLS and no client access',table_name;
     end if;
   end loop;
-  foreach fn in array array['public.start_service_rehearsal(uuid,uuid,text,uuid[])','public.enroll_service_rehearsal_members(uuid,uuid,uuid,uuid[])',
-    'public.revoke_service_rehearsal_member(uuid,uuid,uuid,uuid)','public.end_service_rehearsal(uuid,uuid,uuid)',
-    'public.get_service_rehearsal_admin_state(uuid,uuid)'] loop
+  foreach fn in array array['public.start_service_rehearsal(uuid,uuid,text)','public.end_service_rehearsal(uuid,uuid,uuid)',
+    'public.get_service_rehearsal_admin_state(uuid,uuid)','service_rehearsal_private.is_eligible_user(uuid)'] loop
     if has_function_privilege('anon',fn,'execute') or has_function_privilege('authenticated',fn,'execute')
       or not has_function_privilege('service_role',fn,'execute') then
       raise exception 'Wrong RPC grants: %',fn;
@@ -36,7 +35,7 @@ begin
     (late_user,'rehearsal-late-'||late_user||'@example.invalid','{"display_name":"Late coordinator"}'),
     (v,'rehearsal-volunteer-'||v||'@example.invalid','{"display_name":"Volunteer"}'),
     (inactive_user,'rehearsal-inactive-'||inactive_user||'@example.invalid','{"display_name":"Inactive"}');
-  update public.profiles set is_active=true where id in(a,c,late_user,v);
+  update public.profiles set is_active=true where id in(a,c,v);
   insert into public.user_roles(user_id,role) values(a,'admin'),(c,'coordinator'),(late_user,'coordinator'),(v,'volunteer'),(inactive_user,'coordinator') on conflict do nothing;
   insert into auth.sessions(id,user_id,created_at,updated_at) values(sa,a,stamp,stamp),(sc,c,stamp,stamp),(sv,v,stamp,stamp);
 
@@ -53,32 +52,32 @@ begin
     ('__rehearsal_item__','__rehearsal_a__','Snapshot checklist',0,true),
     ('__rehearsal_item_off__','__rehearsal_a__','Disabled checklist',1,false);
 
-  begin perform public.start_service_rehearsal(v,sv,'主一堂',array[c]); raise exception 'Volunteer start allowed';
+  begin perform public.start_service_rehearsal(v,sv,'主一堂'); raise exception 'Volunteer start allowed';
     exception when insufficient_privilege then null; end;
-  begin perform public.start_service_rehearsal(a,sc,'主一堂',array[c]); raise exception 'Foreign session allowed';
+  begin perform public.start_service_rehearsal(a,sc,'主一堂'); raise exception 'Foreign session allowed';
     exception when insufficient_privilege then null; end;
-  begin perform public.start_service_rehearsal(a,sa,'主一堂',array[v]); raise exception 'Volunteer enrollment allowed';
-    exception when insufficient_privilege then null; end;
-  begin perform public.start_service_rehearsal(a,sa,'主一堂',array[inactive_user]); raise exception 'Inactive enrollment allowed';
-    exception when insufficient_privilege then null; end;
-  begin perform public.start_service_rehearsal(a,sa,'主一堂',array[c,c]); raise exception 'Duplicate enrollment allowed';
-    exception when invalid_parameter_value then null; end;
+  if not service_rehearsal_private.is_eligible_user(c)
+    or not service_rehearsal_private.is_eligible_user(a)
+    or service_rehearsal_private.is_eligible_user(v)
+    or service_rehearsal_private.is_eligible_user(inactive_user)
+    or service_rehearsal_private.is_eligible_user(late_user) then
+    raise exception 'Current active roles must determine eligibility'; end if;
 
   -- An invalid source time rolls back the entire start, including membership.
   insert into public.timeline_nodes(id,service_type,time,title,sort_order,is_active) values
     ('__rehearsal_bad__','主一堂','24:00','Invalid',4,true);
-  begin perform public.start_service_rehearsal(a,sa,'主一堂',array[c]); raise exception 'Invalid template allowed';
+  begin perform public.start_service_rehearsal(a,sa,'主一堂'); raise exception 'Invalid template allowed';
     exception when not_null_violation then null; end;
   delete from public.timeline_nodes where id='__rehearsal_bad__';
   if exists(select 1 from public.service_rehearsals where ended_at is null) then raise exception 'Failed start leaked a session'; end if;
 
   -- Invoke real management RPCs as the server role (not as postgres).
   execute 'set local role service_role';
-  r := public.start_service_rehearsal(a,sa,'主一堂',array[c]);
-  if r is null or (select count(*) from public.service_rehearsal_members where rehearsal_id=r)<>1
+  r := public.start_service_rehearsal(a,sa,'主一堂');
+  if r is null or (select count(*) from public.service_rehearsal_members where rehearsal_id=r)<>0
     or (select count(*) from public.service_rehearsal_nodes where rehearsal_id=r)<>3
     or (select count(*) from public.service_rehearsal_items where rehearsal_id=r)<>1 then
-    raise exception 'Incomplete snapshot or member isolation';
+    raise exception 'Incomplete snapshot or unexpected pre-enrollment';
   end if;
   select due_at into first_due from public.service_rehearsal_nodes where rehearsal_id=r and source_node_id='__rehearsal_a__';
   select due_at into second_due from public.service_rehearsal_nodes where rehearsal_id=r and source_node_id='__rehearsal_c__';
@@ -89,35 +88,36 @@ begin
         and n.due_at>=s.started_at+interval '6 minutes' and n.due_at<s.started_at+interval '7 minutes')
     then raise exception 'Incorrect grouped task times or voice snapshot'; end if;
 
-  begin perform public.start_service_rehearsal(a,sa,'主一堂',array[c]); raise exception 'Second active session allowed';
+  begin perform public.start_service_rehearsal(a,sa,'主一堂'); raise exception 'Second active session allowed';
     exception when unique_violation then null; end;
-  -- Mutation and verification must be separate statements, not volatile
-  -- function calls and subqueries combined under one expression snapshot.
-  affected := public.enroll_service_rehearsal_members(a,sa,r,array[late_user]);
-  if affected<>1 then raise exception 'Late enrollment failed'; end if;
-  affected := public.enroll_service_rehearsal_members(a,sa,r,array[late_user]);
-  if affected<>0 then raise exception 'Late enrollment is not idempotent'; end if;
-  revoked := public.revoke_service_rehearsal_member(a,sa,r,late_user);
-  if not revoked then raise exception 'Revocation failed'; end if;
-  revoked := public.revoke_service_rehearsal_member(a,sa,r,late_user);
-  if revoked then raise exception 'Repeat revocation must be a no-op'; end if;
-  if not exists(select 1 from public.service_rehearsal_members where rehearsal_id=r and user_id=late_user and revoked_at is not null) then
-    raise exception 'Revocation did not persist'; end if;
-  affected := public.enroll_service_rehearsal_members(a,sa,r,array[late_user]);
-  if affected<>1 then raise exception 'Re-enrollment did not update'; end if;
-  if not exists(select 1 from public.service_rehearsal_members where rehearsal_id=r and user_id=late_user and revoked_at is null and checked_in_at is null) then
-    raise exception 'Re-enrollment must be fresh'; end if;
   state := public.get_service_rehearsal_admin_state(a,sa);
   if state#>>'{rehearsal,id}' is distinct from r::text
-    or jsonb_array_length(state->'members')<>2
-    or not exists(select 1 from jsonb_array_elements(state->'eligibleUsers') x where x->>'id'=c::text)
-    or exists(select 1 from jsonb_array_elements(state->'eligibleUsers') x where x->>'id' in (v::text,inactive_user::text)) then
-    raise exception 'Incorrect admin roster'; end if;
+    or (state->>'checkedInCount')::integer<>0
+    or state ? 'members' or state ? 'eligibleUsers' then
+    raise exception 'Incorrect admin aggregate or unexpected roster'; end if;
+  eligible_before := (state->>'eligibleCount')::bigint;
+  if eligible_before<2 then raise exception 'Existing coordinators must be eligible'; end if;
   begin perform public.get_service_rehearsal_admin_state(c,sc); raise exception 'Coordinator viewed admin roster';
     exception when insufficient_privilege then null; end;
   begin perform public.get_service_rehearsal_admin_state(a,sc); raise exception 'Foreign session viewed admin roster';
     exception when insufficient_privilege then null; end;
   execute 'reset role';
+
+  -- Newly activated coordinators count immediately without adding a member row.
+  update public.profiles set is_active=true where id=late_user;
+  execute 'set local role service_role';
+  if not service_rehearsal_private.is_eligible_user(late_user) then raise exception 'Late approval not recognized'; end if;
+  state := public.get_service_rehearsal_admin_state(a,sa);
+  if (state->>'eligibleCount')::bigint<>eligible_before+1
+    or exists(select 1 from public.service_rehearsal_members where rehearsal_id=r) then
+    raise exception 'Late approval must not require pre-enrollment'; end if;
+  execute 'reset role';
+  delete from public.user_roles where user_id=late_user and role='coordinator';
+  state := public.get_service_rehearsal_admin_state(a,sa);
+  if service_rehearsal_private.is_eligible_user(late_user)
+    or (state->>'eligibleCount')::bigint<>eligible_before then
+    raise exception 'Role removal must remove eligibility'; end if;
+  insert into public.user_roles(user_id,role) values(late_user,'coordinator');
 
   -- Later template edits must not change an active snapshot.
   update public.timeline_nodes set title='Edited' where id='__rehearsal_a__';
@@ -128,7 +128,10 @@ begin
   -- Simulate a long session and a future participant check-in. Only manual
   -- end (not the age or last task) clears it.
   update public.service_rehearsals set started_at=clock_timestamp()-interval '2 hours' where id=r;
-  update public.service_rehearsal_members set checked_in_at=clock_timestamp() where rehearsal_id=r and user_id=c;
+  -- Fixture only: simulate a future participant check-in; no HTTP check-in yet.
+  insert into public.service_rehearsal_members(rehearsal_id,user_id,checked_in_at) values(r,c,clock_timestamp());
+  state := public.get_service_rehearsal_admin_state(a,sa);
+  if (state->>'checkedInCount')::bigint<>1 then raise exception 'Expected check-in count'; end if;
   if not exists(select 1 from public.service_rehearsals where id=r and ended_at is null) then raise exception 'Unexpected expiry'; end if;
   begin perform public.end_service_rehearsal(c,sc,r); raise exception 'Coordinator ended session';
     exception when insufficient_privilege then null; end;
@@ -144,9 +147,7 @@ begin
   if ended is null or repeated_end is distinct from ended
     or exists(select 1 from public.service_rehearsal_members where rehearsal_id=r and checked_in_at is not null) then
     raise exception 'End must be idempotent and clear check-in'; end if;
-  begin perform public.enroll_service_rehearsal_members(a,sa,r,array[c]); raise exception 'Ended session enrollment allowed';
-    exception when invalid_parameter_value then null; end;
-  r2 := public.start_service_rehearsal(a,sa,'主一堂',array[c]);
+  r2 := public.start_service_rehearsal(a,sa,'主一堂');
   if r2=r or exists(select 1 from public.service_rehearsal_members where rehearsal_id=r2 and checked_in_at is not null)
     or not exists(select 1 from public.service_rehearsal_nodes where rehearsal_id=r2 and content->>'title'='Edited') then
     raise exception 'New rehearsal must have independent state and snapshot'; end if;
@@ -154,7 +155,7 @@ begin
   if not exists(select 1 from public.service_rehearsals where id=r2 and ended_at is null) then raise exception 'Old end request closed new session'; end if;
   perform public.end_service_rehearsal(a,sa,r2);
   state := public.get_service_rehearsal_admin_state(a,sa);
-  if state->'rehearsal' is distinct from 'null'::jsonb or jsonb_array_length(state->'members')<>0 then
+  if state->'rehearsal' is distinct from 'null'::jsonb or (state->>'checkedInCount')::integer<>0 then
     raise exception 'Ended rehearsal remains visible'; end if;
   execute 'reset role';
   if original_services<>(select count(*) from public.worship_services)

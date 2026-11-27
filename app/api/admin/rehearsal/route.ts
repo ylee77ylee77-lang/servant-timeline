@@ -38,9 +38,9 @@ async function smallJson(request: NextRequest): Promise<unknown> {
 }
 
 function rpcError(error: { code?: string }) {
-  if (error.code === "42501") return reply({ error: "演練權限或參與資格已變更，請重新登入或更新名單。" }, 403);
+  if (error.code === "42501") return reply({ error: "演練權限或參與資格已變更，請重新登入。" }, 403);
   if (error.code === "23505") return reply({ error: "已有演練進行中，請重新整理。" }, 409);
-  if (error.code === "22023" || error.code === "23502") return reply({ error: "演練資料無效或已結束，請確認範本與名單。" }, 409);
+  if (error.code === "22023" || error.code === "23502") return reply({ error: "演練資料無效或已結束，請確認演練範本。" }, 409);
   return reply({ error: "尚未確認演練操作，請重新整理後再試。" }, 503);
 }
 
@@ -72,16 +72,12 @@ export async function POST(request: NextRequest) {
     let raw: unknown;
     try { raw = await smallJson(request); } catch { return reply({ error: "請求內容無效。" }, 400); }
     const action = parseRehearsalAdminAction(raw);
-    if (!action) return reply({ error: "請確認演練範本及參與名單。" }, 400);
+    if (!action) return reply({ error: "請確認演練操作及範本。" }, 400);
     const db = getSupabaseAdminClient();
     const actor = { p_actor: admin.userId, p_session: sessionId };
     const result = action.action === "start"
-      ? await db.rpc("start_service_rehearsal", { ...actor, p_service_type: action.serviceType, p_users: action.userIds })
-      : action.action === "enroll"
-        ? await db.rpc("enroll_service_rehearsal_members", { ...actor, p_rehearsal: action.rehearsalId, p_users: action.userIds })
-        : action.action === "revoke"
-          ? await db.rpc("revoke_service_rehearsal_member", { ...actor, p_rehearsal: action.rehearsalId, p_user: action.userId })
-          : await db.rpc("end_service_rehearsal", { ...actor, p_rehearsal: action.rehearsalId });
+      ? await db.rpc("start_service_rehearsal", { ...actor, p_service_type: action.serviceType })
+      : await db.rpc("end_service_rehearsal", { ...actor, p_rehearsal: action.rehearsalId });
     if (result.error) return rpcError(result.error);
     return reply({ ok: true });
   } catch (error) {

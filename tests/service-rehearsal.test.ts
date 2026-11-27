@@ -16,7 +16,7 @@ const plan = () => buildRehearsalPlan({ serviceType, startsAt: start, nodes });
 const admission = (): RehearsalAdmission => ({
   actor: { userId: "user-a", roles: ["coordinator"], active: true, sessionLive: true },
   rehearsal: { id: "rehearsal-a", startsAt: start, endedAt: null },
-  membership: { rehearsalId: "rehearsal-a", userId: "user-a", revokedAt: null, checkedInAt: start + minute },
+  membership: { rehearsalId: "rehearsal-a", userId: "user-a", checkedInAt: start + minute },
   now: start + 2 * minute, onChurchNetwork: true, hasFormalCheckIn: false,
 });
 
@@ -61,23 +61,26 @@ test("absolute time crosses midnight; only the manual end closes the session", (
   assert.equal(isRehearsalOpen({ ...w, endedAt: p.startsAt }, p.startsAt), false);
 });
 
-test("only an active, explicitly enrolled coordinator/admin with a live session is eligible", () => {
+test("all active coordinators/admins with a live session are eligible without a roster", () => {
   const f = admission();
   assert.equal(rehearsalDenial(f, "check-in"), null);
   assert.equal(rehearsalDenial(f, "operate"), null);
-  assert.equal(rehearsalDenial({ ...f, membership: null }, "view"), "membership");
-  assert.equal(rehearsalDenial({ ...f, actor: { ...f.actor, roles: ["admin"] }, membership: null }, "operate"), "membership");
+  assert.equal(rehearsalDenial({ ...f, membership: null }, "view"), null);
+  assert.equal(rehearsalDenial({ ...f, membership: null }, "check-in"), null);
+  assert.equal(rehearsalDenial({ ...f, membership: null }, "operate"), "check-in-required");
+  assert.equal(rehearsalDenial({ ...f, actor: { ...f.actor, roles: ["admin"] }, membership: null }, "check-in"), null);
+  assert.equal(rehearsalDenial({ ...f, actor: { ...f.actor, roles: ["admin"] }, membership: null }, "operate"), "check-in-required");
   assert.equal(rehearsalDenial({ ...f, actor: { ...f.actor, roles: ["volunteer"] } }, "view"), "role");
   assert.equal(rehearsalDenial({ ...f, actor: { ...f.actor, active: false } }, "view"), "account");
   assert.equal(rehearsalDenial({ ...f, actor: { ...f.actor, sessionLive: false } }, "operate"), "account");
 });
 
-test("cross-user/cross-rehearsal access, revocation and manual termination are denied", () => {
+test("cross-user/cross-rehearsal access, role loss and manual termination are denied", () => {
   const f = admission();
   const m = f.membership!;
   assert.equal(rehearsalDenial({ ...f, membership: { ...m, userId: "user-b" } }, "operate"), "membership");
   assert.equal(rehearsalDenial({ ...f, membership: { ...m, rehearsalId: "rehearsal-b" } }, "operate"), "membership");
-  assert.equal(rehearsalDenial({ ...f, membership: { ...m, revokedAt: f.now } }, "operate"), "membership");
+  assert.equal(rehearsalDenial({ ...f, actor: { ...f.actor, roles: ["volunteer"] } }, "operate"), "role");
   assert.equal(rehearsalDenial({ ...f, now: start - 1 }, "view"), "closed");
   assert.equal(rehearsalDenial({ ...f, rehearsal: { ...f.rehearsal, endedAt: f.now } }, "operate"), "closed");
 });
@@ -118,4 +121,16 @@ test("invalid or unstarted windows are closed and an old membership cannot opera
   assert.equal(isRehearsalOpen({ startsAt: NaN, endedAt: null }, f.now), false);
   assert.equal(isRehearsalOpen({ startsAt: start, endedAt: null }, NaN), false);
   assert.equal(rehearsalDenial({ ...f, rehearsal: { ...f.rehearsal, id: "new-rehearsal" } }, "operate"), "membership");
+});
+
+test("late approved coordinator can join an already-open rehearsal without admin enrollment", () => {
+  const f = admission();
+  const late = { ...f, now: f.now + 30 * minute, membership: null, actor: { ...f.actor, userId: "late-user", active: false } };
+  assert.equal(rehearsalDenial(late, "view"), "account");
+  const approved = { ...late, actor: { ...late.actor, active: true } };
+  assert.equal(rehearsalDenial(approved, "view"), null);
+  assert.equal(rehearsalDenial(approved, "check-in"), null);
+  assert.equal(rehearsalDenial(approved, "operate"), "check-in-required");
+  assert.equal(rehearsalDenial({ ...approved, onChurchNetwork: false }, "check-in"), "network");
+  assert.equal(rehearsalDenial({ ...approved, hasFormalCheckIn: true }, "check-in"), "formal-check-in");
 });

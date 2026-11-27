@@ -4,7 +4,7 @@ export type RehearsalAction = "view" | "check-in" | "operate";
 export type RehearsalAdmission = {
   actor: { userId: string; roles: readonly string[]; active: boolean; sessionLive: boolean };
   rehearsal: RehearsalWindow & { id: string };
-  membership: { rehearsalId: string; userId: string; revokedAt: number | null; checkedInAt: number | null } | null;
+  membership: { rehearsalId: string; userId: string; checkedInAt: number | null } | null;
   now: number;
   onChurchNetwork: boolean;
   hasFormalCheckIn: boolean;
@@ -20,12 +20,14 @@ export function rehearsalDenial(facts: RehearsalAdmission, action: RehearsalActi
   const { actor, rehearsal, membership, now } = facts;
   if (!actor.userId || actor.active !== true || actor.sessionLive !== true) return "account";
   if (!actor.roles.includes("coordinator") && !actor.roles.includes("admin")) return "role";
-  if (!rehearsal.id || !membership || membership.userId !== actor.userId
-    || membership.rehearsalId !== rehearsal.id || membership.revokedAt !== null) return "membership";
+  // Everyone with the current eligible role may view and check in without
+  // pre-enrollment. Actual operations still require their own check-in.
+  if (!rehearsal.id || (membership && (membership.userId !== actor.userId
+    || membership.rehearsalId !== rehearsal.id))) return "membership";
   if (!isRehearsalOpen(rehearsal, now)) return "closed";
   if (facts.hasFormalCheckIn !== false) return "formal-check-in";
   if (action === "check-in" && facts.onChurchNetwork !== true) return "network";
-  if (action === "operate" && (membership.checkedInAt === null
+  if (action === "operate" && (!membership || membership.checkedInAt === null
     || !isRehearsalOpen(rehearsal, membership.checkedInAt) || membership.checkedInAt > now)) return "check-in-required";
   return null;
 }
