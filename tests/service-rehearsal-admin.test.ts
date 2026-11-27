@@ -22,7 +22,9 @@ test("admin route verifies identity, session, origin and rollout flag; no formal
   const source = fs.readFileSync("app/api/admin/rehearsal/route.ts", "utf8");
   assert.match(source, /requireAdmin\(request\)/);
   assert.match(source, /getVerifiedSessionId/);
-  assert.match(source, /VERCEL_ENV === "production" && process.env.ENABLE_SERVICE_REHEARSAL === "true"/);
+  assert.match(source, /!serviceRehearsalEnabled\(\)/);
+  const config = fs.readFileSync("lib/services/rehearsal-config.ts", "utf8");
+  assert.match(config, /VERCEL_ENV === "production" && process.env.ENABLE_SERVICE_REHEARSAL === "true"/);
   assert.match(source, /request.headers.get\("origin"\) !== request.nextUrl.origin/);
   assert.match(source, /p_actor: admin.userId, p_session: sessionId/);
   assert.doesNotMatch(source, /from\("(worship_services|service_check_ins|service_assignments|timeline_nodes)"\)/);

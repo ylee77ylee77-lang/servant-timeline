@@ -25,9 +25,10 @@ begin
       raise exception 'Wrong RPC grants: %',fn;
     end if;
   end loop;
-  if has_table_privilege('service_role','public.service_rehearsal_item_states','INSERT,UPDATE,DELETE') then
-    raise exception 'Item writes must remain disabled pending participant RPC';
-  end if;
+  if not has_table_privilege('service_role','public.service_rehearsal_item_states','INSERT')
+    or not has_table_privilege('service_role','public.service_rehearsal_item_states','UPDATE')
+    or has_table_privilege('service_role','public.service_rehearsal_item_states','DELETE') then
+    raise exception 'Item writes must be scoped to server insert/update'; end if;
 
   insert into auth.users(id,email,raw_user_meta_data) values
     (a,'rehearsal-admin-'||a||'@example.invalid','{"display_name":"Rehearsal admin"}'),

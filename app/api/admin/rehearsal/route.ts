@@ -3,18 +3,13 @@ import { getAuthErrorResponse, requireAdmin } from "@/lib/auth/require-admin";
 import { getVerifiedSessionId } from "@/lib/notifications/background-push";
 import { parseRehearsalAdminAction } from "@/lib/services/rehearsal-admin-contract";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
+import { serviceRehearsalEnabled } from "@/lib/services/rehearsal-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const reply = (body: object, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
-// Preview currently shares the production database. Keep even read access
-// disabled there. The rollout flag must remain off until the complete feature
-// and isolated environment have been verified.
-function enabled() {
-  return process.env.VERCEL_ENV === "production" && process.env.ENABLE_SERVICE_REHEARSAL === "true";
-}
 
 async function smallJson(request: NextRequest): Promise<unknown> {
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) throw new Error("Invalid content type");
@@ -47,7 +42,7 @@ function rpcError(error: { code?: string }) {
 export async function GET(request: NextRequest) {
   try {
     const admin = await requireAdmin(request);
-    if (!enabled()) return reply({ enabled: false });
+    if (!serviceRehearsalEnabled()) return reply({ enabled: false });
     const sessionId = getVerifiedSessionId(request.headers.get("authorization"), admin.userId);
     if (!sessionId) return reply({ error: "登入階段已失效，請重新登入。" }, 401);
     const { data, error } = await getSupabaseAdminClient().rpc("get_service_rehearsal_admin_state", {
@@ -66,7 +61,7 @@ export async function POST(request: NextRequest) {
   try {
     if (request.headers.get("origin") !== request.nextUrl.origin) return reply({ error: "來源網域無效。" }, 403);
     const admin = await requireAdmin(request);
-    if (!enabled()) return reply({ error: "服事演練尚未開放。" }, 503);
+    if (!serviceRehearsalEnabled()) return reply({ error: "服事演練尚未開放。" }, 503);
     const sessionId = getVerifiedSessionId(request.headers.get("authorization"), admin.userId);
     if (!sessionId) return reply({ error: "登入階段已失效，請重新登入。" }, 401);
     let raw: unknown;
