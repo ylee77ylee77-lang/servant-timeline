@@ -230,8 +230,10 @@ export async function syncBackgroundDevice(input: {
     // Reuse the same serialized device operation and consent. Leaving
     // rehearsal disables only its binding, not the browser subscription.
     if (input.rehearsalEnabled && (!input.rehearsalId || !input.rehearsalMode)) {
-      const stopped = await fetchDevice(input.accessToken, { action: "disable-rehearsal", endpoint: sub.endpoint });
-      if (!stopped.ok) throw new Error("Rehearsal stop unavailable");
+      const stopped = await fetchDevice(input.accessToken, { action: "disable-rehearsal", endpoint: sub.endpoint }).catch(() => null);
+      // A rehearsal-only API outage must not block a valid formal binding.
+      // The database already suppresses rehearsal on formal check-in.
+      if (!stopped?.ok && !formalBinding) throw new Error("Rehearsal stop unavailable");
     }
     if (!current()) return { message: "背景提醒同步中…" };
     if (input.rehearsalMode) {

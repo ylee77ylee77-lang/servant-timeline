@@ -281,6 +281,148 @@ try {
   equal(await testStore(testNext).take(testClaims[0].delivery_id),null,"Admin sign-out suppresses claimed cue");
   stages.push("admin Thursday REST registration without check-in, role rejection, concurrent encrypted delivery, worker marker and sign-out");
 
+
+  // Rehearsal integration uses real local Auth/REST, not a deployed endpoint.
+  // Reuse the fixture template and transport mock. Multiple simultaneous
+  // requests go through separate PostgREST transactions.
+  const rehearsalAdminSigned=check(await testBrowser.auth.signInWithPassword({email:testEmail,password:testPassword}),"Rehearsal admin login");
+  const rehearsalAdminSession=getVerifiedSessionId("Bearer "+rehearsalAdminSigned.session.access_token,testUser);
+  assert.ok(rehearsalAdminSession,"Rehearsal admin session");
+  const rehearsalEmail="rehearsal-ci-"+randomUUID()+"@example.invalid";
+  const rehearsalPassword=randomBytes(24).toString("base64url");
+  const rehearsalUser=check(await admin.auth.admin.createUser({
+    email:rehearsalEmail,password:rehearsalPassword,email_confirm:true,user_metadata:{display_name:"Rehearsal coordinator"},
+  }),"Create rehearsal coordinator").user.id;
+  const rehearsalBrowser=makeUserClient();
+  const rehearsalSigned=check(await rehearsalBrowser.auth.signInWithPassword({email:rehearsalEmail,password:rehearsalPassword}),"Coordinator login");
+  const rehearsalSession=getVerifiedSessionId("Bearer "+rehearsalSigned.session.access_token,rehearsalUser);
+  assert.ok(rehearsalSession,"Coordinator session");
+  sql("begin; update public.profiles set is_active=true where id='"+rehearsalUser+"'; "+
+    "insert into public.user_roles(user_id,role) values('"+rehearsalUser+"','coordinator') on conflict do nothing; commit;");
+  const aArgs={p_actor:testUser,p_session:rehearsalAdminSession};
+  const cArgs={p_actor:rehearsalUser,p_session:rehearsalSession};
+  const startArgs={...aArgs,p_service_type:"六晚崇"};
+  const simultaneousStarts=await Promise.all([
+    admin.rpc("start_service_rehearsal",startArgs),admin.rpc("start_service_rehearsal",startArgs),
+  ]);
+  equal(simultaneousStarts.filter(x=>!x.error).length,1,"Only one concurrent start succeeds");
+  equal(simultaneousStarts.filter(x=>x.error?.code==="23505").length,1,"Second start rejected by database uniqueness");
+  const practiceId=simultaneousStarts.find(x=>!x.error).data;
+  const pArgs={...cArgs,p_rehearsal:practiceId};
+  const adminPracticeArgs={...aArgs,p_rehearsal:practiceId};
+  const beforeReport=await rpc("get_service_rehearsal_participant_state",cArgs);
+  equal(beforeReport.rehearsal.id,practiceId,"Coordinator sees open rehearsal without roster");
+  equal(beforeReport.checkedInAt,null,"Coordinator not yet checked in");
+  equal(beforeReport.nodes.length,0,"No private snapshot before report");
+  assert.ok((await rehearsalBrowser.rpc("check_in_service_rehearsal",{...pArgs,p_on_church_network:true})).error,
+    "Authenticated client cannot forge network authorization");
+  assert.ok((await admin.rpc("check_in_service_rehearsal",{...pArgs,p_on_church_network:false})).error,
+    "Server denies offsite report");
+  const simultaneousReports=await Promise.all([
+    rpc("check_in_service_rehearsal",{...pArgs,p_on_church_network:true}),
+    rpc("check_in_service_rehearsal",{...pArgs,p_on_church_network:true}),
+    rpc("check_in_service_rehearsal",{...pArgs,p_on_church_network:true}),
+  ]);
+  equal(new Set(simultaneousReports).size,1,"Parallel duplicate report preserves first timestamp");
+  await rpc("check_in_service_rehearsal",{...adminPracticeArgs,p_on_church_network:true});
+  const practiceState=await rpc("get_service_rehearsal_participant_state",cArgs);
+  const blocks=[...new Set(practiceState.nodes.map(n=>Date.parse(n.dueAt)))].sort((a,b)=>a-b);
+  equal(blocks.length,3,"Template time blocks grouped");
+  const at=(block,seconds)=>new Date(block+seconds*1000).toISOString();
+  const makeEndpoint=()=>endpoint+"-rehearsal-"+randomUUID();
+  const practiceEndpoints=[makeEndpoint(),makeEndpoint()];
+  const allowedEndpoints=new Set(practiceEndpoints);
+  const regArgs=(ep,asAdmin=false)=>({
+    p_user_id:asAdmin?testUser:rehearsalUser,p_session_id:asAdmin?rehearsalAdminSession:rehearsalSession,
+    p_rehearsal_id:practiceId,p_endpoint:ep,p_p256dh:subscription.keys.p256dh,p_auth_secret:subscription.keys.auth,
+  });
+  assert.ok((await rehearsalBrowser.rpc("register_rehearsal_reminder_device",regArgs(practiceEndpoints[0]))).error,
+    "Rehearsal registration RPC is server-only");
+  equal((await rpc("register_rehearsal_reminder_device",regArgs(practiceEndpoints[0]))).length,1,"Coordinator rehearsal device");
+  equal((await rpc("register_rehearsal_reminder_device",regArgs(practiceEndpoints[1],true))).length,1,"Admin rehearsal device");
+  equal((await rpc("register_rehearsal_reminder_device",regArgs(practiceEndpoints[0],true))).length,0,"Foreign subscription reuse denied");
+  stages.push("rehearsal Auth/REST, concurrent start and check-in, device authorization");
+  const practiceStore=time=>({
+    claim:limit=>rpc("claim_rehearsal_reminders",{p_at:time,p_limit:limit}),
+    take:async id=>(await rpc("take_rehearsal_reminder",{p_delivery_id:id,p_at:time}))[0]??null,
+    finish:(id,state,status)=>rpc("finish_rehearsal_reminder",{p_delivery_id:id,p_state:state,p_provider_status:status,p_at:time}),
+  });
+  const seenPracticeDeliveries=new Set();
+  const seenPracticeEndpoints=new Map();
+  const practiceSender=time=>(sub,cue)=>sendBackgroundPush(sub,{...cue,rehearsal:true},keys,async(url,options)=>{
+    assert.ok(allowedEndpoints.has(url),"Only locally registered rehearsal endpoint");
+    const decrypted=ece.decrypt(Buffer.from(options.body),{version:"aes128gcm",privateKey:receiver,authSecret:auth}).toString("utf8");
+    const payload=JSON.parse(decrypted);
+    assert.deepEqual(Object.keys(payload).sort(),["date","id","kind","service","time"]);
+    equal(payload.kind,"service-task-reminder-rehearsal","Rehearsal marker");
+    equal(payload.service,"六晚崇","Rehearsal template");
+    assert.ok(!seenPracticeDeliveries.has(payload.id),"Duplicate delivery");
+    seenPracticeDeliveries.add(payload.id);
+    const key=cue.scheduled_at+"|"+url;
+    assert.ok(!seenPracticeEndpoints.has(key),"Duplicate device/time notification");
+    seenPracticeEndpoints.set(key,true);
+    await push(decrypted);
+    return new Response(null,{status:201});
+  },()=>Date.parse(time));
+  const beforeNotifications=notifications.length;
+  const firstAt=at(blocks[0],5);
+  const rehearsalPair=await Promise.all([
+    dispatchBackgroundReminders(practiceStore(firstAt),practiceSender(firstAt)),
+    dispatchBackgroundReminders(practiceStore(firstAt),practiceSender(firstAt)),
+  ]);
+  equal(rehearsalPair.reduce((s,x)=>s+x.accepted,0),2,"Concurrent rehearsal dispatch exactly once per device");
+  equal(notifications.length,beforeNotifications+2,"Exactly two rehearsal worker notifications");
+  equal(notifications.at(-1).title,"夏凱納招待｜服事演練","Rehearsal worker title");
+  assert.ok(notifications.at(-1).body.endsWith("（演練，非正式服事）"),"Rehearsal worker marker");
+
+  // Simulate 60 device bindings across two authenticated accounts. This
+  // verifies the 50-claim batch limit and the next 10 within the allowed
+  // due window, not the latency of Apple or production capacity.
+  const extraEndpoints=Array.from({length:58},makeEndpoint);
+  for(let offset=0;offset<extraEndpoints.length;offset+=10){
+    const group=extraEndpoints.slice(offset,offset+10);
+    await Promise.all(group.map(async(ep,index)=>{
+      equal((await rpc("register_rehearsal_reminder_device",regArgs(ep,(offset+index)%2===0))).length,1,"Synthetic device registration");
+      allowedEndpoints.add(ep);
+    }));
+  }
+  const secondAt=at(blocks[1],5),secondLater=at(blocks[1],15);
+  const batch1=await dispatchBackgroundReminders(practiceStore(secondAt),practiceSender(secondAt));
+  const batch2=await dispatchBackgroundReminders(practiceStore(secondLater),practiceSender(secondLater));
+  equal(batch1.claimed,50,"First batch bounded to fifty");
+  equal(batch1.accepted,50,"First batch accepted");
+  equal(batch2.claimed,10,"Next batch receives remaining ten");
+  equal(batch2.accepted,10,"Remaining ten accepted");
+  equal(notifications.length,beforeNotifications+62,"Exactly sixty distinct device notifications at second block");
+  equal((await dispatchBackgroundReminders(practiceStore(secondLater),practiceSender(secondLater))).accepted,0,"No repeat dispatch");
+  stages.push("rehearsal concurrent encrypted dispatch and worker; 60 synthetic devices across two bounded batches");
+
+  // Claim the final block before an actual Auth sign-out and manual end.
+  const finalAt=at(blocks[2],5);
+  const lastClaims=await practiceStore(finalAt).claim(50);
+  equal(lastClaims.length,50,"Final block claims");
+  check(await rehearsalBrowser.auth.signOut(),"Rehearsal coordinator Auth sign-out");
+  const coordinatorDelivery=sql("select l.id from service_rehearsal_private.deliveries l join service_rehearsal_private.devices d on d.id=l.device_id where l.rehearsal_id='"+practiceId+"' and d.user_id='"+rehearsalUser+"' and l.state='claimed' limit 1;");
+  assert.ok(coordinatorDelivery,"Claimed coordinator fixture");
+  equal(await practiceStore(finalAt).take(coordinatorDelivery),null,"Signed out participant cannot receive already-claimed reminder");
+  // Race a real admin end with a take. The take may win before end commits,
+  // but no fresh take/claim may succeed once the end response is confirmed.
+  const adminDelivery=sql("select l.id from service_rehearsal_private.deliveries l join service_rehearsal_private.devices d on d.id=l.device_id where l.rehearsal_id='"+practiceId+"' and d.user_id='"+testUser+"' and l.state='claimed' limit 1;");
+  assert.ok(adminDelivery,"Claimed admin fixture");
+  const race=await Promise.all([
+    rpc("end_service_rehearsal",adminPracticeArgs),practiceStore(finalAt).take(adminDelivery),
+  ]);
+  assert.ok(race[0],"End acknowledged");
+  equal((await practiceStore(finalAt).claim(50)).length,0,"No claims after end");
+  equal(await practiceStore(finalAt).take(adminDelivery),null,"No take after end");
+  equal(sql("select count(*) from service_rehearsal_private.devices where rehearsal_id='"+practiceId+"' and enabled;"),"0","All devices disabled transactionally");
+  const closed=await rpc("get_service_rehearsal_participant_state",aArgs);
+  equal(closed.rehearsal,null,"Closed rehearsal no longer visible");
+  equal(closed.checkedInAt,null,"Closed rehearsal check-in cleared");
+  equal((await rpc("end_service_rehearsal",adminPracticeArgs)),race[0],"Manual end idempotent");
+  assert.ok((await admin.rpc("check_in_service_rehearsal",{...adminPracticeArgs,p_on_church_network:true})).error,"Old report cannot reopen rehearsal");
+  stages.push("rehearsal sign-out, concurrent manual end/take, post-end invalidation");
+
   // pg_cron interval capability is verified only in this disposable database,
   // with a harmless SQL job unscheduled in the same transaction. No push.
   sql("begin;\ncreate extension if not exists pg_cron;\n" +

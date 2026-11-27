@@ -497,12 +497,14 @@ end;
 $$;
 
 create function public.disable_rehearsal_reminder_device(p_user_id uuid,p_endpoint text)
-returns boolean language sql volatile security invoker set search_path=pg_catalog as $$
- with stopped as (
-   update service_rehearsal_private.devices set enabled=false,updated_at=clock_timestamp()
-    where user_id=p_user_id and endpoint=p_endpoint and enabled returning id
- ) select exists(select 1 from stopped);
-$$;
+returns boolean language plpgsql volatile security invoker set search_path=pg_catalog as $
+begin
+ perform service_rehearsal_private.lock_participant(p_user_id);
+ update service_rehearsal_private.devices set enabled=false,updated_at=clock_timestamp()
+   where user_id=p_user_id and endpoint=p_endpoint and enabled;
+ return found;
+end;
+$;
 
 create function service_rehearsal_private.push_candidates(p_at timestamptz)
 returns table(device_id uuid,rehearsal_id uuid,service_type text,scheduled_at timestamptz)
@@ -537,15 +539,26 @@ language sql volatile security invoker set search_path=pg_catalog as $$
    on l.device_id=c.device_id and l.rehearsal_id=c.rehearsal_id and l.scheduled_at=c.scheduled_at
  where l.state='claimed';
 $$;
--- Lock the rehearsal row before taking the delivery. This serializes take
--- with manual end; once take commits a network send may already be in flight.
+-- Serialize take against formal report, registration/revocation and end.
+-- Use the same lock order as participant writes: user, rehearsal, device.
+-- Never hold a lock while sending HTTP. A network send may be in flight
+-- after take commits, and cannot be recalled.
 create function public.take_rehearsal_reminder(p_delivery_id uuid,p_at timestamptz default clock_timestamp())
 returns table(delivery_id uuid,endpoint text,p256dh text,auth_secret text,service_date date,service_type text,task_time text,scheduled_at timestamptz)
-language plpgsql volatile security invoker set search_path=pg_catalog as $$
+language plpgsql volatile security invoker set search_path=pg_catalog as $
+declare v_user uuid; v_rehearsal uuid; v_device uuid;
 begin
- perform 1 from public.service_rehearsals r join service_rehearsal_private.deliveries l on l.rehearsal_id=r.id
-  where l.id=p_delivery_id and r.ended_at is null for share of r;
+ select d.user_id,l.rehearsal_id,d.id into v_user,v_rehearsal,v_device
+ from service_rehearsal_private.deliveries l join service_rehearsal_private.devices d on d.id=l.device_id
+ where l.id=p_delivery_id and l.state='claimed' and d.rehearsal_id=l.rehearsal_id;
  if not found then return; end if;
+ perform service_rehearsal_private.lock_participant(v_user);
+ perform 1 from public.service_rehearsals r where r.id=v_rehearsal and r.ended_at is null for share;
+ if not found then return; end if;
+ perform 1 from service_rehearsal_private.devices d
+ where d.id=v_device and d.user_id=v_user and d.rehearsal_id=v_rehearsal and d.enabled for update;
+ if not found then return; end if;
+ -- Fresh statement snapshot after all locks, with full authorization check.
  return query
  with valid as materialized (
    select c.* from service_rehearsal_private.push_candidates(p_at) c
