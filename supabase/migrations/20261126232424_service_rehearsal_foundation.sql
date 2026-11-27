@@ -497,14 +497,14 @@ end;
 $$;
 
 create function public.disable_rehearsal_reminder_device(p_user_id uuid,p_endpoint text)
-returns boolean language plpgsql volatile security invoker set search_path=pg_catalog as $
+returns boolean language plpgsql volatile security invoker set search_path=pg_catalog as $$
 begin
  perform service_rehearsal_private.lock_participant(p_user_id);
  update service_rehearsal_private.devices set enabled=false,updated_at=clock_timestamp()
    where user_id=p_user_id and endpoint=p_endpoint and enabled;
  return found;
 end;
-$;
+$$;
 
 create function service_rehearsal_private.push_candidates(p_at timestamptz)
 returns table(device_id uuid,rehearsal_id uuid,service_type text,scheduled_at timestamptz)
@@ -545,7 +545,7 @@ $$;
 -- after take commits, and cannot be recalled.
 create function public.take_rehearsal_reminder(p_delivery_id uuid,p_at timestamptz default clock_timestamp())
 returns table(delivery_id uuid,endpoint text,p256dh text,auth_secret text,service_date date,service_type text,task_time text,scheduled_at timestamptz)
-language plpgsql volatile security invoker set search_path=pg_catalog as $
+language plpgsql volatile security invoker set search_path=pg_catalog as $$
 declare v_user uuid; v_rehearsal uuid; v_device uuid;
 begin
  select d.user_id,l.rehearsal_id,d.id into v_user,v_rehearsal,v_device
