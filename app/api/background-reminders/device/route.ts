@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthErrorResponse, requireActiveUser } from "@/lib/auth/require-admin";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
 import { isServiceType } from "@/lib/services/catalog";
-import { getBackgroundPushConfig, getAdminTimelinePushConfig, backgroundRemindersEnabledEnvironment } from "@/lib/notifications/background-config";
+import { isUuid } from "@/lib/services/check-in";
+import { getBackgroundPushConfig, getAdminTimelinePushConfig, getRehearsalPushConfig, backgroundRemindersEnabledEnvironment } from "@/lib/notifications/background-config";
 import { getVerifiedSessionId, isApplePushEndpoint, parseAppleSubscription } from "@/lib/notifications/background-push";
 
 export const runtime = "nodejs";
@@ -35,7 +36,9 @@ async function readSmallJson(request: NextRequest): Promise<unknown> {
 export async function GET(request: NextRequest) {
   try {
     const user = await requireActiveUser(request);
-    const config = request.nextUrl.searchParams.get("adminTest") === "1"
+    const config = request.nextUrl.searchParams.get("rehearsal") === "1"
+      ? (user.roles.some(role => role === "coordinator" || role === "admin") ? getRehearsalPushConfig() : null)
+      : request.nextUrl.searchParams.get("adminTest") === "1"
       ? (user.roles.includes("admin") ? getAdminTimelinePushConfig() : null)
       : getBackgroundPushConfig();
     return reply({ enabled: !!config, publicKey: config?.keys.publicKey ?? null });
@@ -55,8 +58,29 @@ export async function POST(request: NextRequest) {
     try { raw = await readSmallJson(request); }
     catch { return reply({ error: "請求內容無效。" }, 400); }
     if (!raw || typeof raw !== "object") return reply({ error: "請求內容無效。" }, 400);
-    const body = raw as { action?: unknown; subscription?: unknown; endpoint?: unknown; serviceType?: unknown };
+    const body = raw as { action?: unknown; subscription?: unknown; endpoint?: unknown; serviceType?: unknown; rehearsalId?: unknown };
     const db = getSupabaseAdminClient();
+    if (body.action === "disable-rehearsal") {
+      if (!isApplePushEndpoint(body.endpoint)) return reply({ error: "訂閱資料無效。" }, 400);
+      const { error } = await db.rpc("disable_rehearsal_reminder_device", { p_user_id: user.userId, p_endpoint: body.endpoint });
+      if (error) return reply({ error: "尚未確認停止演練提醒，請重試。" }, 503);
+      return reply({ enabled: false });
+    }
+    if (body.action === "register-rehearsal") {
+      if (!getRehearsalPushConfig() || !user.roles.some(role => role === "coordinator" || role === "admin")) {
+        return reply({ error: "演練提醒尚未開放。" }, 403);
+      }
+      const sub = parseAppleSubscription(body.subscription);
+      if (!sub || typeof body.rehearsalId !== "string" || !isUuid(body.rehearsalId)) return reply({ error: "演練或訂閱資料無效。" }, 400);
+      const sessionId = getVerifiedSessionId(request.headers.get("authorization"), user.userId);
+      if (!sessionId) return reply({ error: "登入階段已失效，請重新登入。" }, 401);
+      const { data, error } = await db.rpc("register_rehearsal_reminder_device", {
+        p_user_id: user.userId, p_session_id: sessionId, p_rehearsal_id: body.rehearsalId,
+        p_endpoint: sub.endpoint, p_p256dh: sub.keys.p256dh, p_auth_secret: sub.keys.auth,
+      });
+      if (error || !Array.isArray(data) || !data[0]) return reply({ error: "無法綁定演練報到及裝置。" }, 409);
+      return reply({ enabled: true });
+    }
     if (body.action === "disable-admin-test") {
       if (!user.roles.includes("admin")) return reply({ error: "你沒有管理員權限。" }, 403);
       if (!isApplePushEndpoint(body.endpoint)) return reply({ error: "訂閱資料無效。" }, 400);
@@ -80,6 +104,11 @@ export async function POST(request: NextRequest) {
         });
         if (testError) return reply({ error: "尚未確認停止測試提醒，請重試。" }, 503);
       }
+      // Revoke rehearsal too, including when its rollout flag has been disabled.
+      const { error: rehearsalError } = await db.rpc("disable_rehearsal_reminder_device", {
+        p_user_id: user.userId, p_endpoint: body.endpoint,
+      });
+      if (rehearsalError) return reply({ error: "尚未確認停止演練提醒，請重試。" }, 503);
       // Same response if no matching device exists, so no ownership oracle.
       return reply({ enabled: false });
     }

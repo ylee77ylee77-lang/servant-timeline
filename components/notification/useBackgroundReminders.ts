@@ -13,12 +13,14 @@ import {
 type Input = {
   accessToken: string; userId: string; loaded: boolean; enabled: boolean;
   serviceType: string; checkInId: string; allowPreview?: boolean; adminTestService?: string;
+  allowRehearsal?: boolean; rehearsalMode?: boolean; rehearsalId?: string;
 };
 
-export function useBackgroundReminders({ accessToken, userId, loaded, enabled, serviceType, checkInId, allowPreview = false, adminTestService = "" }: Input) {
+export function useBackgroundReminders({ accessToken, userId, loaded, enabled, serviceType, checkInId, allowPreview = false, adminTestService = "", allowRehearsal = false, rehearsalMode = false, rehearsalId = "" }: Input) {
   const [featureEnabled, setFeatureEnabled] = useState(false);
   const [formalEnabled, setFormalEnabled] = useState(false);
   const [adminTestEnabled, setAdminTestEnabled] = useState(false);
+  const [rehearsalEnabled, setRehearsalEnabled] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [testPending, setTestPending] = useState(false);
   const [testMessage, setTestMessage] = useState("");
@@ -36,12 +38,14 @@ export function useBackgroundReminders({ accessToken, userId, loaded, enabled, s
       try {
         const formalKey = await getBackgroundDeviceConfig(accessToken);
         const adminTestKey = allowPreview ? await getBackgroundDeviceConfig(accessToken, true).catch(() => null) : null;
-        const previewKey = !formalKey && allowPreview && !adminTestKey ? await getBackgroundPreviewConfig(accessToken) : null;
-        const key = formalKey ?? adminTestKey ?? previewKey;
+        const rehearsalKey = allowRehearsal ? await getBackgroundDeviceConfig(accessToken, false, true).catch(() => null) : null;
+        const previewKey = !formalKey && allowPreview && !adminTestKey && !rehearsalKey ? await getBackgroundPreviewConfig(accessToken) : null;
+        const key = formalKey ?? adminTestKey ?? rehearsalKey ?? previewKey;
         if (disposed) return;
         setPreviewMode(Boolean(previewKey));
         setFormalEnabled(Boolean(formalKey));
         setAdminTestEnabled(Boolean(adminTestKey));
+        setRehearsalEnabled(Boolean(rehearsalKey));
         setFeatureEnabled(Boolean(key));
         if (!key) { setPrepared(null); setStatus(null); return; }
         if (!isStandaloneReminderApp() || !canUseBackgroundPush()) {
@@ -66,17 +70,17 @@ export function useBackgroundReminders({ accessToken, userId, loaded, enabled, s
       window.removeEventListener("pageshow", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [accessToken, userId, revision, refresh, allowPreview]);
+  }, [accessToken, userId, revision, refresh, allowPreview, allowRehearsal]);
 
   useEffect(() => {
     if (!featureEnabled || !prepared || !loaded) return;
     let disposed = false;
-    void syncBackgroundDevice({ prepared, accessToken, userId, enabled, serviceType, checkInId, previewMode, formalEnabled, adminTestEnabled, adminTestService, isCurrent: () => !disposed })
+    void syncBackgroundDevice({ prepared, accessToken, userId, enabled, serviceType, checkInId, previewMode, formalEnabled, adminTestEnabled, adminTestService, rehearsalEnabled, rehearsalMode, rehearsalId, isCurrent: () => !disposed })
       .then(result => { if (!disposed) setStatus(result); })
       .catch(() => { if (!disposed) setStatus({ message: enabled
         ? "尚未完成背景提醒同步，請重試。" : "尚未確認停止背景提醒，請重試。", action: "retry" }); });
     return () => { disposed = true; };
-  }, [featureEnabled, prepared, accessToken, userId, loaded, enabled, serviceType, checkInId, previewMode, formalEnabled, adminTestEnabled, adminTestService]);
+  }, [featureEnabled, prepared, accessToken, userId, loaded, enabled, serviceType, checkInId, previewMode, formalEnabled, adminTestEnabled, adminTestService, rehearsalEnabled, rehearsalMode, rehearsalId]);
 
   const authorize = useCallback(() => {
     if (!featureEnabled || !prepared || authorizationPending.current) return;

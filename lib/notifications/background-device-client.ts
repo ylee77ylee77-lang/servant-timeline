@@ -90,8 +90,8 @@ function decodePublicKey(key: string): Uint8Array<ArrayBuffer> {
   return result;
 }
 
-async function fetchDevice(accessToken: string, body?: object, adminTest = false): Promise<Response> {
-  return fetch(adminTest ? ROUTE + "?adminTest=1" : ROUTE, {
+async function fetchDevice(accessToken: string, body?: object, adminTest = false, rehearsal = false): Promise<Response> {
+  return fetch(rehearsal ? ROUTE + "?rehearsal=1" : adminTest ? ROUTE + "?adminTest=1" : ROUTE, {
     method: body ? "POST" : "GET",
     headers: { Authorization: "Bearer " + accessToken, ...(body ? { "Content-Type": "application/json" } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -99,8 +99,8 @@ async function fetchDevice(accessToken: string, body?: object, adminTest = false
   });
 }
 
-export async function getBackgroundDeviceConfig(accessToken: string, adminTest = false): Promise<string | null> {
-  const response = await fetchDevice(accessToken, undefined, adminTest);
+export async function getBackgroundDeviceConfig(accessToken: string, adminTest = false, rehearsal = false): Promise<string | null> {
+  const response = await fetchDevice(accessToken, undefined, adminTest, rehearsal);
   if (!response.ok) throw new Error("Config unavailable");
   const data = await response.json();
   return data.enabled === true && typeof data.publicKey === "string" ? data.publicKey : null;
@@ -203,6 +203,7 @@ export async function syncBackgroundDevice(input: {
   enabled: boolean; serviceType: string; checkInId: string; isCurrent?: () => boolean;
   previewMode?: boolean;
   formalEnabled?: boolean; adminTestEnabled?: boolean; adminTestService?: string;
+  rehearsalEnabled?: boolean; rehearsalId?: string; rehearsalMode?: boolean;
 }): Promise<DeviceSyncStatus> {
   if (!input.enabled) {
     const stopped = await revokeBackgroundDevice(input.accessToken);
@@ -223,9 +224,32 @@ export async function syncBackgroundDevice(input: {
       return { message: "請重新啟用背景通知。", action: "authorize" };
     }
     if (input.previewMode) return { message: "測試模式｜已允許通知，可開始三個模擬任務。" };
-    const formalBinding = input.formalEnabled !== false && Boolean(input.serviceType && input.checkInId);
+    const formalBinding = input.formalEnabled !== false && !input.rehearsalMode && Boolean(input.serviceType && input.checkInId);
     const current = () => (!input.isCurrent || input.isCurrent()) && hasReminderConsent(input.userId);
     if (!current()) return { message: "背景提醒同步中…" };
+    // Reuse the same serialized device operation and consent. Leaving
+    // rehearsal disables only its binding, not the browser subscription.
+    if (input.rehearsalEnabled && (!input.rehearsalId || !input.rehearsalMode)) {
+      const stopped = await fetchDevice(input.accessToken, { action: "disable-rehearsal", endpoint: sub.endpoint }).catch(() => null);
+      // A rehearsal-only API outage must not block a valid formal binding.
+      // The database already suppresses rehearsal on formal check-in.
+      if (!stopped?.ok && !formalBinding) throw new Error("Rehearsal stop unavailable");
+    }
+    if (!current()) return { message: "背景提醒同步中…" };
+    if (input.rehearsalMode) {
+      if (!input.rehearsalEnabled || !input.rehearsalId) return { message: "完成演練報到後啟用背景提醒。" };
+      if (input.adminTestEnabled) {
+        const stopped = await fetchDevice(input.accessToken, { action: "disable-admin-test", endpoint: sub.endpoint });
+        if (!stopped.ok) throw new Error("Admin test stop unavailable");
+      }
+      if (!current()) return { message: "背景提醒同步中…" };
+      const registered = await fetchDevice(input.accessToken, {
+        action: "register-rehearsal", rehearsalId: input.rehearsalId, subscription: sub.toJSON(),
+      });
+      if (registered.status === 409) return { message: "目前無法啟用演練提醒，請確認報到狀態。", action: "retry" };
+      if (!registered.ok || (await registered.json()).enabled !== true) throw new Error("Rehearsal registration unavailable");
+      return { message: "演練背景提醒已啟用，震動依 iPhone 設定。" };
+    }
     // Do not reset an active admin test just because a local check-in was
     // attempted. Only the server can establish a real formal binding.
     const stopTest = () => fetchDevice(input.accessToken, { action: "disable-admin-test", endpoint: sub.endpoint });
