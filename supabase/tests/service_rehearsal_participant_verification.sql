@@ -118,12 +118,15 @@ begin
 
   -- Validate formal service cutoffs with an explicit clock independently
   -- of the day this disposable CI job runs.
+  -- Build an isolated fixture through the same-day insert boundary first.
+  -- Move only this disposable fixture to the fixed clock's date afterwards.
+  -- Do not disable or relax the production check-in trigger.
   insert into public.worship_services(service_date,service_type,starts_at,status)
-    values(fixed_sunday,'主一堂',(fixed_sunday+time '09:00') at time zone 'Asia/Taipei','published') on conflict(service_date,service_type) do nothing;
-  select id into fixed_service from public.worship_services where service_date=fixed_sunday and service_type='主一堂';
-  update public.worship_services set status='published' where id=fixed_service;
+    values(today,'__rehearsal_clock__',(today+time '09:00') at time zone 'Asia/Taipei','published') returning id into fixed_service;
   insert into public.service_assignments(service_id,user_id,role_label) values(fixed_service,c,'總招') returning id into fixed_assignment;
   insert into public.service_check_ins(service_id,user_id,assignment_id,checked_in_at) values(fixed_service,c,fixed_assignment,'2030-01-06 08:00+08') returning id into fixed_report;
+  update public.worship_services set service_date=fixed_sunday,service_type='主一堂',
+    starts_at=(fixed_sunday+time '09:00') at time zone 'Asia/Taipei' where id=fixed_service;
   if not service_rehearsal_private.has_formal_check_in(c,'2030-01-06 10:44+08')
     or service_rehearsal_private.has_formal_check_in(c,'2030-01-06 10:45+08')
     or service_rehearsal_private.has_formal_check_in(c,'2030-01-07 09:00+08') then raise exception 'Incorrect formal lead window'; end if;

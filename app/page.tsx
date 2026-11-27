@@ -40,6 +40,8 @@ import { SystemAvatar } from '@/components/profile/SystemAvatar';
 import { PersonalPreferencesCards } from '@/components/profile/PersonalPreferencesCards';
 import { useBackgroundReminders } from '@/components/notification/useBackgroundReminders';
 import { AdminVoiceTestCard } from '@/components/voice/AdminVoiceTestCard';
+import { useServiceRehearsal } from '@/components/service/useServiceRehearsal';
+import { RehearsalCheckInView, RehearsalTimelineView } from '@/components/service/RehearsalViews';
 import type { SettingsPanel } from '@/components/profile/SettingsAccordionCard';
 import { CommunicationHub } from '@/components/communications/CommunicationHub';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -192,6 +194,9 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
   const [activeTab, setActiveTab] = useState('service');
+  const rehearsal = useServiceRehearsal({ eligible: isCoordinator || isAdmin, token: session.access_token, userId: session.user.id, tab: activeTab });
+  const rehearsalMode = rehearsal.inMode;
+  const previousRehearsalMode = useRef(false);
   const [myServiceContext, setMyServiceContext] = useState<MyServiceContext>(
     EMPTY_MY_SERVICE_CONTEXT
   );
@@ -508,7 +513,7 @@ export default function App() {
     accessToken: session.access_token, userId: session.user.id,
     loaded: personalSettingsLoaded, enabled: personalSettings.vibrationReminderEnabled,
     allowPreview: isAdmin,
-    adminTestService: isAdmin && activeTab === "timeline" ? currentService : "",
+    adminTestService: isAdmin && !rehearsalMode && activeTab === "timeline" ? currentService : "",
     serviceType: checkinStatus !== "not_checked_in" && checkInId ? checkedInService : "",
     checkInId,
   });
@@ -676,7 +681,7 @@ export default function App() {
     if (typeof patch.vibrationReminderEnabled === "boolean") {
       backgroundReminder.onPreferenceChange(patch.vibrationReminderEnabled);
     }
-    if (typeof patch.voiceReminderEnabled !== "boolean") return;
+    if (typeof patch.voiceReminderEnabled !== "boolean" || rehearsalMode) return;
     const nextEnabled = patch.voiceReminderEnabled;
     if (nextEnabled && !isAdmin && (checkinStatus === "not_checked_in"
       || !isServiceType(currentService) || isCurrentServiceVoiceClosed())) {
@@ -1104,6 +1109,19 @@ export default function App() {
     }
     window.speechSynthesis?.cancel();
   };
+
+  // Rehearsal rendering uses only independent snapshot state. Keep existing
+  // formal speech and test push paths separate until rehearsal reminders are wired.
+  useEffect(() => {
+    if (rehearsalMode && !previousRehearsalMode.current) {
+      clearServiceVoiceQueue();
+      stopTimelinePreviewAudio();
+      setVoiceAssistantMessage("");
+      void releaseVoiceWakeLock();
+    }
+    if (!rehearsalMode && previousRehearsalMode.current && activeTab === "timeline") setActiveTab("checkin");
+    previousRehearsalMode.current = rehearsalMode;
+  }, [rehearsalMode, activeTab]);
 
   const stopVoiceAssistantForServiceEnd = () => {
     clearServiceVoiceQueue();
@@ -1577,6 +1595,7 @@ export default function App() {
   useEffect(() => { processVoiceQueueRef.current = processVoiceQueue; });
 
   const speak = (text: string, kind: "regular" | "return" | "return-retry" = "regular") => {
+    if (rehearsalMode) return;
     const cleanText = String(text || "").trim();
     const billableCleanText = cleanTextForTtsBilling(cleanText);
     if (!billableCleanText) return;
@@ -2188,7 +2207,7 @@ export default function App() {
     }
     // A fixed startup test is allowed before check-in; scheduled announcements
     // require a check-in for non-admins. Admin role is verified by AuthProvider.
-    if (!isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
+    if (rehearsalMode || !isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
       || (!isAdmin && isCurrentServiceVoiceClosed()) || nodes.length === 0
       || !personalSettings.voiceReminderEnabled) return;
 
@@ -2400,6 +2419,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (rehearsalMode) { lastTaskBlockIdRef.current = null; setTaskBlockNotice(""); return; }
     if (!currentTime || !activeNodeId || filteredNodes.length === 0) return;
 
     if (lastTaskBlockIdRef.current === null) {
@@ -2435,7 +2455,7 @@ export default function App() {
     activeNodeId,
     currentTime,
     filteredNodes.length,
-    personalSettings.vibrationReminderEnabled
+    personalSettings.vibrationReminderEnabled, rehearsalMode
   ]);
 
 
@@ -3017,6 +3037,7 @@ export default function App() {
   // The fixed startup test remains available before check-in; it must never
   // be used to bypass regular-task authorization for volunteers/coordinators.
   const announceVoiceActivation = () => {
+    if (rehearsalMode) return;
     const mayAnnounceTasks = isServiceType(currentService)
       && (isAdmin || (checkinStatus !== "not_checked_in" && !isCurrentServiceVoiceClosed()))
       && showLiveTimeline && !isLoading;
@@ -3097,7 +3118,7 @@ export default function App() {
   // start automatically when the role/service gate allows it. Never play the
   // startup confirmation without an explicit gesture (iOS restriction).
   useEffect(() => {
-    if (!personalSettingsLoaded || voicePreferenceAppliedRef.current) return;
+    if (rehearsalMode || !personalSettingsLoaded || voicePreferenceAppliedRef.current) return;
     if (!personalSettings.voiceReminderEnabled) {
       voicePreferenceAppliedRef.current = true;
       setVoicePreferenceInitialized(true);
@@ -3231,7 +3252,7 @@ export default function App() {
   }, [isVoiceEnabled]);
 
   useEffect(() => {
-    if (returnCuePendingAt === null) return;
+    if (rehearsalMode || returnCuePendingAt === null) return;
     if (activeTab !== "timeline" || (typeof document !== "undefined" && document.visibilityState !== "visible")) return;
 
     const now = new Date();
@@ -3335,7 +3356,7 @@ export default function App() {
   // A rejected iOS media play is retried once after an actual gesture.
   // Do not bypass the volunteer's service/check-in restrictions or formal reminders.
   useEffect(() => {
-    if (!returnCueRetryText) return;
+    if (rehearsalMode || !returnCueRetryText) return;
     const retryAfterGesture = () => {
       if (document.visibilityState !== "visible" || activeTab !== "timeline"
         || voiceProcessingRef.current || voiceQueueRef.current.length > 0) return;
@@ -4648,7 +4669,12 @@ export default function App() {
     else void handleLocalCheckin();
   };
 
+  const returnToFormalCheckIn = () => { rehearsal.leave(); setActiveTab("checkin"); };
+
   const renderCheckinView = () => {
+    if (rehearsalMode) return <RehearsalCheckInView controller={rehearsal}
+      identity={<><SystemAvatar config={authAvatarConfig} displayName={displayCheckinName || "服事同工"} size={52} /><h3 className="min-w-0 break-words text-xl font-black text-[#1F2937]">{displayCheckinName || "服事同工"}</h3></>}
+      onTimeline={() => setActiveTab("timeline")} onFormal={returnToFormalCheckIn} />;
     const isCheckedIn = checkinStatus !== "not_checked_in";
     const stationReady = checkinStatus === "station_confirmed";
     const correctionOptions = leadCheckIn.enabled && isCheckedIn && leadCheckIn.canCorrect && !stationReady
@@ -4667,8 +4693,9 @@ export default function App() {
 
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
-        <div className="mb-6 px-1">
+        <div className="mb-6 flex items-center justify-between gap-2 px-1">
           <h2 className="text-2xl font-extrabold text-[#1F2937] tracking-tight">報到</h2>
+          {rehearsal.available && !isCheckedIn && <button type="button" className="min-h-11 rounded-xl border border-[#785AA5]/25 bg-white px-3 text-xs font-black text-[#785AA5]" onClick={rehearsal.enter}>進入演練</button>}
         </div>
 
         <div className="bg-white p-6 rounded-[24px] border border-[#E6EAF0] shadow-lg shadow-[#785AA5]/5 mb-5">
@@ -5198,6 +5225,7 @@ export default function App() {
   };
 
   const renderTimelineView = () => {
+    if (rehearsalMode) return <RehearsalTimelineView controller={rehearsal} now={currentDate?.getTime() ?? Date.now()} onCheckIn={() => setActiveTab("checkin")} onFormal={returnToFormalCheckIn} />;
     return (
       <div className="flex-1 overflow-y-auto pb-28 px-5 pt-6 bg-[#FFF9F3]">
         {isAdmin && backgroundReminder.adminTimelineTestEnabled && personalSettings.vibrationReminderEnabled && backgroundReminder.status && (
@@ -6726,7 +6754,8 @@ export default function App() {
     </div>
   </div>
 
-  {activeTab !== "checkin" && activeTab !== "service" && (
+  {rehearsalMode && <p className="mt-3 text-xs font-black text-[#785AA5]">服事演練中</p>}
+  {!rehearsalMode && activeTab !== "checkin" && activeTab !== "service" && (
     <>
       {/* 第二層：狀態與語音控制 */}
       <div className={`grid gap-2 mt-5 ${canUseQuestionAssistant ? "grid-cols-3" : "grid-cols-2"}`}>
@@ -6824,7 +6853,7 @@ export default function App() {
   )}
 </header>
         {/* 主內容區 */}
-        {fetchError ? (
+        {fetchError && !(rehearsalMode && (activeTab === "checkin" || activeTab === "timeline")) ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#FFF9F3] text-center overflow-y-auto pb-28">
             <div className="w-16 h-16 bg-[#FFF2F4] rounded-full flex items-center justify-center mb-4">
                <AlertCircle className="w-8 h-8 text-[#F25D6B]" />
@@ -7050,7 +7079,7 @@ export default function App() {
                 key={item.key}
                 type="button"
                 onClick={() => {
-                  if (item.key === "timeline" && isVoiceEnabled) {
+                  if (item.key === "timeline" && isVoiceEnabled && !rehearsalMode) {
                     const audioContext = getVoiceAudioContext();
                     if (audioContext && audioContext.state !== "running") {
                       void audioContext.resume().catch(() => {});
