@@ -35,12 +35,13 @@ export function useServiceRehearsal({ eligible, token, userId, tab }: {
   const generation = useRef(0);
   const getRequest = useRef<AbortController | null>(null);
   const writeRequest = useRef<AbortController | null>(null);
+  const leftModeRef = useRef(false);
   const modeRef = useRef<{ disabled: boolean; hasRehearsal: boolean; checkedIn: boolean }>({ disabled: false, hasRehearsal: false, checkedIn: false });
 
   const data = eligible && snapshot?.owner === userId ? snapshot.value : null;
   const selectedId = eligible && choice?.owner === userId && choice.value !== "formal" ? choice.value : null;
   const inMode = Boolean(selectedId);
-  const current = data?.rehearsal?.id === selectedId && !data.formalCheckIn ? data : null;
+  const current = data && data.rehearsal?.id === selectedId && !data.formalCheckIn ? data : null;
 
   const refresh = useCallback(async (afterWrite = false): Promise<Snapshot | null> => {
     if (!eligible || !token || (writeRequest.current && !afterWrite)) return null;
@@ -52,6 +53,7 @@ export function useServiceRehearsal({ eligible, token, userId, tab }: {
     const controller = new AbortController();
     getRequest.current = controller;
     setChecking(true);
+    if (!writeRequest.current) setPending(false);
     const timeout = window.setTimeout(() => controller.abort(), 8000);
     try {
       const res = await fetch("/api/rehearsal", {
@@ -92,14 +94,17 @@ export function useServiceRehearsal({ eligible, token, userId, tab }: {
     if (!eligible || !token) return;
     let disposed = false;
     let timer: number | undefined;
+    let sequence = 0;
     const tick = async () => {
       if (disposed || document.hidden) return;
+      const attempt = ++sequence;
       await refresh();
-      if (disposed || document.hidden || modeRef.current.disabled) return;
+      if (disposed || attempt !== sequence || document.hidden || modeRef.current.disabled) return;
       const fast = tab === "checkin" && modeRef.current.hasRehearsal && !modeRef.current.checkedIn;
       timer = window.setTimeout(() => void tick(), fast ? 1000 : modeRef.current.hasRehearsal ? 5000 : 10000);
     };
     const restart = () => {
+      sequence += 1;
       window.clearTimeout(timer);
       if (!document.hidden) void tick();
     };
@@ -128,10 +133,14 @@ export function useServiceRehearsal({ eligible, token, userId, tab }: {
 
   const enter = () => {
     if (!data?.rehearsal || data.formalCheckIn) return;
+    leftModeRef.current = false;
     setChoice({ owner: userId, value: data.rehearsal.id });
     void refresh();
   };
-  const leave = () => setChoice({ owner: userId, value: "formal" });
+  const leave = () => {
+    leftModeRef.current = true;
+    setChoice({ owner: userId, value: "formal" });
+  };
 
   const run = async (action: RehearsalParticipantAction): Promise<Snapshot | null> => {
     if (!eligible || !current?.rehearsal || current.rehearsal.id !== action.rehearsalId
@@ -160,7 +169,7 @@ export function useServiceRehearsal({ eligible, token, userId, tab }: {
         return null;
       }
       const next = await refresh(true);
-      return next?.rehearsal?.id === action.rehearsalId && next.checkedInAt ? next : null;
+      return !leftModeRef.current && next?.rehearsal?.id === action.rehearsalId && next.checkedInAt ? next : null;
     } catch {
       if (version === generation.current) {
         await refresh(true);
