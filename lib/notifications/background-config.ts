@@ -1,5 +1,6 @@
 import "server-only";
 import { validVapidKeys, type PushKeys } from "@/lib/notifications/background-push";
+import { serviceRehearsalEnabled } from "@/lib/services/rehearsal-config";
 
 export function backgroundRemindersEnabledEnvironment() {
   // Preview currently shares the production database. Never enable a preview
@@ -27,4 +28,9 @@ export function getBackgroundPushConfig() {
 // Independent rollout switch; enabling admin testing never enables formal sends.
 export function getAdminTimelinePushConfig() {
   return process.env.ENABLE_ADMIN_TIMELINE_VIBRATION_TEST === "true" ? readProductionPushConfig() : null;
+}
+
+// Independent rehearsal admission; the existing signed dispatcher and VAPID keys are reused.
+export function getRehearsalPushConfig() {
+  return serviceRehearsalEnabled() ? readProductionPushConfig() : null;
 }

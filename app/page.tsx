@@ -39,6 +39,7 @@ import { AvatarSettingsCard } from '@/components/profile/AvatarSettingsCard';
 import { SystemAvatar } from '@/components/profile/SystemAvatar';
 import { PersonalPreferencesCards } from '@/components/profile/PersonalPreferencesCards';
 import { useBackgroundReminders } from '@/components/notification/useBackgroundReminders';
+import { isAppleMobile } from '@/lib/notifications/background-device-client';
 import { AdminVoiceTestCard } from '@/components/voice/AdminVoiceTestCard';
 import { useServiceRehearsal } from '@/components/service/useServiceRehearsal';
 import { RehearsalCheckInView, RehearsalTimelineView } from '@/components/service/RehearsalViews';
@@ -49,7 +50,7 @@ import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 import { getServiceActivationState, isLeadServiceOpen } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
-import { rehearsalVoiceCues, dueRehearsalCues, nearRehearsalCue, selectRehearsalTask, rehearsalSpeechNode } from '@/lib/voice/rehearsal-cues';
+import { rehearsalVoiceCues, dueRehearsalCues, nearRehearsalCue, selectRehearsalTask, rehearsalSpeechNode, dueRehearsalVibrationBlocks } from '@/lib/voice/rehearsal-cues';
 import { beginVoicePlayback, beginVoiceCapture, refreshVoicePlaybackMode } from '@/lib/voice/ios-audio-session';
 import {
   buildFirstCheckinTimelineSpeech,
@@ -201,6 +202,7 @@ export default function App() {
   const rehearsalVoiceId = rehearsalMode && rehearsal.current?.checkedInAt ? rehearsal.current.rehearsal?.id || "" : "";
   const rehearsalVoiceScopeRef = useRef("");
   const rehearsalSeenCuesRef = useRef(new Set<string>());
+  const rehearsalVibrationRef = useRef(new Set<string>());
   const rehearsalFirstEntryRef = useRef("");
   const rehearsalReturnPendingRef = useRef(false);
   const [myServiceContext, setMyServiceContext] = useState<MyServiceContext>(
@@ -519,6 +521,9 @@ export default function App() {
     accessToken: session.access_token, userId: session.user.id,
     loaded: personalSettingsLoaded, enabled: personalSettings.vibrationReminderEnabled,
     allowPreview: isAdmin,
+    allowRehearsal: isAdmin || isCoordinator,
+    rehearsalMode,
+    rehearsalId: rehearsalVoiceId,
     adminTestService: isAdmin && !rehearsalMode && activeTab === "timeline" ? currentService : "",
     serviceType: checkinStatus !== "not_checked_in" && checkInId ? checkedInService : "",
     checkInId,
@@ -2517,6 +2522,19 @@ export default function App() {
     personalSettings.vibrationReminderEnabled, rehearsalMode
   ]);
 
+
+  // Independent of voice. Apple devices use the existing Web Push worker;
+  // never also invoke the local vibration path on those devices.
+  useEffect(() => {
+    if (!rehearsalVoiceId || !rehearsal.current || !currentDate
+      || !personalSettingsLoaded || !personalSettings.vibrationReminderEnabled
+      || rehearsal.checking || document.visibilityState !== "visible"
+      || isAppleMobile()) return;
+    for (const block of dueRehearsalVibrationBlocks(rehearsal.current, currentDate.getTime(), rehearsalVibrationRef.current)) {
+      rehearsalVibrationRef.current.add(block.key);
+      triggerVibration(getTaskBlockVibrationPattern(block.node.content));
+    }
+  }, [rehearsalVoiceId, rehearsal.current, currentDate, rehearsal.checking, personalSettingsLoaded, personalSettings.vibrationReminderEnabled]);
 
   const getCurrentMinuteValue = () => {
     const now = currentDate || new Date();

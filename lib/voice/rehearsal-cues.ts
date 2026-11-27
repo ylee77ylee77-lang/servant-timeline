@@ -53,3 +53,20 @@ export function rehearsalSpeechNode(node: RehearsalVoiceNode) {
     checklist: node.checklist.map(item => ({ id:item.id, text:item.text, details:item.details, is_completed:item.isCompleted })),
   };
 }
+
+
+/** Vibration is one cue per time block, not one per spoken task. It is
+ * independent of the user's voice advance/now settings. */
+export function dueRehearsalVibrationBlocks(state: RehearsalParticipantState, now: number, seen: ReadonlySet<string>) {
+  if (!state.rehearsal || !state.checkedInAt || state.formalCheckIn || !Number.isFinite(now)) return [];
+  const start = Math.max(Date.parse(state.rehearsal.startedAt), Date.parse(state.checkedInAt));
+  if (!Number.isFinite(start)) return [];
+  const blocks = new Map<string, { key: string; node: RehearsalVoiceNode }>();
+  for (const node of state.nodes) {
+    const at = Date.parse(node.dueAt);
+    const key = state.rehearsal.id + ":" + at;
+    if (!Number.isFinite(at) || at < start || now < at || now >= at + 15_000 || seen.has(key) || blocks.has(key)) continue;
+    blocks.set(key, { key, node });
+  }
+  return [...blocks.values()];
+}

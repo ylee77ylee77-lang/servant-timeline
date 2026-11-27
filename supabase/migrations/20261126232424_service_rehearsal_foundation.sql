@@ -1,5 +1,5 @@
 -- Rehearsal management foundation. No formal service tables are written.
--- New tables and RPCs are server-only. No rehearsal push routes yet.
+-- New tables and RPCs are server-only. No scheduler or push secrets are created.
 create table public.service_rehearsals (
   id uuid primary key default gen_random_uuid(),
   service_type text not null check (service_type in ('六晚崇','主一堂','主二堂')),
@@ -405,3 +405,254 @@ revoke all on function service_rehearsal_private.release_on_formal_report() from
 create trigger service_rehearsal_release_on_formal_report
 after insert or update of status,service_id,user_id,checked_in_at on public.service_check_ins
 for each row execute function service_rehearsal_private.release_on_formal_report();
+
+
+-- Rehearsal push bindings use the existing signed dispatcher and Apple
+-- subscription. Session lifetime is controlled only by the administrator.
+create table service_rehearsal_private.devices (
+ id uuid primary key default gen_random_uuid(),
+ rehearsal_id uuid not null,
+ user_id uuid not null,
+ session_id uuid not null,
+ checked_in_at timestamptz not null,
+ endpoint text not null unique check(length(endpoint)<=2048 and endpoint ~ '^https://web[.]push[.]apple[.]com/[A-Za-z0-9_-]+$'),
+ p256dh text not null check(p256dh ~ '^[A-Za-z0-9_-]{87}$'),
+ auth_secret text not null check(auth_secret ~ '^[A-Za-z0-9_-]{22}$'),
+ enabled boolean not null,
+ opted_in_at timestamptz not null,
+ updated_at timestamptz not null,
+ foreign key(rehearsal_id,user_id) references public.service_rehearsal_members(rehearsal_id,user_id) on delete cascade
+);
+create index service_rehearsal_devices_active on service_rehearsal_private.devices(rehearsal_id,user_id) where enabled;
+create table service_rehearsal_private.deliveries (
+ id uuid primary key default gen_random_uuid(),
+ device_id uuid not null references service_rehearsal_private.devices(id) on delete cascade,
+ rehearsal_id uuid not null references public.service_rehearsals(id) on delete cascade,
+ scheduled_at timestamptz not null,
+ state text not null default 'claimed' check(state in ('claimed','sending','accepted','rejected','uncertain')),
+ started_at timestamptz,
+ finished_at timestamptz,
+ provider_status integer check(provider_status between 100 and 599),
+ unique(device_id,rehearsal_id,scheduled_at)
+);
+alter table service_rehearsal_private.devices enable row level security;
+alter table service_rehearsal_private.deliveries enable row level security;
+revoke all on service_rehearsal_private.devices,service_rehearsal_private.deliveries from public,anon,authenticated,service_role;
+grant select,insert,update on service_rehearsal_private.devices,service_rehearsal_private.deliveries to service_role;
+
+create function service_rehearsal_private.push_allowed(p_rehearsal uuid,p_user uuid,p_session uuid,p_report timestamptz,p_at timestamptz)
+returns boolean language sql stable security invoker set search_path=pg_catalog as $$
+ select p_at is not null and p_report is not null and p_report<=p_at
+  and service_rehearsal_private.is_eligible_user(p_user)
+  and background_reminder_private.session_is_live(p_user,p_session,p_at)
+  and not service_rehearsal_private.has_formal_check_in(p_user,p_at)
+  and exists(select 1 from public.service_rehearsals r join public.service_rehearsal_members m on m.rehearsal_id=r.id
+    where r.id=p_rehearsal and r.ended_at is null and r.started_at<=p_report
+      and m.user_id=p_user and m.checked_in_at=p_report);
+$$;
+
+create function service_rehearsal_private.release_push_on_report_clear()
+returns trigger language plpgsql security invoker set search_path=pg_catalog as $$
+begin
+ if old.checked_in_at is distinct from new.checked_in_at then
+   update service_rehearsal_private.devices set enabled=false,updated_at=clock_timestamp()
+     where rehearsal_id=new.rehearsal_id and user_id=new.user_id and enabled;
+ end if;
+ return new;
+end;
+$$;
+create trigger service_rehearsal_release_push after update of checked_in_at on public.service_rehearsal_members
+for each row execute function service_rehearsal_private.release_push_on_report_clear();
+
+create function public.register_rehearsal_reminder_device(
+ p_user_id uuid,p_session_id uuid,p_rehearsal_id uuid,p_endpoint text,p_p256dh text,p_auth_secret text
+) returns table(device_id uuid)
+language plpgsql volatile security invoker set search_path=pg_catalog as $$
+declare v_now timestamptz; v_report timestamptz;
+begin
+ if p_endpoint is null or length(p_endpoint)>2048 or p_endpoint !~ '^https://web[.]push[.]apple[.]com/[A-Za-z0-9_-]+$'
+  or p_p256dh is null or p_p256dh !~ '^[A-Za-z0-9_-]{87}$'
+  or p_auth_secret is null or p_auth_secret !~ '^[A-Za-z0-9_-]{22}$' then return; end if;
+ perform service_rehearsal_private.assert_open_for_write(p_user_id,p_session_id,p_rehearsal_id,true);
+ v_now := clock_timestamp();
+ select m.checked_in_at into v_report from public.service_rehearsal_members m
+    where m.rehearsal_id=p_rehearsal_id and m.user_id=p_user_id;
+ if not service_rehearsal_private.push_allowed(p_rehearsal_id,p_user_id,p_session_id,v_report,v_now) then return; end if;
+ if exists(select 1 from public.background_reminder_devices d where d.endpoint=p_endpoint
+       and (d.user_id<>p_user_id or d.p256dh<>p_p256dh or d.auth_secret<>p_auth_secret))
+    or exists(select 1 from background_reminder_private.admin_test_devices d where d.endpoint=p_endpoint
+       and (d.user_id<>p_user_id or d.p256dh<>p_p256dh or d.auth_secret<>p_auth_secret)) then return; end if;
+ return query insert into service_rehearsal_private.devices as d
+    (rehearsal_id,user_id,session_id,checked_in_at,endpoint,p256dh,auth_secret,enabled,opted_in_at,updated_at)
+ values(p_rehearsal_id,p_user_id,p_session_id,v_report,p_endpoint,p_p256dh,p_auth_secret,true,v_now,v_now)
+ on conflict(endpoint) do update set rehearsal_id=excluded.rehearsal_id,session_id=excluded.session_id,
+   checked_in_at=excluded.checked_in_at,enabled=true,
+   opted_in_at=case when d.enabled and d.rehearsal_id=excluded.rehearsal_id and d.session_id=excluded.session_id
+      and d.checked_in_at=excluded.checked_in_at then d.opted_in_at else excluded.opted_in_at end,
+   updated_at=excluded.updated_at
+ where d.user_id=excluded.user_id and d.p256dh=excluded.p256dh and d.auth_secret=excluded.auth_secret
+   and d.updated_at<=excluded.updated_at
+ returning d.id;
+end;
+$$;
+
+create function public.disable_rehearsal_reminder_device(p_user_id uuid,p_endpoint text)
+returns boolean language sql volatile security invoker set search_path=pg_catalog as $$
+ with stopped as (
+   update service_rehearsal_private.devices set enabled=false,updated_at=clock_timestamp()
+    where user_id=p_user_id and endpoint=p_endpoint and enabled returning id
+ ) select exists(select 1 from stopped);
+$$;
+
+create function service_rehearsal_private.push_candidates(p_at timestamptz)
+returns table(device_id uuid,rehearsal_id uuid,service_type text,scheduled_at timestamptz)
+language sql stable security invoker set search_path=pg_catalog as $$
+ select distinct d.id,d.rehearsal_id,r.service_type,n.due_at
+ from service_rehearsal_private.devices d
+ join public.service_rehearsals r on r.id=d.rehearsal_id and r.ended_at is null
+ join public.service_rehearsal_nodes n on n.rehearsal_id=r.id
+ where d.enabled and n.due_at>=d.opted_in_at and n.due_at>=d.checked_in_at
+   and n.due_at between p_at-interval '20 seconds' and p_at
+   and service_rehearsal_private.push_allowed(r.id,d.user_id,d.session_id,d.checked_in_at,p_at)
+   and not exists(select 1 from public.background_reminder_devices f where f.endpoint=d.endpoint
+        and (f.user_id<>d.user_id or f.p256dh<>d.p256dh or f.auth_secret<>d.auth_secret))
+   and not exists(select 1 from background_reminder_private.admin_test_devices f where f.endpoint=d.endpoint
+        and (f.user_id<>d.user_id or f.p256dh<>d.p256dh or f.auth_secret<>d.auth_secret));
+$$;
+create function public.claim_rehearsal_reminders(p_at timestamptz default clock_timestamp(),p_limit integer default 50)
+returns table(delivery_id uuid)
+language sql volatile security invoker set search_path=pg_catalog as $$
+ with due as materialized (
+   select c.* from service_rehearsal_private.push_candidates(p_at) c
+   where not exists(select 1 from service_rehearsal_private.deliveries l
+     where l.device_id=c.device_id and l.rehearsal_id=c.rehearsal_id and l.scheduled_at=c.scheduled_at and l.state<>'claimed')
+   order by c.scheduled_at,c.device_id limit greatest(1,least(coalesce(p_limit,50),50))
+ ), inserted as (
+   insert into service_rehearsal_private.deliveries(device_id,rehearsal_id,scheduled_at)
+   select c.device_id,c.rehearsal_id,c.scheduled_at from due c
+   on conflict(device_id,rehearsal_id,scheduled_at) do nothing returning id
+ )
+ select i.id from inserted i union all
+ select l.id from service_rehearsal_private.deliveries l join due c
+   on l.device_id=c.device_id and l.rehearsal_id=c.rehearsal_id and l.scheduled_at=c.scheduled_at
+ where l.state='claimed';
+$$;
+-- Lock the rehearsal row before taking the delivery. This serializes take
+-- with manual end; once take commits a network send may already be in flight.
+create function public.take_rehearsal_reminder(p_delivery_id uuid,p_at timestamptz default clock_timestamp())
+returns table(delivery_id uuid,endpoint text,p256dh text,auth_secret text,service_date date,service_type text,task_time text,scheduled_at timestamptz)
+language plpgsql volatile security invoker set search_path=pg_catalog as $$
+begin
+ perform 1 from public.service_rehearsals r join service_rehearsal_private.deliveries l on l.rehearsal_id=r.id
+  where l.id=p_delivery_id and r.ended_at is null for share of r;
+ if not found then return; end if;
+ return query
+ with valid as materialized (
+   select c.* from service_rehearsal_private.push_candidates(p_at) c
+   join service_rehearsal_private.deliveries l on l.device_id=c.device_id and l.rehearsal_id=c.rehearsal_id and l.scheduled_at=c.scheduled_at
+   where l.id=p_delivery_id and l.state='claimed'
+ ), taken as (
+   update service_rehearsal_private.deliveries l set state='sending',started_at=p_at
+   from valid c where l.id=p_delivery_id and l.state='claimed'
+    and l.device_id=c.device_id and l.rehearsal_id=c.rehearsal_id and l.scheduled_at=c.scheduled_at
+   returning l.id,l.device_id,l.rehearsal_id,l.scheduled_at
+ )
+ select t.id,d.endpoint,d.p256dh,d.auth_secret,(t.scheduled_at at time zone 'Asia/Taipei')::date,c.service_type,
+   to_char(t.scheduled_at at time zone 'Asia/Taipei','HH24:MI'),t.scheduled_at
+ from taken t join valid c on c.device_id=t.device_id and c.rehearsal_id=t.rehearsal_id and c.scheduled_at=t.scheduled_at
+ join service_rehearsal_private.devices d on d.id=t.device_id;
+end;
+$$;
+create function public.finish_rehearsal_reminder(p_delivery_id uuid,p_state text,p_provider_status integer default null,p_at timestamptz default clock_timestamp())
+returns boolean language sql volatile security invoker set search_path=pg_catalog as $$
+ with finished as (
+   update service_rehearsal_private.deliveries l set state=p_state,provider_status=p_provider_status,finished_at=p_at
+   where l.id=p_delivery_id and l.state='sending' and p_at>=l.started_at and
+      ((p_state='accepted' and p_provider_status between 200 and 299)
+      or (p_state='rejected' and p_provider_status between 100 and 599 and p_provider_status not between 200 and 299)
+      or (p_state='uncertain' and p_provider_status is null))
+   returning l.device_id,l.rehearsal_id,l.started_at,l.provider_status
+ ), expired as (
+   update service_rehearsal_private.devices d set enabled=false,updated_at=p_at
+   from finished f where f.provider_status in(404,410) and d.id=f.device_id
+     and d.rehearsal_id=f.rehearsal_id and d.updated_at<=f.started_at returning d.id
+ ) select exists(select 1 from finished);
+$$;
+
+revoke all on function service_rehearsal_private.push_allowed(uuid,uuid,uuid,timestamptz,timestamptz),
+ service_rehearsal_private.push_candidates(timestamptz),service_rehearsal_private.release_push_on_report_clear()
+ from public,anon,authenticated,service_role;
+grant execute on function service_rehearsal_private.push_allowed(uuid,uuid,uuid,timestamptz,timestamptz),
+ service_rehearsal_private.push_candidates(timestamptz) to service_role;
+revoke all on function public.register_rehearsal_reminder_device(uuid,uuid,uuid,text,text,text),
+ public.disable_rehearsal_reminder_device(uuid,text),public.claim_rehearsal_reminders(timestamptz,integer),
+ public.take_rehearsal_reminder(uuid,timestamptz),public.finish_rehearsal_reminder(uuid,text,integer,timestamptz)
+ from public,anon,authenticated,service_role;
+grant execute on function public.register_rehearsal_reminder_device(uuid,uuid,uuid,text,text,text),
+ public.disable_rehearsal_reminder_device(uuid,text),public.claim_rehearsal_reminders(timestamptz,integer),
+ public.take_rehearsal_reminder(uuid,timestamptz),public.finish_rehearsal_reminder(uuid,text,integer,timestamptz)
+ to service_role;
+
+-- Existing admin testing is suppressed only while a valid rehearsal binding
+-- is active; formal reminder behavior is otherwise untouched.
+create or replace function background_reminder_private.admin_test_allowed(p_user uuid,p_session uuid,p_at timestamptz)
+returns boolean language sql stable security invoker set search_path=pg_catalog as $$
+ select p_at is not null
+  and exists(select 1 from public.profiles p join public.user_roles r on r.user_id=p.id
+     where p.id=p_user and p.is_active and r.role='admin')
+  and background_reminder_private.session_is_live(p_user,p_session,p_at)
+  and not exists(select 1 from public.background_reminder_open_bindings(p_at,p_user,null))
+  and not exists(select 1 from service_rehearsal_private.devices d
+    where d.user_id=p_user and d.enabled
+     and service_rehearsal_private.push_allowed(d.rehearsal_id,d.user_id,d.session_id,d.checked_in_at,p_at));
+$$;
+create or replace function background_reminder_private.should_dispatch(p_at timestamptz)
+returns boolean
+language sql stable security invoker
+set search_path = pg_catalog
+as $$
+  select case
+    when p_at is null then false
+    when extract(second from p_at at time zone 'Asia/Taipei') > 20 then false
+    when exists (
+      select 1 from service_rehearsal_private.push_candidates(p_at) c
+      where not exists(select 1 from service_rehearsal_private.deliveries l
+        where l.device_id=c.device_id and l.rehearsal_id=c.rehearsal_id and l.scheduled_at=c.scheduled_at and l.state<>'claimed')
+    ) then true
+    when exists (
+      select 1 from background_reminder_private.admin_test_devices d
+      where d.enabled and d.expires_at > p_at
+    ) and exists (
+      select 1 from background_reminder_private.admin_test_candidates(p_at) c
+      where not exists (
+        select 1 from background_reminder_private.admin_test_deliveries l
+        where l.device_id=c.device_id and l.service_type=c.service_type
+          and l.scheduled_at=c.scheduled_at and l.state<>'claimed'
+      )
+    ) then true
+    when not (
+      (extract(dow from p_at at time zone 'Asia/Taipei') = 6
+        and (p_at at time zone 'Asia/Taipei')::time >= time '17:00'
+        and (p_at at time zone 'Asia/Taipei')::time < time '21:45')
+      or (extract(dow from p_at at time zone 'Asia/Taipei') = 0
+        and (p_at at time zone 'Asia/Taipei')::time < time '12:45')
+    ) then false
+    when not exists (
+      select 1 from public.background_reminder_devices d
+      where d.enabled and d.expires_at > p_at
+    ) then false
+    else exists (
+      select 1 from public.background_reminder_candidates(p_at) c
+      where not exists (
+        select 1 from public.background_task_reminder_deliveries old
+        where old.device_id = c.device_id
+          and old.service_id = c.service_id
+          and old.scheduled_at = c.scheduled_at
+          and (old.state <> 'claimed' or old.user_id <> c.user_id
+            or old.check_in_id <> c.check_in_id
+            or old.assignment_id <> c.assignment_id
+            or old.timeline_node_id <> c.timeline_node_id)
+      )
+    )
+  end;
+$$;

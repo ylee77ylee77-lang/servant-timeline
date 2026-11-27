@@ -15,6 +15,8 @@ export type ReminderCue = {
   previewTest?: boolean;
   /** Real task times for a verified admin, not a formal service assignment. */
   adminTest?: boolean;
+  /** Server-owned rehearsal delivery, never a formal notification. */
+  rehearsal?: boolean;
 };
 export type PushKeys = { subject: string; publicKey: string; privateKey: string };
 
@@ -93,7 +95,7 @@ export function makeReminderPayload(cue: ReminderCue): string {
     throw new Error("Invalid reminder cue");
   }
   return JSON.stringify({
-    kind: cue.previewTest === true ? "service-task-reminder-preview" : cue.adminTest === true ? "service-task-reminder-admin-test" : "service-task-reminder",
+    kind: cue.rehearsal === true ? "service-task-reminder-rehearsal" : cue.previewTest === true ? "service-task-reminder-preview" : cue.adminTest === true ? "service-task-reminder-admin-test" : "service-task-reminder",
     id: cue.delivery_id,
     date: cue.service_date,
     service: cue.service_type,
