@@ -27,6 +27,6 @@ test("admin test is independently gated and only authorized by server", () => {
   assert.match(route,/adminTest && !user.roles.includes\("admin"\)/);
   assert.match(config,/ENABLE_ADMIN_TIMELINE_VIBRATION_TEST === "true"/);
   assert.match(config,/VERCEL_ENV === "production"/);
-  assert.match(page,/adminTestService: isAdmin && activeTab === "timeline" \? currentService : ""/);
+  assert.match(page,/adminTestService: isAdmin && !rehearsalMode && activeTab === "timeline" \? currentService : ""/);
   assert.match(hook,/allowPreview \? await getBackgroundDeviceConfig\(accessToken, true\)/);
 });

@@ -9,6 +9,10 @@ import { getLeadCheckInScope } from "@/lib/services/lead-check-in";
 import { isLeadServiceOpen } from "@/lib/services/service-activation";
 import { ensureCurrentServices } from "@/lib/services/ensure-current-services";
 import { getSupabaseUserClient } from "@/lib/supabase/server-user";
+import { getSupabaseAdminClient } from "@/lib/supabase/server-admin";
+import { getVerifiedSessionId } from "@/lib/notifications/background-push";
+import { serviceRehearsalEnabled } from "@/lib/services/rehearsal-config";
+import { isUuid } from "@/lib/services/check-in";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -746,8 +750,29 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const isPreview = body.preview === true;
     const isStartupTest = body.startupTest === true;
+    const isRehearsal = Object.prototype.hasOwnProperty.call(body, "rehearsalId");
+    const rehearsalId = isRehearsal && typeof body.rehearsalId === "string" ? body.rehearsalId : "";
     const speechText = isStartupTest ? VOICE_STARTUP_CONFIRMATION : normalizeSpeechText(body.text);
     const serviceType = normalizeInput(body.serviceType || body.currentService || "");
+
+    // Rehearsal is not an admin preview or a general startup exemption.
+    // Authorize every request (including shared-cache hits) against the
+    // server-owned active rehearsal and this verified participant.
+    const rehearsalAuthorized = async () => {
+      if (!isRehearsal || !serviceRehearsalEnabled() || isPreview || isStartupTest
+        || !isUuid(rehearsalId) || !user.roles.some(role => role === "coordinator" || role === "admin")) return false;
+      const verifiedSession = getVerifiedSessionId(request.headers.get("authorization"), user.userId);
+      if (!verifiedSession) return false;
+      const { data, error } = await getSupabaseAdminClient().rpc("get_service_rehearsal_participant_state", {
+        p_actor: user.userId, p_session: verifiedSession,
+      });
+      return !error && data?.rehearsal?.id === rehearsalId && data.rehearsal.serviceType === serviceType
+        && typeof data.checkedInAt === "string" && data.formalCheckIn === false;
+    };
+    const rehearsalDenied = () => NextResponse.json(
+      { error: "演練已結束或尚未完成報到。", fallbackToBrowser: false, reason: "rehearsal_closed" },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
 
     if (isStartupTest && isPreview) {
       return NextResponse.json(
@@ -808,7 +833,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!isPreview && !startupMaySkipCheckIn && isServiceType(serviceType)) {
+    if (isRehearsal) {
+      if (!await rehearsalAuthorized()) return rehearsalDenied();
+    } else if (!isPreview && !startupMaySkipCheckIn && isServiceType(serviceType)) {
       const current = await ensureCurrentServices();
       const leadScope = await getLeadCheckInScope(request, user, current.services
         .filter(({ status }) => status === "published" || status === "completed").map(({ id }) => id));
@@ -864,12 +891,13 @@ export async function POST(request: NextRequest) {
 
     const cachedAudioBase64 = await getCachedAudioBase64(cacheKey);
     if (cachedAudioBase64) {
+      if (isRehearsal && !await rehearsalAuthorized()) return rehearsalDenied();
       const audioBuffer = Buffer.from(cachedAudioBase64, "base64");
       return new NextResponse(new Uint8Array(audioBuffer), {
         status: 200,
         headers: {
           "Content-Type": "audio/mpeg",
-          "Cache-Control": "private, max-age=31536000, immutable",
+          "Cache-Control": isRehearsal ? "no-store" : "private, max-age=31536000, immutable",
           "X-Voice-Profile": voiceProfile,
           "X-Voice-Engine": "google-cloud-chirp3-hd",
           "X-Voice-Family": "cmn-CN-Chirp3-HD",
@@ -978,12 +1006,13 @@ export async function POST(request: NextRequest) {
       audioBase64
     });
 
+    if (isRehearsal && !await rehearsalAuthorized()) return rehearsalDenied();
     const audioBuffer = Buffer.from(audioBase64, "base64");
     return new NextResponse(new Uint8Array(audioBuffer), {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        "Cache-Control": "private, max-age=31536000, immutable",
+        "Cache-Control": isRehearsal ? "no-store" : "private, max-age=31536000, immutable",
         "X-Voice-Profile": voiceProfile,
         "X-Voice-Engine": "google-cloud-chirp3-hd",
         "X-Voice-Family": "cmn-CN-Chirp3-HD",

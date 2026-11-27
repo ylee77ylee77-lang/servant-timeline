@@ -49,6 +49,7 @@ import { getPublicSupabaseConfig } from '@/lib/supabase/config';
 import { isServiceType, SERVICE_TYPES, STATION_OPTIONS_BY_SERVICE } from '@/lib/services/catalog';
 import { getServiceActivationState, isLeadServiceOpen } from '@/lib/services/service-activation';
 import { VOICE_STARTUP_CONFIRMATION } from '@/lib/voice/startup-confirmation';
+import { rehearsalVoiceCues, dueRehearsalCues, nearRehearsalCue, selectRehearsalTask, rehearsalSpeechNode } from '@/lib/voice/rehearsal-cues';
 import { beginVoicePlayback, beginVoiceCapture, refreshVoicePlaybackMode } from '@/lib/voice/ios-audio-session';
 import {
   buildFirstCheckinTimelineSpeech,
@@ -197,6 +198,11 @@ export default function App() {
   const rehearsal = useServiceRehearsal({ eligible: isCoordinator || isAdmin, token: session.access_token, userId: session.user.id, tab: activeTab });
   const rehearsalMode = rehearsal.inMode;
   const previousRehearsalMode = useRef(false);
+  const rehearsalVoiceId = rehearsalMode && rehearsal.current?.checkedInAt ? rehearsal.current.rehearsal?.id || "" : "";
+  const rehearsalVoiceScopeRef = useRef("");
+  const rehearsalSeenCuesRef = useRef(new Set<string>());
+  const rehearsalFirstEntryRef = useRef("");
+  const rehearsalReturnPendingRef = useRef(false);
   const [myServiceContext, setMyServiceContext] = useState<MyServiceContext>(
     EMPTY_MY_SERVICE_CONTEXT
   );
@@ -681,7 +687,11 @@ export default function App() {
     if (typeof patch.vibrationReminderEnabled === "boolean") {
       backgroundReminder.onPreferenceChange(patch.vibrationReminderEnabled);
     }
-    if (typeof patch.voiceReminderEnabled !== "boolean" || rehearsalMode) return;
+    if (typeof patch.voiceReminderEnabled !== "boolean") return;
+    if (rehearsalMode) {
+      applyRehearsalVoicePreference(patch.voiceReminderEnabled);
+      return;
+    }
     const nextEnabled = patch.voiceReminderEnabled;
     if (nextEnabled && !isAdmin && (checkinStatus === "not_checked_in"
       || !isServiceType(currentService) || isCurrentServiceVoiceClosed())) {
@@ -1110,18 +1120,32 @@ export default function App() {
     window.speechSynthesis?.cancel();
   };
 
-  // Rehearsal rendering uses only independent snapshot state. Keep existing
-  // formal speech and test push paths separate until rehearsal reminders are wired.
+  // Enter/leave/revoke/connection loss invalidates every pending audio fetch
+  // and the existing serialized playback queue. Never treat a rehearsal as
+  // a formal check-in or reuse a previous rehearsal's scope.
   useEffect(() => {
-    if (rehearsalMode && !previousRehearsalMode.current) {
-      clearServiceVoiceQueue();
-      stopTimelinePreviewAudio();
-      setVoiceAssistantMessage("");
-      void releaseVoiceWakeLock();
+    const changed = previousRehearsalMode.current !== rehearsalMode || rehearsalVoiceScopeRef.current !== rehearsalVoiceId;
+    if (!changed) return;
+    const wasRehearsal = previousRehearsalMode.current;
+    clearServiceVoiceQueue();
+    stopTimelinePreviewAudio();
+    setVoiceAssistantMessage("");
+    rehearsalVoiceScopeRef.current = rehearsalVoiceId;
+    rehearsalReturnPendingRef.current = false;
+    if (rehearsalMode) {
+      setIsVoiceEnabled(Boolean(rehearsalVoiceId && personalSettingsLoaded && personalSettings.voiceReminderEnabled));
+    } else if (wasRehearsal) {
+      setIsVoiceEnabled(false);
+      voicePreferenceAppliedRef.current = false;
+      setVoicePreferenceInitialized(false);
+      if (activeTab === "timeline") setActiveTab("checkin");
     }
-    if (!rehearsalMode && previousRehearsalMode.current && activeTab === "timeline") setActiveTab("checkin");
     previousRehearsalMode.current = rehearsalMode;
-  }, [rehearsalMode, activeTab]);
+  }, [rehearsalMode, rehearsalVoiceId, activeTab]);
+
+  useEffect(() => {
+    if (rehearsalMode && personalSettingsLoaded) setIsVoiceEnabled(Boolean(rehearsalVoiceId && personalSettings.voiceReminderEnabled));
+  }, [rehearsalMode, rehearsalVoiceId, personalSettingsLoaded, personalSettings.voiceReminderEnabled]);
 
   const stopVoiceAssistantForServiceEnd = () => {
     clearServiceVoiceQueue();
@@ -1317,7 +1341,7 @@ export default function App() {
     return `${voiceProfile}-${(hash >>> 0).toString(16)}-${input.length}`;
   };
 
-  const fetchVoiceBlob = async (text: string) => {
+  const fetchVoiceBlob = async (text: string, practiceId = "") => {
     if (typeof window === "undefined") return null;
 
     const cleanText = cleanTextForTtsBilling(text);
@@ -1326,6 +1350,24 @@ export default function App() {
     const voiceProfile = getVoiceProfile();
     const cacheId = createVoiceCacheId(cleanText, voiceProfile);
     const cacheUrl = `${window.location.origin}/voice-cache/${cacheId}.mp3`;
+
+    if (practiceId) {
+      // Rehearsal must reauthorize at the server, even if this phone has
+      // previously cached the same speech. The server's shared TTS cache
+      // and existing cost controls still apply.
+      const response = await fetch("/api/voice", {
+        method: "POST", cache: "no-store",
+        headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: cleanText, voiceProfile, rehearsalId: practiceId, serviceType: rehearsal.current?.rehearsal?.serviceType }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const error: any = new Error(payload?.error || "演練語音尚未確認。");
+        error.reason = payload?.reason || "";
+        throw error;
+      }
+      return response.blob();
+    }
 
     if ("caches" in window) {
       const cache = await caches.open(VOICE_AUDIO_CACHE_NAME);
@@ -1531,7 +1573,9 @@ export default function App() {
     if (voiceProcessingRef.current) return;
     voiceProcessingRef.current = true;
     const generation = voiceQueueGenerationRef.current;
-    const isCurrent = () => generation === voiceQueueGenerationRef.current;
+    const practiceId = rehearsalVoiceScopeRef.current;
+    const isCurrent = () => generation === voiceQueueGenerationRef.current
+      && practiceId === rehearsalVoiceScopeRef.current;
     const releasePlayback = beginVoicePlayback();
 
     try {
@@ -1541,12 +1585,20 @@ export default function App() {
         const isReturnCue = returnCueQueuedTextRef.current === nextText;
 
         try {
-          await playSoftDing();
-          await wait(360);
+          // Do not emit even a rehearsal cue tone before authorization.
+          if (!practiceId) {
+            await playSoftDing();
+            await wait(360);
+          }
           if (!isCurrent()) break;
-          const blob = await fetchVoiceBlob(nextText);
-          if (!isCurrent()) break;
+          const blob = await fetchVoiceBlob(nextText, practiceId);
+          if (!isCurrent() || (practiceId && document.visibilityState !== "visible")) break;
           if (!blob) throw new Error("語音音檔不存在。");
+          if (practiceId) {
+            await playSoftDing();
+            await wait(360);
+            if (!isCurrent() || document.visibilityState !== "visible") break;
+          }
           await playVoiceBlob(blob);
           if (isReturnCue && returnCueQueuedTextRef.current === nextText) {
             returnCueQueuedTextRef.current = null;
@@ -1570,6 +1622,12 @@ export default function App() {
           }
           // 已經播放過第一次提示音；若雲端 TTS 超過月用量或暫時不可用，退回瀏覽器語音，不再補第二聲。
           console.error("語音助理播放失敗:", err);
+
+          if (practiceId && err?.reason === "rehearsal_closed") {
+            clearServiceVoiceQueue();
+            void rehearsal.refresh();
+            break;
+          }
 
           if (err?.reason === "service_closed" || err?.reason === "service_date_expired") {
             stopVoiceAssistantForServiceEnd();
@@ -1595,7 +1653,7 @@ export default function App() {
   useEffect(() => { processVoiceQueueRef.current = processVoiceQueue; });
 
   const speak = (text: string, kind: "regular" | "return" | "return-retry" = "regular") => {
-    if (rehearsalMode) return;
+    if (rehearsalMode || rehearsalVoiceScopeRef.current) return;
     const cleanText = String(text || "").trim();
     const billableCleanText = cleanTextForTtsBilling(cleanText);
     if (!billableCleanText) return;
@@ -2207,7 +2265,8 @@ export default function App() {
     }
     // A fixed startup test is allowed before check-in; scheduled announcements
     // require a check-in for non-admins. Admin role is verified by AuthProvider.
-    if (rehearsalMode || !isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
+    if (rehearsalMode) return;
+    if (!isVoiceEnabled || (!isAdmin && checkinStatus === "not_checked_in")
       || (!isAdmin && isCurrentServiceVoiceClosed()) || nodes.length === 0
       || !personalSettings.voiceReminderEnabled) return;
 
@@ -3036,8 +3095,86 @@ export default function App() {
   // may hear live tasks, announces the current/next task in the SAME TTS clip.
   // The fixed startup test remains available before check-in; it must never
   // be used to bypass regular-task authorization for volunteers/coordinators.
+  const rehearsalCueSettings = () => ({
+    leadSeconds: getReminderLeadSeconds(personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds),
+    advance: personalSettings.reminderPre5Enabled,
+    onTime: personalSettings.reminderNowEnabled,
+  });
+
+  const queueRehearsalSpeech = (text: string, kind: "regular" | "return" = "regular") => {
+    if (!rehearsalVoiceId || rehearsalVoiceScopeRef.current !== rehearsalVoiceId
+      || !rehearsal.current?.checkedInAt || document.visibilityState !== "visible") return;
+    const clean = cleanTextForTtsBilling(text);
+    if (!clean) return;
+    if (kind === "return") {
+      returnCueQueuedTextRef.current = clean;
+      returnCueRetryCountRef.current = 0;
+      setReturnCueRetryText(null);
+    } else if (returnCueQueuedTextRef.current) {
+      voiceQueueRef.current = voiceQueueRef.current.filter(item => item !== returnCueQueuedTextRef.current);
+      returnCueQueuedTextRef.current = null;
+      setReturnCueRetryText(null);
+    }
+    stopVoiceStartupConfirmation();
+    voiceQueueRef.current.push(clean);
+    void processVoiceQueue();
+  };
+
+  const announceRehearsalTask = (intro: boolean, detail: ReminderDetailLevel) => {
+    if (!rehearsal.current || !rehearsalVoiceId) return;
+    const now = Date.now();
+    const cues = rehearsalVoiceCues(rehearsal.current, rehearsalCueSettings());
+    const selected = nearRehearsalCue(cues, now) ? null : selectRehearsalTask(rehearsal.current.nodes, now);
+    const speech = selected ? buildReminderSpeechText(
+      rehearsalSpeechNode(selected.node), selected.kind === "current" ? "now" : "pre5",
+      detail, null, selected.kind
+    ) : "";
+    const text = intro ? buildFirstCheckinTimelineSpeech(speech, VOICE_STARTUP_CONFIRMATION) || VOICE_STARTUP_CONFIRMATION : speech;
+    if (text) queueRehearsalSpeech(text, "return");
+  };
+
+  const applyRehearsalVoicePreference = (enabled: boolean) => {
+    clearServiceVoiceQueue();
+    setIsVoiceEnabled(Boolean(enabled && rehearsalVoiceId));
+    if (!enabled || !rehearsalVoiceId) {
+      void releaseVoiceWakeLock();
+      return;
+    }
+    if (rehearsal.current?.checkedInAt) rehearsalFirstEntryRef.current = rehearsalVoiceId + ":" + rehearsal.current.checkedInAt;
+    void requestVoiceWakeLock();
+    announceRehearsalTask(true, personalSettings.voiceDetailLevel);
+  };
+
+  // Use absolute snapshot timestamps, not the weekday or HH:mm of a formal
+  // service. A 15-second grace window matches the existing formal scheduler.
+  // Poll errors remove current scope; missing/ended sessions cannot speak.
+  useEffect(() => {
+    if (!rehearsalVoiceId || !rehearsal.current || !currentDate || !personalSettingsLoaded
+      || !isVoiceEnabled || !personalSettings.voiceReminderEnabled
+      || document.visibilityState !== "visible" || rehearsal.checking) return;
+    const now = currentDate.getTime();
+    const settings = rehearsalCueSettings();
+    const cues = rehearsalVoiceCues(rehearsal.current, settings);
+    const due = dueRehearsalCues(cues, now, rehearsalSeenCuesRef.current);
+    for (const cue of due) {
+      rehearsalSeenCuesRef.current.add(cue.key);
+      queueRehearsalSpeech(buildReminderSpeechText(rehearsalSpeechNode(cue.node), cue.kind, personalSettings.voiceDetailLevel, settings.leadSeconds));
+    }
+    const entry = rehearsalVoiceId + ":" + rehearsal.current.checkedInAt;
+    if (activeTab === "timeline" && rehearsalFirstEntryRef.current !== entry) {
+      rehearsalFirstEntryRef.current = entry;
+      rehearsalReturnPendingRef.current = false;
+      announceRehearsalTask(true, "simple");
+    } else if (activeTab === "timeline" && rehearsalReturnPendingRef.current) {
+      rehearsalReturnPendingRef.current = false;
+      if (!due.length) announceRehearsalTask(false, "simple");
+    }
+  }, [currentDate, rehearsalVoiceId, rehearsal.current, rehearsal.checking, activeTab, isVoiceEnabled, personalSettingsLoaded,
+    personalSettings.voiceReminderEnabled, personalSettings.reminderPre5Enabled, personalSettings.reminderNowEnabled,
+    personalSettings.reminderLeadMinutes, personalSettings.reminderLeadSeconds, personalSettings.voiceDetailLevel]);
+
   const announceVoiceActivation = () => {
-    if (rehearsalMode) return;
+    if (rehearsalMode) { announceRehearsalTask(true, personalSettings.voiceDetailLevel); return; }
     const mayAnnounceTasks = isServiceType(currentService)
       && (isAdmin || (checkinStatus !== "not_checked_in" && !isCurrentServiceVoiceClosed()))
       && showLiveTimeline && !isLoading;
@@ -3086,6 +3223,12 @@ export default function App() {
   const handleToggleVoiceReminder = () => {
     const nextEnabled = !isVoiceEnabled;
 
+    if (rehearsalMode) {
+      setPersonalSettings(prev => ({ ...prev, voiceReminderEnabled: nextEnabled }));
+      applyRehearsalVoicePreference(nextEnabled);
+      return;
+    }
+
     if (nextEnabled && !isAdmin && isCurrentServiceVoiceClosed()) {
       setCustomAlert({ isOpen: true, message: "本場服事已結束，語音助理已關閉。" });
       stopVoiceAssistantForServiceEnd();
@@ -3118,7 +3261,8 @@ export default function App() {
   // start automatically when the role/service gate allows it. Never play the
   // startup confirmation without an explicit gesture (iOS restriction).
   useEffect(() => {
-    if (rehearsalMode || !personalSettingsLoaded || voicePreferenceAppliedRef.current) return;
+    if (rehearsalMode) return;
+    if (!personalSettingsLoaded || voicePreferenceAppliedRef.current) return;
     if (!personalSettings.voiceReminderEnabled) {
       voicePreferenceAppliedRef.current = true;
       setVoicePreferenceInitialized(true);
@@ -3130,10 +3274,11 @@ export default function App() {
     setVoicePreferenceInitialized(true);
     setIsVoiceEnabled(true);
   }, [personalSettingsLoaded, personalSettings.voiceReminderEnabled,
-    isAdmin, checkinStatus, currentService, currentDate]);
+    isAdmin, checkinStatus, currentService, currentDate, rehearsalMode]);
 
   useEffect(() => {
     if (!isVoiceEnabled) return;
+    if (rehearsalMode) return;
 
     const checkVoiceClose = () => {
       // Admins retain the assistant outside worship hours for testing and
@@ -3146,7 +3291,7 @@ export default function App() {
     checkVoiceClose();
     const timer = window.setInterval(checkVoiceClose, 60_000);
     return () => window.clearInterval(timer);
-  }, [isVoiceEnabled, currentService, isAdmin]);
+  }, [isVoiceEnabled, currentService, isAdmin, rehearsalMode]);
 
   // A screen wake lock does not keep iOS JavaScript alive while hidden.
   // Recover already-existing audio sources on foreground; a real pointer
@@ -3221,11 +3366,18 @@ export default function App() {
       // A previously unlocked HTMLAudioElement may need a fresh user gesture
       // after iOS has suspended the PWA. Do not play any audio while hidden.
       if (isVoiceEnabled) voiceHtmlAudioUnlockedRef.current = false;
+      if (rehearsalMode) clearServiceVoiceQueue();
     };
     const handleAppForegrounded = () => {
       if (!shouldQueueReturnCue(appWasInBackgroundRef.current, document.visibilityState)) return;
       // pageshow, focus and visibilitychange may all fire for one return.
       appWasInBackgroundRef.current = false;
+      if (rehearsalMode) {
+        rehearsalReturnPendingRef.current = Boolean(rehearsalVoiceId && activeTab === "timeline" && isVoiceEnabled);
+        void rehearsal.refresh();
+        setCurrentDate(new Date());
+        return;
+      }
       if (isVoiceEnabled) {
         // iOS may have suspended the one-second clock in the background.
         // Re-evaluate any *currently due* formal reminder immediately.
@@ -3249,10 +3401,11 @@ export default function App() {
       window.removeEventListener("pageshow", handleAppForegrounded);
       window.removeEventListener("focus", handleAppForegrounded);
     };
-  }, [isVoiceEnabled]);
+  }, [isVoiceEnabled, rehearsalMode, rehearsalVoiceId, activeTab, rehearsal.refresh]);
 
   useEffect(() => {
-    if (rehearsalMode || returnCuePendingAt === null) return;
+    if (returnCuePendingAt === null) return;
+    if (rehearsalMode) return;
     if (activeTab !== "timeline" || (typeof document !== "undefined" && document.visibilityState !== "visible")) return;
 
     const now = new Date();
@@ -3330,6 +3483,7 @@ export default function App() {
   // check-in. An external-app return uses the same pending queue, so the
   // two triggers cannot create duplicate current/next task announcements.
   useEffect(() => {
+    if (rehearsalMode) return;
     const service = firstCheckinTimelineCueServiceRef.current;
     if (!service || activeTab !== "timeline") return;
     const verifiedCheckin = checkinStatus !== "not_checked_in" && checkedInService === service;
@@ -3356,7 +3510,19 @@ export default function App() {
   // A rejected iOS media play is retried once after an actual gesture.
   // Do not bypass the volunteer's service/check-in restrictions or formal reminders.
   useEffect(() => {
-    if (rehearsalMode || !returnCueRetryText) return;
+    if (!returnCueRetryText) return;
+    if (rehearsalMode) {
+      const retryPractice = () => {
+        if (rehearsalVoiceId && isVoiceEnabled && !voiceProcessingRef.current && !voiceQueueRef.current.length
+          && document.visibilityState === "visible") {
+          const text = returnCueRetryText;
+          setReturnCueRetryText(null);
+          queueRehearsalSpeech(text);
+        }
+      };
+      document.addEventListener("pointerdown", retryPractice, { passive: true, once: true });
+      return () => document.removeEventListener("pointerdown", retryPractice);
+    }
     const retryAfterGesture = () => {
       if (document.visibilityState !== "visible" || activeTab !== "timeline"
         || voiceProcessingRef.current || voiceQueueRef.current.length > 0) return;
@@ -6754,7 +6920,14 @@ export default function App() {
     </div>
   </div>
 
-  {rehearsalMode && <p className="mt-3 text-xs font-black text-[#785AA5]">服事演練中</p>}
+  {rehearsalMode && <div className="mt-3 flex items-center justify-between gap-2">
+    <p className="text-xs font-black text-[#785AA5]">服事演練中</p>
+    {rehearsalVoiceId && activeTab === "timeline" && <button type="button" onClick={handleToggleVoiceReminder} aria-pressed={isVoiceEnabled}
+      className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 text-xs font-black ${isVoiceEnabled ? "border-[#F25D6B]/20 bg-[#FFF2F4] text-[#F25D6B]" : "border-[#E6EAF0] bg-white text-[#7B7B74]"}`}>
+      {isVoiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}語音助理
+    </button>}
+  </div>}
+  {rehearsalMode && rehearsalVoiceId && (voiceAudioRecoveryNeeded || returnCueRetryText) && <p role="status" className="mt-2 text-[11px] font-semibold text-[#F25D6B]">若未聽到語音，請輕觸畫面或檢查音量。</p>}
   {!rehearsalMode && activeTab !== "checkin" && activeTab !== "service" && (
     <>
       {/* 第二層：狀態與語音控制 */}
