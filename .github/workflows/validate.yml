@@ -116,20 +116,6 @@ jobs:
           version: 2.101.0
           github-token: ${{ github.token }}
 
-      # Temporary draft-PR step: generate a real CLI migration filename,
-      # test the draft SQL in disposable CI, then promote the file and remove this step.
-      - name: Generate rehearsal migration in disposable CI
-        shell: bash
-        run: |
-          set -euo pipefail
-          supabase migration --help
-          supabase migration new --help
-          supabase migration new service_rehearsal_foundation
-          mapfile -t files < <(find supabase/migrations -maxdepth 1 -type f -name '*_service_rehearsal_foundation.sql')
-          test "${#files[@]}" -eq 1
-          cp supabase/drafts/service-rehearsal-foundation.sql "${files[0]}"
-          echo "GENERATED_REHEARSAL_MIGRATION=$(basename "${files[0]}")"
-
       - name: Normalize disposable local Supabase config for stable CLI
         shell: bash
         run: |

@@ -5,6 +5,7 @@ import { CalendarPlus, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { SERVICE_TYPES } from "@/lib/services/catalog";
+import RehearsalAdminCard from "@/components/service/RehearsalAdminCard";
 
 type ServiceRow = {
   id: string;
@@ -86,6 +87,7 @@ export default function ServiceAdminPage() {
     <main className="min-h-screen bg-[#FFF9F3] px-5 py-12 text-[#1F2937]">
       <div className="mx-auto max-w-2xl space-y-6">
         <Link href="/" className="text-sm font-black text-[#6D55A3]">← 回主畫面</Link>
+        {isAdmin && <RehearsalAdminCard token={session.access_token} />}
         {isAdmin ? <form onSubmit={submit} className="rounded-[28px] border border-[#E6EAF0] bg-white p-6 shadow-xl shadow-[#6D55A3]/10">
           <div className="mb-6 flex items-center gap-3">
             <CalendarPlus className="h-7 w-7 text-[#6D55A3]" />

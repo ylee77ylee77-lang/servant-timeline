@@ -238,3 +238,37 @@ end;
 $$;
 revoke all on function public.end_service_rehearsal(uuid,uuid,uuid) from public,anon,authenticated;
 grant execute on function public.end_service_rehearsal(uuid,uuid,uuid) to service_role;
+
+-- Return only the current rehearsal and minimal names/account codes needed
+-- by the administrator to select participants. Never return contact details.
+create function public.get_service_rehearsal_admin_state(p_actor uuid,p_session uuid)
+returns jsonb language plpgsql security invoker set search_path = pg_catalog
+as $$
+declare v_state jsonb;
+begin
+  perform service_rehearsal_private.assert_admin(p_actor,p_session);
+  with current_rehearsal as (
+    select r.id,r.service_type,r.started_at from public.service_rehearsals r
+    where r.ended_at is null
+  ), eligible as (
+    select p.id,p.display_name,p.account_code
+    from public.profiles p where p.is_active and exists (
+      select 1 from public.user_roles ur where ur.user_id=p.id and ur.role in ('coordinator','admin')
+    )
+  )
+  select jsonb_build_object(
+    'rehearsal',(select jsonb_build_object('id',r.id,'serviceType',r.service_type,'startedAt',r.started_at) from current_rehearsal r),
+    'eligibleUsers',coalesce((select jsonb_agg(jsonb_build_object('id',e.id,'displayName',e.display_name,'accountCode',e.account_code)
+      order by e.display_name,e.id) from eligible e),'[]'::jsonb),
+    'members',coalesce((select jsonb_agg(jsonb_build_object('id',m.user_id,'displayName',p.display_name,'accountCode',p.account_code,
+      'checkedInAt',m.checked_in_at,'revokedAt',m.revoked_at,'eligible',e.id is not null) order by p.display_name,m.user_id)
+      from public.service_rehearsal_members m
+      join current_rehearsal r on r.id=m.rehearsal_id
+      join public.profiles p on p.id=m.user_id
+      left join eligible e on e.id=m.user_id),'[]'::jsonb)
+  ) into v_state;
+  return v_state;
+end;
+$$;
+revoke all on function public.get_service_rehearsal_admin_state(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.get_service_rehearsal_admin_state(uuid,uuid) to service_role;
